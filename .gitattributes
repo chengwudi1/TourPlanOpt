@@ -1,0 +1,24 @@
+# core.autocrlf is true on this machine. Without these rules, dev.sh is checked
+# out with CRLF and `bash dev.sh` dies with `$'\r': command not found`.
+* text=auto
+
+*.sh text eol=lf
+*.py text eol=lf
+*.ts text eol=lf
+*.vue text eol=lf
+*.sql text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+*.db binary
+*.png binary
+*.jpg binary
+*.svg text eol=lf
+*.ico binary
+*.woff binary
+*.woff2 binary

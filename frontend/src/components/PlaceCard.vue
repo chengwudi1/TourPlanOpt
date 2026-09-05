@@ -1,0 +1,274 @@
+<script setup lang="ts">
+import { computed, ref, watch } from 'vue'
+
+import type { Place } from '@/types/domain'
+import { formatDuration, formatMin } from '@/utils/time'
+
+const props = defineProps<{
+  place: Place
+  index: number
+  active?: boolean
+  /** Another participant currently has this card focused -- show their colour ring. */
+  editingBy?: { name: string; color: string } | null
+  /** 高德 URI API navigation link into this stop (from the previous one). */
+  navHref?: string | null
+}>()
+
+const emit = defineEmits<{
+  select: [place: Place]
+  remove: [place: Place]
+  lock: [place: Place, locked: boolean]
+  patch: [place: Place, patch: { duration_min?: number; note?: string }]
+}>()
+
+const duration = ref(String(props.place.duration_min))
+const note = ref(props.place.note)
+
+// Re-seed when the card opens: the row may have changed under us since last time.
+watch(
+  () => props.active,
+  (active) => {
+    if (active) {
+      duration.value = String(props.place.duration_min)
+      note.value = props.place.note
+    }
+  },
+)
+
+const ringStyle = computed(() =>
+  props.editingBy
+    ? { borderColor: props.editingBy.color, boxShadow: `0 0 0 3px ${props.editingBy.color}33` }
+    : undefined,
+)
+
+function commitDuration() {
+  const value = Math.max(0, Math.min(24 * 60, Math.round(Number(duration.value) || 0)))
+  duration.value = String(value)
+  if (value !== props.place.duration_min) {
+    emit('patch', props.place, { duration_min: value })
+  }
+}
+
+function commitNote() {
+  if (note.value !== props.place.note) {
+    emit('patch', props.place, { note: note.value })
+  }
+}
+</script>
+
+<template>
+  <li
+    class="card place"
+    :class="{ 'place--active': active }"
+    :style="ringStyle"
+    :data-place-id="place.id"
+    @click="emit('select', place)"
+  >
+    <span class="place__drag" title="拖动排序" aria-hidden="true">⋮⋮</span>
+    <span class="place__order" :class="{ 'place__order--locked': place.locked }">{{ index + 1 }}</span>
+
+    <div class="place__body">
+      <div class="place__title">
+        <span class="place__name">{{ place.name }}</span>
+        <span v-if="place.locked" class="place__pin tiny" title="已锁定，优化时不参与重排">📌</span>
+        <span v-if="editingBy" class="place__editor tiny" :style="{ color: editingBy.color }">
+          {{ editingBy.name }} 正在编辑
+        </span>
+      </div>
+
+      <div v-if="place.address" class="place__address tiny muted">{{ place.address }}</div>
+
+      <div class="place__facts tiny muted">
+        <span>停留 {{ formatDuration(place.duration_min) }}</span>
+        <span v-if="place.start_min !== null">· {{ formatMin(place.start_min) }} 开始</span>
+        <span v-if="place.status === 'confirmed'" class="place__confirmed">· 已确认</span>
+      </div>
+
+      <div v-if="place.note" class="place__note tiny">{{ place.note }}</div>
+
+      <!-- Editor: only on the selected card. LWW means typing here can never clobber
+           someone else's edit to the OTHER field of the same card. -->
+      <div v-if="active" class="place__edit" @click.stop>
+        <label class="place__field">
+          <span class="tiny muted">停留（分钟）</span>
+          <input
+            v-model="duration"
+            class="input"
+            type="number"
+            min="0"
+            max="1440"
+            step="5"
+            @blur="commitDuration"
+            @keydown.enter="($event.target as HTMLInputElement).blur()"
+          />
+        </label>
+        <label class="place__field">
+          <span class="tiny muted">备注</span>
+          <textarea
+            v-model="note"
+            class="input"
+            rows="2"
+            placeholder="例如：19:00 已订座"
+            @blur="commitNote"
+          />
+        </label>
+        <div class="place__editrow">
+          <button class="btn btn--sm" type="button" @click="emit('lock', place, !place.locked)">
+            {{ place.locked ? '📍 取消锁定' : '📌 锁定位置' }}
+          </button>
+          <a
+            v-if="navHref"
+            class="btn btn--sm btn--ghost"
+            :href="navHref"
+            target="_blank"
+            rel="noopener"
+            title="跳转到高德地图导航"
+          >
+            🧭 导航到这里
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <button
+      class="btn btn--sm btn--ghost place__delete"
+      title="删除这个地点"
+      @click.stop="emit('remove', place)"
+    >
+      ✕
+    </button>
+  </li>
+</template>
+
+<style scoped>
+.place {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.place--ghost {
+  opacity: 0.4;
+}
+
+.place--active {
+  border-color: var(--accent);
+}
+
+.place__drag {
+  flex: 0 0 auto;
+  padding: 0 2px;
+  color: var(--text-3);
+  font-size: 12px;
+  letter-spacing: -2px;
+  cursor: grab;
+  user-select: none;
+}
+
+.place__order {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 50%;
+}
+
+.place__order--locked {
+  background: var(--warn);
+}
+
+.place__body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.place__title {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.place__name {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.place__editor {
+  white-space: nowrap;
+}
+
+.place__address,
+.place__note {
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.place__facts {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.place__confirmed {
+  color: var(--ok);
+}
+
+.place__note {
+  padding: 4px 6px;
+  margin-top: 6px;
+  white-space: pre-wrap;
+  background: var(--bg);
+  border-radius: 4px;
+}
+
+.place__edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.place__field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.place__field .input {
+  font-size: 13px;
+}
+
+.place__editrow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+a.place__editrow,
+.place__editrow a {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.place__delete {
+  flex: 0 0 auto;
+}
+</style>

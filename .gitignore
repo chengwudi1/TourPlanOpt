@@ -1,0 +1,30 @@
+# --- Python / uv ---
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# SQLite: WAL produces -wal and -shm siblings, so ignore the whole directory,
+# not just *.db
+backend/data/
+
+# --- Secrets: both Amap keys live here and must never be committed ---
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# --- Node / Vite ---
+node_modules/
+frontend/dist/
+dist/
+*.local
+npm-debug.log*
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
