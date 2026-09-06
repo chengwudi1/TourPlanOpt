@@ -265,3 +265,42 @@ def test_resync_returns_full_snapshot(client: tuple[TestClient, str, str]):
         assert frame["type"] == "welcome"
         places = frame["data"]["snapshot"]["places"]
         assert [p["name"] for p in places] == ["外滩"]
+
+
+def test_setting_time_auto_locks_and_clearing_unlocks(client):
+    """修正 2: a hand-set start_min is an anchor -- the server pins the place in the
+    same atomic patch; clearing the time releases it."""
+    testclient, trip_id, day_id = client
+    with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws1:
+        join_and_sync(ws1, "c-1", "小明")
+
+        ws1.send_json(
+            protocol.op_frame(
+                protocol.Ops.PLACE_ADD,
+                "op-lock-time",
+                {"day_id": day_id, "name": "餐厅", "lng": 121.47, "lat": 31.23},
+            )
+        )
+        place = ws1.receive_json()["data"]["place"]
+
+        ws1.send_json(
+            protocol.op_frame(
+                protocol.Ops.PLACE_UPDATE,
+                "op-set-time",
+                {"place_id": place["id"], "patch": {"start_min": 19 * 60}},
+            )
+        )
+        updated = ws1.receive_json()["data"]["place"]
+        assert updated["start_min"] == 19 * 60
+        assert updated["locked"] is True
+
+        ws1.send_json(
+            protocol.op_frame(
+                protocol.Ops.PLACE_UPDATE,
+                "op-clear-time",
+                {"place_id": place["id"], "patch": {"start_min": None}},
+            )
+        )
+        cleared = ws1.receive_json()["data"]["place"]
+        assert cleared["start_min"] is None
+        assert cleared["locked"] is False

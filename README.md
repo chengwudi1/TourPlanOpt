@@ -61,6 +61,16 @@ cd frontend && npm run dev
 - 优化结果一键撤销；所有人的地图与列表实时收敛
 - 距离矩阵带 SQLite 缓存（坐标取整到 ~1.1m）+ 不可达负缓存，配额消耗在 `/api/trips/{t}/days/{d}/matrix` 可观测
 
+## 文档
+
+开发文档在本地 `docs/` 目录（不入仓库，作者自用）：
+
+- `docs/DEVELOPMENT.md` — 环境、常用命令、故障排查、代码约定
+- `docs/ARCHITECTURE.md` — 协同模型、分层成本、数据不变量、依赖决策
+- `docs/PROTOCOL.md` — WebSocket 协议规范
+
+运行时的 REST 接口文档：启动后访问 `/docs`（FastAPI 自动生成）。
+
 ## 协同模型（给感兴趣的人）
 
 服务端权威 + last-write-wins：客户端发字段级 patch → 服务端按到达顺序应用并 `rev+1` → **广播结果状态**（不是意图）给包括发起者在内的所有人。重排必须携带完整有序 id 数组并校验为排列，否则以 `op_reject` 附权威数组拒绝——并发拖拽因此不可能永久分叉。重连先 flush 离线队列（服务端按 `op_id` LRU 去重）再 resync 快照。
@@ -85,7 +95,7 @@ frontend/
 ## 测试
 
 ```bash
-cd backend && uv run pytest -q          # 61 个测试
+cd backend && uv run pytest -q          # 62 个测试
 cd frontend && npm run type-check       # vue-tsc
 ```
 

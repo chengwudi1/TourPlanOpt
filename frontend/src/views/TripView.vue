@@ -112,8 +112,20 @@ function onRemove(placeId: string) {
   store.deletePlace(placeId)
 }
 
-function onPatch(place: Place, patch: { duration_min?: number; note?: string }) {
+function onPatch(place: Place, patch: { duration_min?: number; note?: string; start_min?: number | null }) {
   store.updatePlace(place.id, patch)
+}
+
+function renameDay(dayId: string, current: string) {
+  const name = window.prompt('这一天的名称（留空恢复默认）：', current)
+  if (name === null) return
+  store.updateDay(dayId, { title: name.trim() })
+}
+
+function renameTrip(current: string) {
+  const name = window.prompt('行程名称：', current)
+  if (name === null) return
+  store.updateTripFields({ title: name.trim() })
 }
 
 async function copyShareLink() {
@@ -143,9 +155,10 @@ if (import.meta.env.DEV) {
       :title="store.trip?.title ?? ''"
       :city="store.trip?.city ?? ''"
       :presence="store.presence"
-      :self-id="getClientId()"
+      :self-id="selfId"
       :status="socket.status"
       @share="copyShareLink"
+      @rename="renameTrip(store.trip?.title ?? '')"
     />
 
     <AmapKeyCheck />
@@ -168,17 +181,22 @@ if (import.meta.env.DEV) {
           <div v-if="store.loading" class="muted tiny">正在加载行程…</div>
 
           <template v-else-if="store.trip">
-            <nav v-if="store.days.length > 1" class="daytabs">
+            <nav class="daytabs">
               <button
                 v-for="day in store.days"
                 :key="day.id"
                 class="daytab"
                 :class="{ 'daytab--on': day.id === store.currentDayId }"
                 type="button"
+                :title="day.id === store.currentDayId ? '双击重命名这一天' : ''"
                 @click="store.currentDayId = day.id"
+                @dblclick="renameDay(day.id, day.title)"
               >
                 D{{ day.day_index + 1 }}
                 <span v-if="day.title" class="daytab__title">{{ day.title }}</span>
+              </button>
+              <button class="daytab daytab--add" type="button" title="加一天" @click="store.addDay()">
+                ＋
               </button>
             </nav>
 
@@ -276,6 +294,11 @@ if (import.meta.env.DEV) {
 
 .daytab__title {
   margin-left: 4px;
+}
+
+.daytab--add {
+  padding: 5px 10px;
+  color: var(--text-3);
 }
 
 .placelist {

@@ -136,6 +136,11 @@ async def _place_update(
         return
 
     patch = data.get("patch")
+    if isinstance(patch, dict) and "start_min" in patch:
+        # 修正 2: a hand-set time IS an anchor. Setting a time locks the place for the
+        # optimizer; clearing the time releases it -- in the same atomic patch so the
+        # broadcast row never shows a time without the pin (or vice versa).
+        patch = {**patch, "locked": patch["start_min"] is not None}
     updated = (
         await repositories.update_place(db, place_id, patch) if isinstance(patch, dict) else None
     )

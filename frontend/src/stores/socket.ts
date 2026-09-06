@@ -101,6 +101,25 @@ export const useSocketStore = defineStore('socket', () => {
     reconnectTimer = setTimeout(() => openSocket(), delay)
   }
 
+  /** Background tabs get their timers throttled to once a minute by Chrome, so the
+   * backoff loop alone can leave a hidden tab "重连中" long after the backend is back.
+   * The moment the user LOOKS at the tab (or the network returns), retry immediately. */
+  function reconnectSoon() {
+    if (!tripId || closedByUs) return
+    if (ws && ws.readyState === WebSocket.OPEN) return
+    teardownTimers()
+    openSocket()
+  }
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') reconnectSoon()
+    })
+  }
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', reconnectSoon)
+  }
+
   function teardownTimers() {
     if (heartbeatTimer) {
       clearInterval(heartbeatTimer)

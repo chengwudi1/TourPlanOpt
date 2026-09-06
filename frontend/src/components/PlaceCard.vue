@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 
 import type { Place } from '@/types/domain'
-import { formatDuration, formatMin } from '@/utils/time'
+import { formatDuration, formatMin, parseHHMM } from '@/utils/time'
 
 const props = defineProps<{
   place: Place
@@ -18,11 +18,19 @@ const emit = defineEmits<{
   select: [place: Place]
   remove: [place: Place]
   lock: [place: Place, locked: boolean]
-  patch: [place: Place, patch: { duration_min?: number; note?: string }]
+  patch: [place: Place, patch: { duration_min?: number; note?: string; start_min?: number | null }]
 }>()
 
 const duration = ref(String(props.place.duration_min))
 const note = ref(props.place.note)
+/** HH:MM for the <input type="time">; null start = empty string (auto-schedule). */
+const startTime = ref(startText(props.place.start_min))
+
+function startText(startMin: number | null): string {
+  if (startMin === null || startMin === undefined) return ''
+  // formatMin may prefix 次日 for past-midnight times; the time input only shows HH:MM.
+  return formatMin(startMin).slice(-5)
+}
 
 // Re-seed when the card opens: the row may have changed under us since last time.
 watch(
@@ -31,6 +39,7 @@ watch(
     if (active) {
       duration.value = String(props.place.duration_min)
       note.value = props.place.note
+      startTime.value = startText(props.place.start_min)
     }
   },
 )
@@ -52,6 +61,18 @@ function commitDuration() {
 function commitNote() {
   if (note.value !== props.place.note) {
     emit('patch', props.place, { note: note.value })
+  }
+}
+
+/** '' clears the hand-set time (and thereby the pin, server-side). */
+function commitStart(value: string) {
+  const minutes = value.trim() === '' ? null : parseHHMM(value)
+  if (value.trim() !== '' && minutes === null) {
+    startTime.value = startText(props.place.start_min)
+    return
+  }
+  if ((minutes ?? null) !== (props.place.start_min ?? null)) {
+    emit('patch', props.place, { start_min: minutes })
   }
 }
 </script>
@@ -100,6 +121,15 @@ function commitNote() {
             step="5"
             @blur="commitDuration"
             @keydown.enter="($event.target as HTMLInputElement).blur()"
+          />
+        </label>
+        <label class="place__field">
+          <span class="tiny muted">开始时间（设置即锁定 📌；留空自动排）</span>
+          <input
+            :value="startTime"
+            class="input"
+            type="time"
+            @change="commitStart(($event.target as HTMLInputElement).value)"
           />
         </label>
         <label class="place__field">

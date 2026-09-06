@@ -195,7 +195,10 @@ export const useTripStore = defineStore('trip', () => {
         ;(place as Record<string, unknown>)[key] = value
       }
     }
-    place.rev += 1
+    // rev is NOT bumped locally: the server is its only authority. A local bump would
+    // collide with the server's rev for this very op, and the echo (which may carry
+    // server-side side effects like the time->lock pin) would then be dropped by the
+    // rev guard. Echo rev+1 > local rev applies cleanly.
     useSocketStore().sendOp(Ops.PLACE_UPDATE, { place_id: placeId, patch })
   }
 
@@ -204,7 +207,6 @@ export const useTripStore = defineStore('trip', () => {
     const place = places.value.find((p) => p.id === placeId)
     if (!place) return
     place.locked = locked
-    place.rev += 1
     useSocketStore().sendOp(Ops.PLACE_LOCK, { place_id: placeId, locked })
   }
 
@@ -223,6 +225,16 @@ export const useTripStore = defineStore('trip', () => {
   function updateTripFields(patch: Partial<Trip>) {
     if (trip.value) Object.assign(trip.value, patch)
     useSocketStore().sendOp(Ops.TRIP_UPDATE, { patch })
+  }
+
+  /** Append a new day to the trip. */
+  function addDay() {
+    useSocketStore().sendOp(Ops.DAY_ADD, {})
+  }
+
+  /** Rename a day (or set its date/mode later -- full patch goes through the op). */
+  function updateDay(dayId: string, patch: Partial<Day>) {
+    useSocketStore().sendOp(Ops.DAY_UPDATE, { day_id: dayId, patch })
   }
 
   // -- optimization --------------------------------------------------------------------
@@ -434,6 +446,8 @@ export const useTripStore = defineStore('trip', () => {
     deletePlace,
     reorderDay,
     updateTripFields,
+    addDay,
+    updateDay,
     optimize,
     undoOptimize,
     dismissOptimizeResult,

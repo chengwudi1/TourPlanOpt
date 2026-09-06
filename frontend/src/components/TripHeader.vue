@@ -12,7 +12,7 @@ const props = defineProps<{
   status: SocketStatus
 }>()
 
-const emit = defineEmits<{ share: [] }>()
+const emit = defineEmits<{ share: []; rename: [] }>()
 
 const initials = computed(() =>
   props.presence.map((p) => ({
@@ -41,7 +41,11 @@ const statusLabel = computed(() => {
 <template>
   <header class="triphead">
     <strong>TourPlanOpt</strong>
-    <span class="triphead__title">
+    <span
+      class="triphead__title"
+      :title="props.title ? '点击重命名行程' : '点击设置行程名'"
+      @click="emit('rename')"
+    >
       {{ title || '未命名行程' }}
       <span v-if="city" class="muted tiny">· {{ city }}</span>
     </span>
