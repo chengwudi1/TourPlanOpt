@@ -151,3 +151,59 @@ def test_optimize_respects_locked_anchor(client) -> None:
     # the free places around it may be reordered.
     assert locked_order.index(locked_id) == current_position
     assert sorted(locked_order) == sorted(current)
+
+
+def test_optimize_start_place_rotation_keeps_timed_anchor(client) -> None:
+    """起点锚旋转的回归测试。
+
+    「设为起点」把 start_place_id 旋到序列首位再求解。旋转实现里 has_time
+    曾被错误复制（has_time[idx:]+has_time[idx:]）：起点选在序列尾部时新表
+    比地点短，is_anchor 越界直接 500；起点在中部时手设时间锚的语义整体错位。
+    """
+    testclient, trip_id, day, _place_ids = client
+    current = [p["id"] for p in testclient.get(f"/api/trips/{trip_id}").json()["places"]]
+    start_id = current[-1]  # 起点设在序列最后一个：踩长度不足的分支
+    timed_id = current[1]  # 头段里的一个点手设时间 → 旋转后成为中段锚
+
+    with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
+        ws.send_json(
+            {
+                "v": 1,
+                "type": "hello",
+                "data": {"client_id": "c-1", "name": "小明", "color": "#123456"},
+            }
+        )
+        ws.receive_json()
+        ws.receive_json()
+        ws.send_json(
+            {
+                "v": 1,
+                "type": "op",
+                "op": "day_update",
+                "op_id": "start-1",
+                "data": {"day_id": day, "patch": {"start_place_id": start_id}},
+            }
+        )
+        assert ws.receive_json()["op"] == "day_updated"
+        ws.send_json(
+            {
+                "v": 1,
+                "type": "op",
+                "op": "place_update",
+                "op_id": "time-1",
+                "data": {"place_id": timed_id, "patch": {"start_min": 600}},
+            }
+        )
+        assert ws.receive_json()["op"] == "place_updated"
+
+    resp = testclient.post(
+        f"/api/trips/{trip_id}/days/{day}/optimize",
+        json={"cost_model": "haversine", "apply": False},
+    )
+    assert resp.status_code == 200
+    result = resp.json()["place_ids"]
+
+    rotated = current[current.index(start_id):] + current[: current.index(start_id)]
+    assert result[0] == start_id, "起点必须钉在首位"
+    assert result.index(timed_id) == rotated.index(timed_id), "手设时间的锚不能被旋转挤动"
+    assert sorted(result) == sorted(current)

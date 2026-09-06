@@ -17,6 +17,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSocketStore } from '@/stores/socket'
 import { useTripStore } from '@/stores/trip'
 import type { Place, Poi } from '@/types/domain'
+import { apiFetch } from '@/utils/api'
 import { formatDuration, formatMin } from '@/utils/time'
 
 const props = defineProps<{ tripId: string }>()
@@ -169,6 +170,57 @@ function onStash(poi: Poi) {
   })
 }
 
+/** 地图选点：右键/长按地图某处 → regeo 预填名称 → 排进今天或存入想去清单。 */
+const mapPick = ref<{
+  lng: number
+  lat: number
+  name: string
+  address: string
+  loading: boolean
+} | null>(null)
+
+function onMapPick(point: { lng: number; lat: number }) {
+  const round = (v: number) => Math.round(v * 1e6) / 1e6
+  mapPick.value = {
+    lng: round(point.lng),
+    lat: round(point.lat),
+    name: '',
+    address: '',
+    loading: true,
+  }
+  apiFetch<{ name: string; address: string }>(
+    `/api/poi/regeo?lng=${mapPick.value.lng}&lat=${mapPick.value.lat}`,
+  )
+    .then((info) => {
+      if (!mapPick.value) return
+      mapPick.value.address = info.address || ''
+      mapPick.value.name = info.name || info.address || '地图选点'
+    })
+    .catch(() => {
+      // 没配 Web 服务 Key 时 regeo 不可用：仍可手动命名添加。
+      if (mapPick.value) mapPick.value.name = '地图选点'
+    })
+    .finally(() => {
+      if (mapPick.value) mapPick.value.loading = false
+    })
+}
+
+function confirmMapPick() {
+  const p = mapPick.value
+  if (!p?.name.trim()) return
+  store.opError = null
+  store.addPlace({ name: p.name.trim(), lng: p.lng, lat: p.lat, address: p.address })
+  mapPick.value = null
+}
+
+function stashMapPick() {
+  const p = mapPick.value
+  if (!p?.name.trim()) return
+  store.opError = null
+  store.stashAdd({ name: p.name.trim(), lng: p.lng, lat: p.lat, address: p.address })
+  mapPick.value = null
+}
+
 /** 删除空的天：有内容的天服务端会拒绝，这里只对空天显示 ×。 */
 function dayIsEmpty(dayId: string): boolean {
   return !store.places.some((p) => p.day_id === dayId)
@@ -251,6 +303,13 @@ const cardMenuPos = computed(() => {
     left: `${Math.min(cardMenu.value.x, window.innerWidth - 190)}px`,
     top: `${Math.min(cardMenu.value.y, window.innerHeight - 150)}px`,
   }
+})
+
+/** 卡片菜单里的「移到其他天」候选（地点当前所在的天除外）。 */
+const cardMenuOtherDays = computed(() => {
+  const menu = cardMenu.value
+  if (!menu) return []
+  return store.days.filter((d) => d.id !== menu.place.day_id)
 })
 
 async function copyAddress(place: Place) {
@@ -435,7 +494,7 @@ if (import.meta.env.DEV) {
         </div>
       </div>
       <div class="map-host">
-        <MapPanel />
+        <MapPanel @pick="onMapPick" />
       </div>
     </div>
 
@@ -497,6 +556,46 @@ if (import.meta.env.DEV) {
       >
         🏁 设为起点
       </button>
+      <button
+        v-for="d in cardMenuOtherDays"
+        :key="d.id"
+        class="cardmenu__item"
+        type="button"
+        @click="store.movePlaceToDay(cardMenu.place.id, d.id); closeCardMenu()"
+      >
+        ➜ 移到 D{{ d.day_index + 1 }}{{ d.title ? ` · ${d.title}` : '' }}
+      </button>
+    </div>
+
+    <div v-if="mapPick" class="mappick card" role="dialog" aria-label="把地图上选的位置加进行程">
+      <strong>{{ mapPick.loading ? '正在识别这个位置…' : '把这个位置加进行程？' }}</strong>
+      <input
+        v-model="mapPick.name"
+        class="mappick__name"
+        placeholder="地点名称"
+        maxlength="120"
+        @keyup.enter="confirmMapPick"
+      />
+      <p v-if="mapPick.address" class="tiny muted mappick__addr">{{ mapPick.address }}</p>
+      <div class="mappick__actions">
+        <button
+          class="btn btn--sm"
+          type="button"
+          :disabled="!mapPick.name.trim()"
+          @click="confirmMapPick"
+        >
+          ➜ 排进今天
+        </button>
+        <button
+          class="btn btn--sm btn--ghost"
+          type="button"
+          :disabled="!mapPick.name.trim()"
+          @click="stashMapPick"
+        >
+          🧺 存入想去
+        </button>
+        <button class="btn btn--sm btn--ghost" type="button" @click="mapPick = null">取消</button>
+      </div>
     </div>
   </div>
 </template>
@@ -525,6 +624,38 @@ if (import.meta.env.DEV) {
 
 .cardmenu__item:hover {
   background: var(--surface-2);
+}
+
+.mappick {
+  position: fixed;
+  z-index: 70;
+  left: 50%;
+  bottom: 88px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(320px, calc(100vw - 32px));
+  padding: 14px 16px;
+  transform: translateX(-50%);
+  box-shadow: var(--shadow);
+}
+
+.mappick__name {
+  padding: 8px 10px;
+  font-size: 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.mappick__addr {
+  margin: 0;
+}
+
+.mappick__actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .panel__content {

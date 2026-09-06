@@ -119,7 +119,7 @@ async def optimize_day(trip_id: str, day_id: str, body: OptimizeRequest) -> Opti
         idx = place_ids.index(start_id)
         effective_ids = place_ids[idx:] + place_ids[:idx]
         locked_flags = locked_flags[idx:] + locked_flags[:idx]
-        has_time = has_time[idx:] + has_time[idx:]
+        has_time = has_time[idx:] + has_time[:idx]
 
     new_ids, _seg_costs, any_exact = optimize_day_order(
         cost, effective_ids, locked_flags, has_time

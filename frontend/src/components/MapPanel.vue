@@ -25,6 +25,9 @@ const initError = ref('')
 const locating = ref(false)
 const locateNote = ref('')
 
+/** 长按选点：把地图上按住的坐标抛给上层（TripView 弹「加地点」确认框）。 */
+const emit = defineEmits<{ pick: [point: { lng: number; lat: number }] }>()
+
 const { status } = useAmap()
 const store = useTripStore()
 
@@ -81,10 +84,67 @@ onMounted(async () => {
     viewMode: '2D',
   })
   map.value.addControl(new AMap.Scale())
+  bindPickHandlers()
   syncMarkers()
 })
 
+// -- 地图选点（右键 = 桌面，长按 = 触屏）------------------------------------------------
+
+/** detach fn returned by bindPickHandlers; called on unmount. */
+let detachPickHandlers: (() => void) | null = null
+
+function bindPickHandlers() {
+  const m = map.value
+  const hostEl = host.value
+  if (!m || !hostEl) return
+
+  m.on('rightclick', (e: { lnglat?: { getLng: () => number; getLat: () => number } }) => {
+    const ll = e?.lnglat
+    if (ll) emit('pick', { lng: ll.getLng(), lat: ll.getLat() })
+  })
+
+  // 触屏长按 550ms 且几乎没挪动 = 选点；挪动是拖地图，照常取消。
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let start: { x: number; y: number } | null = null
+  const clear = () => {
+    if (timer !== null) clearTimeout(timer)
+    timer = null
+    start = null
+  }
+  const onTouchStart = (ev: TouchEvent) => {
+    if (ev.touches.length !== 1) return clear()
+    const t = ev.touches[0]
+    start = { x: t.clientX, y: t.clientY }
+    timer = setTimeout(() => {
+      timer = null
+      if (!start || !map.value || !amapNs.value) return
+      const rect = hostEl.getBoundingClientRect()
+      const lnglat = map.value.containerToLngLat?.(
+        new amapNs.value.Pixel(start.x - rect.left, start.y - rect.top),
+      )
+      if (lnglat?.getLng) emit('pick', { lng: lnglat.getLng(), lat: lnglat.getLat() })
+    }, 550)
+  }
+  const onTouchMove = (ev: TouchEvent) => {
+    if (!start) return
+    const t = ev.touches[0]
+    if (Math.hypot(t.clientX - start.x, t.clientY - start.y) > 12) clear()
+  }
+  hostEl.addEventListener('touchstart', onTouchStart, { passive: true })
+  hostEl.addEventListener('touchmove', onTouchMove, { passive: true })
+  hostEl.addEventListener('touchend', clear)
+  hostEl.addEventListener('touchcancel', clear)
+  detachPickHandlers = () => {
+    hostEl.removeEventListener('touchstart', onTouchStart)
+    hostEl.removeEventListener('touchmove', onTouchMove)
+    hostEl.removeEventListener('touchend', clear)
+    hostEl.removeEventListener('touchcancel', clear)
+  }
+}
+
 onBeforeUnmount(() => {
+  detachPickHandlers?.()
+  detachPickHandlers = null
   map.value?.destroy?.()
   map.value = null
   markers.clear()

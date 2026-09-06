@@ -283,6 +283,19 @@ export const useTripStore = defineStore('trip', () => {
     stashRemove(item.id)
   }
 
+  /** 跨天移动：把地点移到目标天末尾（place_move op，两天顺序由服务端权威重排）。 */
+  function movePlaceToDay(placeId: string, toDayId: string) {
+    const place = places.value.find((p) => p.id === placeId)
+    if (!place || place.day_id === toDayId) return
+    removeLocalRow(placeId)
+    const maxIndex = places.value.reduce(
+      (max, p) => (p.day_id === toDayId ? Math.max(max, p.sort_index) : max),
+      -1,
+    )
+    places.value.push({ ...place, day_id: toDayId, sort_index: maxIndex + 1 })
+    useSocketStore().sendOp(Ops.PLACE_MOVE, { place_id: placeId, day_id: toDayId })
+  }
+
 
   // -- optimization --------------------------------------------------------------------
 
@@ -550,6 +563,7 @@ export const useTripStore = defineStore('trip', () => {
     stashAdd,
     stashRemove,
     promoteFromStash,
+    movePlaceToDay,
     optimize,
     undoOptimize,
     dismissOptimizeResult,

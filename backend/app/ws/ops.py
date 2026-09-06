@@ -110,7 +110,6 @@ async def _place_add(
             note=str(data.get("note") or ""),
             added_by=str(data.get("added_by") or client_id),
             after_place_id=data.get("after_place_id"),
-            stashed=bool(data.get("stashed")),
         )
     except (TypeError, ValueError):
         await _reject(conn, op_id, "bad_payload")
