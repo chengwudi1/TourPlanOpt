@@ -5,7 +5,7 @@ import type { Poi } from '@/types/domain'
 import { ApiError, apiFetch } from '@/utils/api'
 
 const props = defineProps<{ city?: string }>()
-const emit = defineEmits<{ select: [poi: Poi] }>()
+const emit = defineEmits<{ select: [poi: Poi]; stash: [poi: Poi] }>()
 
 const keyword = ref('')
 const results = ref<Poi[]>([])
@@ -117,6 +117,14 @@ onBeforeUnmount(() => {
         <div class="search__meta tiny muted">
           {{ [poi.district, poi.address].filter(Boolean).join(' · ') || `${poi.lng}, ${poi.lat}` }}
         </div>
+        <button
+          class="search__stash"
+          type="button"
+          title="先存进想去清单，不排进今天"
+          @mousedown.stop.prevent="emit('stash', poi)"
+        >
+          🧺
+        </button>
       </li>
     </ul>
   </div>
@@ -149,9 +157,30 @@ onBeforeUnmount(() => {
 }
 
 .search__item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
   padding: 8px 10px;
   cursor: pointer;
   border-radius: calc(var(--radius) - 4px);
+}
+
+.search__name {
+  flex: 1;
+}
+
+.search__stash {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  font-size: 14px;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.search__stash:hover {
+  background: var(--surface-2);
 }
 
 .search__item--active {

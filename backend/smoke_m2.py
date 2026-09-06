@@ -34,7 +34,8 @@ with httpx.Client(base_url=BASE, timeout=20.0) as c:
     ids.insert(1, r.json()["id"])
 
     snap = c.get(f"/api/trips/{trip_id}").json()
-    show("after adds", [(p["sort_index"], p["name"], p["locked"], p["status"]) for p in snap["places"]])
+    show("after adds", [(p["sort_index"], p["name"], p["locked"], p["status"])
+                        for p in snap["places"]])
     show("trip_id denormalised", {p["trip_id"] == trip_id for p in snap["places"]})
 
     r = c.delete(f"/api/trips/{trip_id}/places/{ids[1]}")

@@ -145,3 +145,18 @@ CREATE TABLE IF NOT EXISTS city_poi_cache (
     fetched_at TEXT NOT NULL,
     PRIMARY KEY (city, category)
 );
+
+-- 暂存区（想去清单）：先丢想法，再择日排进行程。与 places 分表——
+-- 暂存项不参与优化/排程，混进 places 会污染排序与时间线。
+CREATE TABLE IF NOT EXISTS stash (
+    id          TEXT PRIMARY KEY,
+    trip_id     TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    address     TEXT NOT NULL DEFAULT '',
+    lng         REAL NOT NULL,
+    lat         REAL NOT NULL,
+    amap_poi_id TEXT NOT NULL DEFAULT '',
+    added_by    TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_stash_trip ON stash(trip_id, created_at);

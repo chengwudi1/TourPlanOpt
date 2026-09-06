@@ -47,3 +47,10 @@ async def search_tips(
     why the debounced input box uses this one."""
     tips = await get_amap_client().inputtips(keyword.strip(), city)
     return PoiTipsResponse(tips=[PoiOut.model_validate(tip) for tip in tips])
+
+
+@router.get("/regeo")
+async def regeo(lng: float = Query(...), lat: float = Query(...)) -> dict:
+    """坐标 -> 地址与最近 POI 名。地图选点添加时预填名称/地址用。"""
+    result = await get_amap_client().regeo(lng, lat)
+    return result

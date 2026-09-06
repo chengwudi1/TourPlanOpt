@@ -56,6 +56,16 @@ function add(poi: Poi) {
   })
 }
 
+function stash(poi: Poi) {
+  store.stashAdd({
+    name: poi.name,
+    lng: poi.lng,
+    lat: poi.lat,
+    address: poi.address,
+    amap_poi_id: poi.id,
+  })
+}
+
 function added(poi: Poi): boolean {
   return store.currentPlaces.some((p) => p.amap_poi_id && p.amap_poi_id === poi.id)
 }
@@ -97,6 +107,14 @@ function added(poi: Poi): boolean {
             <div class="reco__name">{{ poi.name }}</div>
             <div class="tiny muted reco__addr">{{ poi.address || poi.district }}</div>
           </div>
+          <button
+            class="btn btn--sm"
+            type="button"
+            title="先存进想去清单"
+            @click="stash(poi)"
+          >
+            🧺
+          </button>
           <button
             class="btn btn--sm"
             type="button"

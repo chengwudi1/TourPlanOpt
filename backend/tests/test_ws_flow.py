@@ -304,3 +304,147 @@ def test_setting_time_auto_locks_and_clearing_unlocks(client):
         cleared = ws1.receive_json()["data"]["place"]
         assert cleared["start_min"] is None
         assert cleared["locked"] is False
+
+
+# -- M12：跨天移动 / 删空天 / 想去清单 / 起点锚点 ---------------------------------------
+
+
+def _add_place_rest(testclient: TestClient, trip_id: str, day_id: str, name: str) -> dict:
+    resp = testclient.post(
+        f"/api/trips/{trip_id}/days/{day_id}/places",
+        json={"name": name, "lng": 121.47, "lat": 31.23},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def test_place_move_cross_day_broadcasts_both_orders(client):
+    """place_move 是纯跨天移动：广播带回两天各自的权威顺序。"""
+    testclient, trip_id, day1 = client
+    place = _add_place_rest(testclient, trip_id, day1, "外滩")
+    with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
+        join_and_sync(ws, "c-1", "小明")
+
+        ws.send_json(protocol.op_frame(protocol.Ops.DAY_ADD, "op-day2", {}))
+        frame = ws.receive_json()
+        assert frame["op"] == "day_added"
+        day2 = frame["data"]["day"]["id"]
+
+        ws.send_json(
+            protocol.op_frame(
+                protocol.Ops.PLACE_MOVE,
+                "op-move-1",
+                {"place_id": place["id"], "day_id": day2},
+            )
+        )
+        frame = ws.receive_json()
+        assert frame["type"] == "op" and frame["op"] == "place_moved"
+        data = frame["data"]
+        assert data["place"]["id"] == place["id"]
+        assert data["old_day_id"] == day1
+        assert data["old_place_ids"] == []
+        assert data["day_id"] == day2
+        assert data["place_ids"] == [place["id"]]
+
+
+def test_place_move_unknown_target_day_rejected(client):
+    testclient, trip_id, day1 = client
+    place = _add_place_rest(testclient, trip_id, day1, "外滩")
+    with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
+        join_and_sync(ws, "c-1", "小明")
+        ws.send_json(
+            protocol.op_frame(
+                protocol.Ops.PLACE_MOVE,
+                "op-move-bad",
+                {"place_id": place["id"], "day_id": "day-nope"},
+            )
+        )
+        frame = ws.receive_json()
+        assert frame["type"] == "op_reject"
+        assert frame["reason"] == "day_not_found"
+
+
+def test_day_delete_empty_day_ok_and_non_empty_rejected(client):
+    """空天直接删；有内容的天拒绝（day_not_empty），数据一个都不丢。"""
+    testclient, trip_id, day1 = client
+    with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
+        join_and_sync(ws, "c-1", "小明")
+
+        ws.send_json(protocol.op_frame(protocol.Ops.DAY_ADD, "op-day2", {}))
+        day2 = ws.receive_json()["data"]["day"]["id"]
+
+        ws.send_json(protocol.op_frame(protocol.Ops.DAY_DELETE, "op-del-1", {"day_id": day2}))
+        frame = ws.receive_json()
+        assert frame["type"] == "op" and frame["op"] == "day_deleted"
+        assert frame["data"]["day_id"] == day2
+
+        _add_place_rest(testclient, trip_id, day1, "外滩")
+        ws.send_json(protocol.op_frame(protocol.Ops.DAY_DELETE, "op-del-2", {"day_id": day1}))
+        frame = ws.receive_json()
+        assert frame["type"] == "op_reject"
+        assert frame["reason"] == "day_not_empty"
+
+        snap = testclient.get(f"/api/trips/{trip_id}").json()
+        assert [d["id"] for d in snap["days"]] == [day1]
+        assert len(snap["places"]) == 1
+
+
+def test_stash_add_and_remove_round_trip(client):
+    """想去清单：stash_add 广播权威条目并进快照；stash_remove 删掉。"""
+    testclient, trip_id, _day = client
+    with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
+        join_and_sync(ws, "c-1", "小明")
+
+        ws.send_json(
+            protocol.op_frame(
+                protocol.Ops.STASH_ADD,
+                "op-stash-1",
+                {"name": "城隍庙", "lng": 121.49, "lat": 31.23, "address": "方浜中路"},
+            )
+        )
+        frame = ws.receive_json()
+        assert frame["type"] == "op" and frame["op"] == "stash_added"
+        item = frame["data"]["item"]
+        assert item["name"] == "城隍庙"
+        assert item["added_by"] == "c-1"
+
+        snap = testclient.get(f"/api/trips/{trip_id}").json()
+        assert [s["id"] for s in snap["stash"]] == [item["id"]]
+
+        ws.send_json(protocol.op_frame(protocol.Ops.STASH_REMOVE, "op-stash-2", {"id": item["id"]}))
+        frame = ws.receive_json()
+        assert frame["type"] == "op" and frame["op"] == "stash_removed"
+        assert frame["data"]["id"] == item["id"]
+
+        snap = testclient.get(f"/api/trips/{trip_id}").json()
+        assert snap["stash"] == []
+
+
+def test_stash_remove_unknown_id_rejected(client):
+    testclient, trip_id, _day = client
+    with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
+        join_and_sync(ws, "c-1", "小明")
+        ws.send_json(
+            protocol.op_frame(protocol.Ops.STASH_REMOVE, "op-stash-bad", {"id": "nope"})
+        )
+        frame = ws.receive_json()
+        assert frame["type"] == "op_reject"
+        assert frame["reason"] == "stash_not_found"
+
+
+def test_day_update_sets_start_place_anchor(client):
+    """设为起点：day_update 白名单接受 start_place_id 并回权威行。"""
+    testclient, trip_id, day1 = client
+    place = _add_place_rest(testclient, trip_id, day1, "人民广场")
+    with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
+        join_and_sync(ws, "c-1", "小明")
+        ws.send_json(
+            protocol.op_frame(
+                protocol.Ops.DAY_UPDATE,
+                "op-start-1",
+                {"day_id": day1, "patch": {"start_place_id": place["id"]}},
+            )
+        )
+        frame = ws.receive_json()
+        assert frame["type"] == "op" and frame["op"] == "day_updated"
+        assert frame["data"]["day"]["start_place_id"] == place["id"]

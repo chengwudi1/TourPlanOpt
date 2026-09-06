@@ -115,6 +115,21 @@ class Presence(BaseModel):
     joined_at: float = 0.0
 
 
+class StashItemOut(BaseModel):
+    """暂存区条目：想去但还没排进某一天的点子。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    address: str = ""
+    lng: float
+    lat: float
+    amap_poi_id: str = ""
+    added_by: str = ""
+    created_at: str = ""
+
+
 class Snapshot(BaseModel):
     """The whole trip. Small enough (tens of records, a few KB) that we always send it
     in full on hello/resync instead of maintaining an op-replay ring buffer."""
@@ -124,6 +139,7 @@ class Snapshot(BaseModel):
     places: list[PlaceOut] = Field(default_factory=list)
     participants: list[ParticipantOut] = Field(default_factory=list)
     presence: list[Presence] = Field(default_factory=list)
+    stash: list[StashItemOut] = Field(default_factory=list)
 
 
 class MatrixOut(BaseModel):
@@ -177,6 +193,15 @@ class ParticipantUpsert(BaseModel):
     client_id: str = Field(min_length=1)
     name: str = Field(min_length=1, max_length=40)
     color: str = ""
+
+
+class StashCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    lng: float
+    lat: float
+    address: str = ""
+    amap_poi_id: str = ""
+    added_by: str = ""
 
 
 class PlaceCreate(BaseModel):

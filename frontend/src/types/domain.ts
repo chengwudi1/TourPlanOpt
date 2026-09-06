@@ -77,12 +77,24 @@ export interface Presence {
   joined_at: number
 }
 
+export interface StashItem {
+  id: string
+  name: string
+  address: string
+  lng: number
+  lat: number
+  amap_poi_id: string
+  added_by: string
+  created_at: string
+}
+
 export interface Snapshot {
   trip: Trip
   days: Day[]
   places: Place[]
   participants: Participant[]
   presence: Presence[]
+  stash: StashItem[]
 }
 
 /** A POI from the backend proxy. Coordinates are GCJ-02 -- never convert them. */

@@ -276,6 +276,23 @@ class AmapWebClient:
             )
         return out
 
+    async def regeo(self, lng: float, lat: float) -> dict:
+        """逆地理编码：坐标 -> 结构化地址 + 最近的 POI 名（用于地图选点添加）。"""
+        body = await self._get(
+            "/v3/geocode/regeo",
+            {"location": fmt_coord((lng, lat))},
+        )
+        regeo = (body.get("regeocodes") or [{}])[0]
+        component = regeo.get("addressComponent") or {}
+        district = "".join(
+            component.get(k) or "" for k in ("province", "district", "street", "streetNumber")
+        )
+        nearest = (regeo.get("pois") or [{}])[0]
+        return {
+            "address": str(regeo.get("formatted_address") or district or "").strip(),
+            "name": str(nearest.get("name") or "").strip(),
+        }
+
     async def place_text(
         self,
         keyword: str | None = None,

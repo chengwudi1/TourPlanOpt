@@ -7,6 +7,7 @@ import MapPanel from '@/components/MapPanel.vue'
 import OptimizeBar from '@/components/OptimizeBar.vue'
 import PlaceCard from '@/components/PlaceCard.vue'
 import PlaceSearch from '@/components/PlaceSearch.vue'
+import StashPanel from '@/components/StashPanel.vue'
 import RecommendPanel from '@/components/RecommendPanel.vue'
 import RouteSummary from '@/components/RouteSummary.vue'
 import TripHeader from '@/components/TripHeader.vue'
@@ -157,6 +158,56 @@ function onRemove(placeId: string) {
   store.deletePlace(placeId)
 }
 
+function onStash(poi: Poi) {
+  store.opError = null
+  store.stashAdd({
+    name: poi.name,
+    lng: poi.lng,
+    lat: poi.lat,
+    address: poi.address,
+    amap_poi_id: poi.id,
+  })
+}
+
+/** 删除空的天：有内容的天服务端会拒绝，这里只对空天显示 ×。 */
+function dayIsEmpty(dayId: string): boolean {
+  return !store.places.some((p) => p.day_id === dayId)
+}
+
+function removeDay(dayId: string, event: MouseEvent) {
+  event.stopPropagation()
+  if (window.confirm('删除这个（空的）天？')) store.deleteDay(dayId)
+}
+
+/** 文字版行程：贴群聊用。 */
+async function copyTextItinerary() {
+  const lines: string[] = []
+  const title = store.trip?.title || '未命名行程'
+  lines.push(`📍 ${title}${store.trip?.city ? `（${store.trip.city}）` : ''}`)
+  for (const day of store.days) {
+    const list = store.places
+      .filter((p) => p.day_id === day.id)
+      .sort((a, b) => a.sort_index - b.sort_index)
+    lines.push('')
+    lines.push(`DAY ${day.day_index + 1}${day.title ? ` · ${day.title}` : ''}`)
+    for (const place of list) {
+      const time =
+        place.start_min !== null
+          ? `${String(Math.floor((place.start_min % 1440) / 60)).padStart(2, '0')}:${String(place.start_min % 60).padStart(2, '0')} `
+          : ''
+      lines.push(`${time}${place.name}${place.address ? `（${place.address}）` : ''}`)
+    }
+  }
+  const text = lines.join('\n')
+  try {
+    await navigator.clipboard.writeText(text)
+    copied.value = true
+    setTimeout(() => (copied.value = false), 1500)
+  } catch {
+    window.prompt('复制文字版行程：', text)
+  }
+}
+
 function onPatch(place: Place, patch: { duration_min?: number; note?: string; start_min?: number | null }) {
   store.updatePlace(place.id, patch)
 }
@@ -280,6 +331,15 @@ if (import.meta.env.DEV) {
               >
                 D{{ day.day_index + 1 }}
                 <span v-if="day.title" class="daytab__title">{{ day.title }}</span>
+                <span
+                  v-if="dayIsEmpty(day.id) && store.days.length > 1"
+                  class="daytab__del"
+                  title="删除这个空的天"
+                  @click.stop="removeDay(day.id, $event)"
+                  @dblclick.stop
+                >
+                  ×
+                </span>
               </button>
               <button class="daytab daytab--add" type="button" title="加一天" @click="store.addDay()">
                 ＋
@@ -287,15 +347,26 @@ if (import.meta.env.DEV) {
             </nav>
 
             <p v-if="dayOverview" class="daystrip tiny muted">
-              {{ dayOverview.count }} 个地点
-              <template v-if="dayOverview.start">
-                · {{ dayOverview.start }} 出发 · 预计 {{ dayOverview.end }} 结束
-              </template>
+              <span>
+                {{ dayOverview.count }} 个地点
+                <template v-if="dayOverview.start">
+                  · {{ dayOverview.start }} 出发 · 预计 {{ dayOverview.end }} 结束
+                </template>
+              </span>
+              <button class="daystrip__copy" type="button" @click="copyTextItinerary">
+                {{ copied ? '已复制 ✓' : '复制文字版' }}
+              </button>
             </p>
 
-            <PlaceSearch :city="store.trip.city" @select="onPoiPicked" />
+            <PlaceSearch
+              :city="store.trip.city"
+              @select="onPoiPicked"
+              @stash="onStash"
+            />
 
             <RecommendPanel :city="store.trip.city" />
+
+            <StashPanel />
 
             <OptimizeBar />
 
@@ -418,6 +489,14 @@ if (import.meta.env.DEV) {
       >
         {{ cardMenu.place.locked ? '📍 取消锁定' : '📍 锁定位置' }}
       </button>
+      <button
+        v-if="store.currentDayId && store.currentDay?.start_place_id !== cardMenu.place.id"
+        class="cardmenu__item"
+        type="button"
+        @click="store.setStartPlace(store.currentDayId, cardMenu.place.id); closeCardMenu()"
+      >
+        🏁 设为起点
+      </button>
     </div>
   </div>
 </template>
@@ -499,10 +578,37 @@ if (import.meta.env.DEV) {
 }
 
 .daystrip {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
   padding: 8px 12px;
   margin: -4px 0 0;
   background: var(--accent-soft);
   border-radius: var(--radius-sm);
+}
+
+.daystrip__copy {
+  padding: 2px 8px;
+  font-size: 12px;
+  color: var(--accent-strong);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.daytab__del {
+  margin-left: 5px;
+  padding: 0 4px;
+  font-size: 13px;
+  color: var(--text-3);
+  border-radius: 50%;
+}
+
+.daytab__del:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 
 .placelist {

@@ -1,4 +1,4 @@
-import { defineStore } from 'pinia'
+import { acceptHMRUpdate, defineStore } from 'pinia'
 import { ref } from 'vue'
 
 import type { ClientFrame, OpSendFrame, PresenceSendFrame, ServerFrame } from '@/types/protocol'
@@ -248,3 +248,7 @@ export const useSocketStore = defineStore('socket', () => {
     sendPresence,
   }
 })
+
+if (import.meta.hot) {
+  acceptHMRUpdate(useSocketStore, import.meta.hot)
+}

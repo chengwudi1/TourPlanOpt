@@ -1,4 +1,4 @@
-import { defineStore } from 'pinia'
+import { acceptHMRUpdate, defineStore } from 'pinia'
 import { ref } from 'vue'
 
 import { apiFetch, postJson } from '@/utils/api'
@@ -78,3 +78,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   return { user, loaded, busy, error, load, register, login, logout, myTrips }
 })
+
+if (import.meta.hot) {
+  acceptHMRUpdate(useAuthStore, import.meta.hot)
+}

@@ -110,7 +110,20 @@ async def optimize_day(trip_id: str, day_id: str, body: OptimizeRequest) -> Opti
     cost = matrix.seconds
     locked_flags = [p.locked for p in places]
     has_time = [p.start_min is not None for p in places]
-    new_ids, _seg_costs, any_exact = optimize_day_order(cost, place_ids, locked_flags, has_time)
+
+    # 起点锚（day.start_place_id，卡片菜单「设为起点」设置）：先把它旋到当前序列
+    # 首位，优化时leading block 的首节点钉死规则会把它固定为出发地。
+    effective_ids = place_ids
+    start_id = day.start_place_id
+    if start_id in place_ids and place_ids[0] != start_id:
+        idx = place_ids.index(start_id)
+        effective_ids = place_ids[idx:] + place_ids[:idx]
+        locked_flags = locked_flags[idx:] + locked_flags[:idx]
+        has_time = has_time[idx:] + has_time[idx:]
+
+    new_ids, _seg_costs, any_exact = optimize_day_order(
+        cost, effective_ids, locked_flags, has_time
+    )
 
     def order_cost(ids: list[str]) -> int:
         index = {pid: i for i, pid in enumerate(place_ids)}

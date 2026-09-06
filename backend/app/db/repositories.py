@@ -18,6 +18,7 @@ from app.models.domain import (
     PlaceCreate,
     PlaceOut,
     Snapshot,
+    StashItemOut,
     TravelMode,
     TripOut,
 )
@@ -103,11 +104,15 @@ async def get_snapshot(db: Database, trip_id: str) -> Snapshot | None:
         participant_rows = conn.execute(
             "SELECT * FROM participants WHERE trip_id = ? ORDER BY joined_at", (trip_id,)
         ).fetchall()
+        stash_rows = conn.execute(
+            "SELECT * FROM stash WHERE trip_id = ? ORDER BY created_at", (trip_id,)
+        ).fetchall()
         return Snapshot(
             trip=TripOut.model_validate(dict(trip_row)),
             days=[DayOut.model_validate(dict(r)) for r in day_rows],
             places=[PlaceOut.model_validate(dict(r)) for r in place_rows],
             participants=[ParticipantOut.model_validate(dict(r)) for r in participant_rows],
+            stash=[StashItemOut.model_validate(dict(r)) for r in stash_rows],
         )
 
     return await db.run(_load)
@@ -184,8 +189,8 @@ async def add_place(db: Database, day_id: str, payload: PlaceCreate) -> PlaceOut
 
         conn.execute(
             """INSERT INTO places (id, day_id, trip_id, sort_index, name, amap_poi_id, address,
-                                   lng, lat, duration_min, locked, status, note, added_by, rev,
-                                   created_at, updated_at)
+                                   lng, lat, duration_min, locked, status, note, added_by,
+                                   rev, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'pending', ?, ?, 1, ?, ?)""",
             (
                 place_id,
@@ -262,6 +267,43 @@ async def get_db_places(db: Database, day_id: str) -> list[PlaceOut]:
         ).fetchall()
     )
     return [PlaceOut.model_validate(dict(r)) for r in rows]
+
+
+async def move_place(
+    db: Database, place_id: str, to_day_id: str
+) -> tuple[PlaceOut, str, list[str], str, list[str]] | None:
+    """把地点移动到另一天的末尾（跨天移动）。返回
+    (place, old_day_id, old_order, new_day_id, new_order)；地点或目标天无效时 None。"""
+
+    def _move(conn: sqlite3.Connection) -> tuple[dict, str, list[str], str, list[str]] | None:
+        row = conn.execute("SELECT * FROM places WHERE id = ?", (place_id,)).fetchone()
+        if row is None:
+            return None
+        old_day_id = row["day_id"]
+        target = conn.execute("SELECT trip_id FROM days WHERE id = ?", (to_day_id,)).fetchone()
+        if target is None or target["trip_id"] != row["trip_id"]:
+            return None
+        if old_day_id == to_day_id:
+            return None  # 同天移动走 day_reorder，不在这里
+
+        old_order = _ordered_ids(conn, old_day_id)
+        if place_id in old_order:
+            old_order.remove(place_id)
+        _renumber(conn, old_day_id, old_order)
+
+        new_order = _ordered_ids(conn, to_day_id)
+        new_order.append(place_id)
+        _renumber(conn, to_day_id, new_order)
+
+        conn.execute(
+            "UPDATE places SET day_id = ?, sort_index = ?, rev = rev + 1,"
+            " updated_at = ? WHERE id = ?",
+            (to_day_id, len(new_order) - 1, now_iso(), place_id),
+        )
+        place = dict(conn.execute("SELECT * FROM places WHERE id = ?", (place_id,)).fetchone())
+        return place, old_day_id, old_order, to_day_id, new_order
+
+    return await db.run(_move)
 
 
 async def persist_schedule(
@@ -448,3 +490,64 @@ async def update_trip(db: Database, trip_id: str, patch: dict[str, object]) -> T
 
     row = await db.run(_update)
     return TripOut.model_validate(row) if row is not None else None
+
+
+async def delete_day(db: Database, trip_id: str, day_id: str) -> bool:
+    """Delete an EMPTY day. Returns False if the day does not exist or still has places
+    -- days with content must go through place_delete first (no silent data loss)."""
+
+    def _delete(conn: sqlite3.Connection) -> bool:
+        day = conn.execute("SELECT id FROM days WHERE id = ?", (day_id,)).fetchone()
+        if day is None:
+            return False
+        has_places = conn.execute(
+            "SELECT 1 FROM places WHERE day_id = ? LIMIT 1", (day_id,)
+        ).fetchone()
+        if has_places:
+            return False
+        remaining = conn.execute(
+            "SELECT id FROM days WHERE trip_id = ? AND id != ? ORDER BY day_index LIMIT 1",
+            (trip_id, day_id),
+        ).fetchone()
+        if remaining is None:
+            return False  # 最后一天不可删
+        conn.execute("DELETE FROM days WHERE id = ?", (day_id,))
+        return True
+
+    return await db.run(_delete)
+
+
+# -- stash（暂存区）--------------------------------------------------------------------
+
+
+async def stash_add(
+    db: Database,
+    trip_id: str,
+    *,
+    name: str,
+    lng: float,
+    lat: float,
+    address: str = "",
+    amap_poi_id: str = "",
+    added_by: str = "",
+) -> StashItemOut:
+    item_id = new_id()
+
+    def _insert(conn: sqlite3.Connection) -> dict:
+        conn.execute(
+            """INSERT INTO stash (id, trip_id, name, address, lng, lat, amap_poi_id,
+                                  added_by, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (item_id, trip_id, name, address, lng, lat, amap_poi_id, added_by, now_iso()),
+        )
+        return dict(conn.execute("SELECT * FROM stash WHERE id = ?", (item_id,)).fetchone())
+
+    return StashItemOut.model_validate(await db.run(_insert))
+
+
+async def stash_remove(db: Database, trip_id: str, item_id: str) -> bool:
+    def _remove(conn: sqlite3.Connection) -> bool:
+        cur = conn.execute("DELETE FROM stash WHERE id = ? AND trip_id = ?", (item_id, trip_id))
+        return cur.rowcount > 0
+
+    return await db.run(_remove)

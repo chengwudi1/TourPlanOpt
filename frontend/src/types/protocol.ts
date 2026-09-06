@@ -30,9 +30,13 @@ export const Ops = {
   PLACE_UPDATE: 'place_update',
   PLACE_DELETE: 'place_delete',
   PLACE_LOCK: 'place_lock',
+  PLACE_MOVE: 'place_move',
   DAY_REORDER: 'day_reorder',
   DAY_ADD: 'day_add',
+  DAY_DELETE: 'day_delete',
   DAY_UPDATE: 'day_update',
+  STASH_ADD: 'stash_add',
+  STASH_REMOVE: 'stash_remove',
   TRIP_UPDATE: 'trip_update',
 } as const
 

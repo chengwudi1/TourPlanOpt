@@ -69,6 +69,7 @@ class Database:
         if "created_by" not in columns:
             conn.execute("ALTER TABLE trips ADD COLUMN created_by TEXT")
 
+
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=5.0)
         conn.row_factory = sqlite3.Row

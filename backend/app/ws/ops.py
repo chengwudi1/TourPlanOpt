@@ -17,7 +17,7 @@ import typing
 from app.db import repositories
 from app.db.database import get_db
 from app.models import protocol
-from app.models.domain import PlaceCreate
+from app.models.domain import PlaceCreate, StashCreate
 from app.ws.hub import TripHub
 
 if typing.TYPE_CHECKING:
@@ -46,6 +46,10 @@ async def apply_op(conn: ClientConnection, hub: TripHub, frame: dict) -> None:
 
     handlers = {
         Ops.PLACE_ADD: _place_add,
+        Ops.PLACE_MOVE: _place_move,
+        Ops.DAY_DELETE: _day_delete,
+        Ops.STASH_ADD: _stash_add,
+        Ops.STASH_REMOVE: _stash_remove,
         Ops.PLACE_UPDATE: _place_update,
         Ops.PLACE_DELETE: _place_delete,
         Ops.PLACE_LOCK: _place_lock,
@@ -106,6 +110,7 @@ async def _place_add(
             note=str(data.get("note") or ""),
             added_by=str(data.get("added_by") or client_id),
             after_place_id=data.get("after_place_id"),
+            stashed=bool(data.get("stashed")),
         )
     except (TypeError, ValueError):
         await _reject(conn, op_id, "bad_payload")
@@ -149,6 +154,33 @@ async def _place_update(
         return
     await _broadcast(
         hub, db, trip_id, "place_updated", op_id, client_id, {"place": updated.model_dump()}
+    )
+
+
+async def _place_move(
+    conn: ClientConnection, hub: TripHub, db, client_id: str, op_id: str, data: dict
+) -> None:
+    trip_id = conn.trip_id
+    place_id = str(data.get("place_id") or "")
+    to_day_id = str(data.get("day_id") or "")
+    place = await repositories.get_place(db, place_id) if place_id else None
+    if place is None or place.trip_id != trip_id:
+        await _reject(conn, op_id, "place_not_found", {"place_id": place_id})
+        return
+    result = await repositories.move_place(db, place_id, to_day_id)
+    if result is None:
+        await _reject(conn, op_id, "day_not_found", {"day_id": to_day_id})
+        return
+    moved, old_day_id, old_order, new_day_id, new_order = result
+    await _broadcast(
+        hub, db, trip_id, "place_moved", op_id, client_id,
+        {
+            "place": moved,
+            "old_day_id": old_day_id,
+            "old_place_ids": old_order,
+            "day_id": new_day_id,
+            "place_ids": new_order,
+        },
     )
 
 
@@ -259,6 +291,24 @@ async def _day_update(
     )
 
 
+async def _day_delete(
+    conn: ClientConnection, hub: TripHub, db, client_id: str, op_id: str, data: dict
+) -> None:
+    trip_id = conn.trip_id
+    day_id = str(data.get("day_id") or "")
+    day = await repositories.get_day(db, day_id) if day_id else None
+    if day is None or day.trip_id != trip_id:
+        await _reject(conn, op_id, "day_not_found", {"day_id": day_id})
+        return
+
+    deleted = await repositories.delete_day(db, trip_id, day_id)
+    if not deleted:
+        # 有内容的天必须先删地点：拒绝并告知原因，绝不静默丢数据。
+        await _reject(conn, op_id, "day_not_empty", {"day_id": day_id})
+        return
+    await _broadcast(hub, db, trip_id, "day_deleted", op_id, client_id, {"day_id": day_id})
+
+
 async def _trip_update(
     conn: ClientConnection, hub: TripHub, db, client_id: str, op_id: str, data: dict
 ) -> None:
@@ -273,3 +323,48 @@ async def _trip_update(
     await _broadcast(
         hub, db, trip_id, "trip_updated", op_id, client_id, {"trip": updated.model_dump()}
     )
+
+
+# -- stash（暂存区）--------------------------------------------------------------------
+
+
+async def _stash_add(
+    conn: ClientConnection, hub: TripHub, db, client_id: str, op_id: str, data: dict
+) -> None:
+    trip_id = conn.trip_id
+    try:
+        payload = StashCreate(
+            name=str(data.get("name") or "").strip(),
+            lng=float(data.get("lng")),
+            lat=float(data.get("lat")),
+            address=str(data.get("address") or ""),
+            amap_poi_id=str(data.get("amap_poi_id") or ""),
+            added_by=str(data.get("added_by") or client_id),
+        )
+    except (TypeError, ValueError):
+        await _reject(conn, op_id, "bad_payload")
+        return
+    if not payload.name:
+        await _reject(conn, op_id, "bad_payload")
+        return
+    item = await repositories.stash_add(
+        db, trip_id,
+        name=payload.name, lng=payload.lng, lat=payload.lat,
+        address=payload.address, amap_poi_id=payload.amap_poi_id,
+        added_by=payload.added_by,
+    )
+    await _broadcast(
+        hub, db, trip_id, "stash_added", op_id, client_id, {"item": item.model_dump()}
+    )
+
+
+async def _stash_remove(
+    conn: ClientConnection, hub: TripHub, db, client_id: str, op_id: str, data: dict
+) -> None:
+    trip_id = conn.trip_id
+    item_id = str(data.get("id") or "")
+    removed = await repositories.stash_remove(db, trip_id, item_id) if item_id else False
+    if not removed:
+        await _reject(conn, op_id, "stash_not_found", {"id": item_id})
+        return
+    await _broadcast(hub, db, trip_id, "stash_removed", op_id, client_id, {"id": item_id})

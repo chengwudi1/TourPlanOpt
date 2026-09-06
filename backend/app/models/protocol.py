@@ -40,6 +40,10 @@ class Ops:
     DAY_REORDER = "day_reorder"
 
     DAY_ADD = "day_add"
+    DAY_DELETE = "day_delete"
+    PLACE_MOVE = "place_move"
+    STASH_ADD = "stash_add"
+    STASH_REMOVE = "stash_remove"
     DAY_UPDATE = "day_update"
     TRIP_UPDATE = "trip_update"
 

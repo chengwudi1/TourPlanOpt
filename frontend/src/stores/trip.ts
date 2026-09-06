@@ -1,4 +1,4 @@
-import { defineStore } from 'pinia'
+import { acceptHMRUpdate, defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 import type {
@@ -8,6 +8,7 @@ import type {
   PlaceCreateInput,
   Presence,
   Snapshot,
+  StashItem,
   Trip,
 } from '@/types/domain'
 import type { OpBroadcastFrame } from '@/types/protocol'
@@ -56,6 +57,7 @@ export const useTripStore = defineStore('trip', () => {
   const places = ref<Place[]>([])
   const participants = ref<Participant[]>([])
   const presence = ref<Presence[]>([])
+  const stash = ref<StashItem[]>([])
   const currentDayId = ref<string | null>(null)
   const selectedPlaceId = ref<string | null>(null)
   const loading = ref(false)
@@ -71,6 +73,7 @@ export const useTripStore = defineStore('trip', () => {
     () => days.value.find((d) => d.id === currentDayId.value) ?? null,
   )
 
+  /** 当前天已安排的地点。 */
   const currentPlaces = computed(() =>
     places.value
       .filter((p) => p.day_id === currentDayId.value)
@@ -95,6 +98,7 @@ export const useTripStore = defineStore('trip', () => {
     places.value = snap.places
     participants.value = snap.participants
     presence.value = snap.presence ?? []
+    stash.value = snap.stash ?? []
     if (!currentDayId.value || !snap.days.some((d) => d.id === currentDayId.value)) {
       currentDayId.value = snap.days[0]?.id ?? null
     }
@@ -232,10 +236,53 @@ export const useTripStore = defineStore('trip', () => {
     useSocketStore().sendOp(Ops.DAY_ADD, {})
   }
 
+  /** 删除一个空的天（服务端拒绝有内容的天与最后一天）。 */
+  function deleteDay(dayId: string) {
+    useSocketStore().sendOp(Ops.DAY_DELETE, { day_id: dayId })
+  }
+
+  /** 设为起点：优化器把这一天从这个地点出发。 */
+  function setStartPlace(dayId: string, placeId: string) {
+    useSocketStore().sendOp(Ops.DAY_UPDATE, { day_id: dayId, patch: { start_place_id: placeId } })
+  }
+
   /** Rename a day (or set its date/mode later -- full patch goes through the op). */
   function updateDay(dayId: string, patch: Partial<Day>) {
     useSocketStore().sendOp(Ops.DAY_UPDATE, { day_id: dayId, patch })
   }
+
+  // -- stash（想去清单）------------------------------------------------------------------
+
+  interface StashAddInput {
+    name: string
+    lng: number
+    lat: number
+    address?: string
+    amap_poi_id?: string
+  }
+
+  /** 收进想去清单。条目 id 由服务端生成，靠 stash_added 回广播落地。 */
+  function stashAdd(input: StashAddInput) {
+    useSocketStore().sendOp(Ops.STASH_ADD, { ...input, added_by: useClientIdentity().name })
+  }
+
+  function stashRemove(id: string) {
+    stash.value = stash.value.filter((s) => s.id !== id)
+    useSocketStore().sendOp(Ops.STASH_REMOVE, { id })
+  }
+
+  /** 把清单里的一条安排进当前天：加为地点 + 移出清单，两个 op 各自回广播。 */
+  function promoteFromStash(item: StashItem) {
+    addPlace({
+      name: item.name,
+      lng: item.lng,
+      lat: item.lat,
+      address: item.address,
+      amap_poi_id: item.amap_poi_id,
+    })
+    stashRemove(item.id)
+  }
+
 
   // -- optimization --------------------------------------------------------------------
 
@@ -321,6 +368,26 @@ export const useTripStore = defineStore('trip', () => {
         if (!days.value.some((d) => d.id === day.id)) days.value.push(day)
         break
       }
+      case 'day_deleted': {
+        pendingOps.delete(frame.op_id)
+        const removedId = String(data.day_id)
+        days.value = days.value.filter((d) => d.id !== removedId)
+        places.value = places.value.filter((p) => p.day_id !== removedId)
+        if (currentDayId.value === removedId) {
+          currentDayId.value = days.value[0]?.id ?? null
+        }
+        break
+      }
+      case 'place_moved': {
+        pendingOps.delete(frame.op_id)
+        const place = data.place as Place
+        // 权威结果直接覆盖：两天的顺序都由服务端给出。
+        places.value = places.value.filter((p) => p.id !== place.id)
+        places.value.push(place)
+        applyOrder(String(data.old_day_id), data.old_place_ids as string[])
+        applyOrder(String(data.day_id), data.place_ids as string[])
+        break
+      }
       case 'day_updated': {
         const day = data.day as Day
         const index = days.value.findIndex((d) => d.id === day.id)
@@ -329,6 +396,17 @@ export const useTripStore = defineStore('trip', () => {
       }
       case 'trip_updated': {
         trip.value = data.trip as Trip
+        break
+      }
+      case 'stash_added': {
+        const item = data.item as StashItem
+        if (!stash.value.some((s) => s.id === item.id)) stash.value.push(item)
+        break
+      }
+      case 'stash_removed': {
+        const id = String(data.id)
+        stash.value = stash.value.filter((s) => s.id !== id)
+        pendingOps.delete(frame.op_id)
         break
       }
       case 'route_optimized': {
@@ -361,6 +439,7 @@ export const useTripStore = defineStore('trip', () => {
       day_not_found: '目标天不存在',
       bad_patch: '修改内容无效',
       bad_payload: '提交的内容无效',
+      stash_not_found: '这条想去清单已被删除',
     }
     opError.value = {
       message: messages[reason] ?? `操作被拒绝（${reason}）`,
@@ -465,6 +544,12 @@ export const useTripStore = defineStore('trip', () => {
     updateTripFields,
     addDay,
     updateDay,
+    deleteDay,
+    setStartPlace,
+    stash,
+    stashAdd,
+    stashRemove,
+    promoteFromStash,
     optimize,
     undoOptimize,
     dismissOptimizeResult,
@@ -478,3 +563,9 @@ export const useTripStore = defineStore('trip', () => {
     applyOrder,
   }
 })
+
+if (import.meta.hot) {
+  // dev 热更新时保住 store 状态：没有这一行，改 store 文件后长开页面的状态会错乱
+  // （用户遇到的「刚刚卡了」的一部分来源）。
+  acceptHMRUpdate(useTripStore, import.meta.hot)
+}
