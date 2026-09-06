@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 import type { Presence } from '@/types/domain'
 import type { SocketStatus } from '@/stores/socket'
 import { useAuthStore } from '@/stores/auth'
+import { useTripStore } from '@/stores/trip'
+import { shareTripCard } from '@/utils/shareCard'
 
 const props = defineProps<{
   title: string
@@ -16,6 +18,21 @@ const props = defineProps<{
 const emit = defineEmits<{ share: []; rename: [] }>()
 
 const auth = useAuthStore()
+const store = useTripStore()
+
+const sharing = ref(false)
+
+async function shareImage() {
+  if (!store.trip || sharing.value) return
+  sharing.value = true
+  try {
+    await shareTripCard(store.trip, store.currentPlaces)
+  } catch {
+    // 用户取消分享（AbortError）或生成失败：静默即可，下载路径不经过这里失败。
+  } finally {
+    sharing.value = false
+  }
+}
 
 const initials = computed(() =>
   props.presence.map((p) => ({
@@ -77,6 +94,9 @@ const statusLabel = computed(() => {
       </span>
     </div>
 
+    <button class="btn btn--sm" type="button" :disabled="sharing || !store.currentPlaces.length" @click="shareImage">
+      {{ sharing ? '生成中…' : '分享图' }}
+    </button>
     <button class="btn btn--sm" type="button" @click="emit('share')">
       分享链接
     </button>

@@ -13,10 +13,14 @@
   --accent-soft: #e1f1ee;
   --ok: #1f9d55;
   --ok-soft: #e6f6ec;
+  --ok-border: #bfe6cd;
   --warn: #b7791f;
   --warn-soft: #fdf3e0;
+  --warn-border: #f0dcb4;
   --danger: #d64545;
   --danger-soft: #fdeaea;
+  --danger-border: #f2c9c9;
+  --code-bg: rgba(0, 0, 0, 0.06);
 
   --radius: 12px;
   --radius-sm: 8px;
@@ -28,6 +32,39 @@
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
     'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   --mono: ui-monospace, SFMono-Regular, 'Cascadia Mono', Consolas, monospace;
+
+  color-scheme: light;
+}
+
+/* 深色模式：跟随系统。地图瓦片仍是亮色（行业惯例，叠加层已用 token），
+   其余界面全部走这里的变量。 */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #14171a;
+    --surface: #1d2125;
+    --surface-2: #262b30;
+    --border: #2e343a;
+    --border-strong: #3d454c;
+    --text: #e8ecea;
+    --text-2: #a5b0aa;
+    --text-3: #6e7a74;
+    --accent: #2aa393;
+    --accent-strong: #45c0b0;
+    --accent-soft: #123c37;
+    --ok: #34b96f;
+    --ok-soft: #12291b;
+    --ok-border: #1f4430;
+    --warn: #d9a24a;
+    --warn-soft: #2e2415;
+    --warn-border: #4d3d1d;
+    --danger: #e06666;
+    --danger-soft: #2e1717;
+    --danger-border: #4d2424;
+    --code-bg: rgba(255, 255, 255, 0.08);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  }
 }
 
 * {
@@ -178,19 +215,19 @@ textarea {
   font-size: 12px;
   padding: 1px 5px;
   border-radius: 4px;
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--code-bg);
 }
 .banner--ok {
   background: var(--ok-soft);
-  border-color: #bfe6cd;
+  border-color: var(--ok-border);
 }
 .banner--warn {
   background: var(--warn-soft);
-  border-color: #f0dcb4;
+  border-color: var(--warn-border);
 }
 .banner--danger {
   background: var(--danger-soft);
-  border-color: #f2c9c9;
+  border-color: var(--danger-border);
 }
 
 /* ---------- app shell ---------- */
@@ -290,6 +327,34 @@ textarea {
 }
 
 /* ---------- 质量底线 ---------- */
+
+/* 骨架屏：内容加载中的占位，shimmer 顺着阅读方向扫过 */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+}
+.skeleton::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.55),
+    transparent
+  );
+  animation: skeleton-sweep 1.4s ease-in-out infinite;
+}
+@keyframes skeleton-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
 
 :focus-visible {
   outline: 2px solid var(--accent);

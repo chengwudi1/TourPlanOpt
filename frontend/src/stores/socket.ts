@@ -174,9 +174,18 @@ export const useSocketStore = defineStore('socket', () => {
   let latestPresence: PresenceSendFrame['data'] | null = null
 
   /** Coalesced to one frame per 250 ms server-side; we pre-coalesce here so a burst of
-   * selection changes does not even reach the socket. */
-  function sendPresence(currentDayId: string | null, focusingPlaceId: string | null) {
-    latestPresence = { current_day_id: currentDayId, focusing_place_id: focusingPlaceId }
+   * selection changes does not even reach the socket. `draggingDayId` tells the room
+   * someone is mid-drag so their lists can show a gentle hint. */
+  function sendPresence(
+    currentDayId: string | null,
+    focusingPlaceId: string | null,
+    draggingDayId?: string | null,
+  ) {
+    latestPresence = {
+      current_day_id: currentDayId,
+      focusing_place_id: focusingPlaceId,
+      dragging_day_id: draggingDayId ?? null,
+    }
     if (presenceTimer) return
     const elapsed = Date.now() - lastPresenceSent
     const wait = Math.max(0, 250 - elapsed)

@@ -73,6 +73,7 @@ export interface Presence {
   color: string
   current_day_id: string | null
   focusing_place_id: string | null
+  dragging_day_id?: string | null
   joined_at: number
 }
 

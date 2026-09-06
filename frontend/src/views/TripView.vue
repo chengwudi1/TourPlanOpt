@@ -66,9 +66,15 @@ const dayOverview = computed(() => {
 })
 
 const placeListEl = ref<HTMLElement | null>(null)
-useDragSort(placeListEl, (orderedIds) => {
-  if (store.currentDayId) store.reorderDay(store.currentDayId, orderedIds)
-})
+useDragSort(
+  placeListEl,
+  (orderedIds) => {
+    if (store.currentDayId) store.reorderDay(store.currentDayId, orderedIds)
+  },
+  (dragging) => {
+    if (store.currentDayId) socket.sendPresence(store.currentDayId, store.selectedPlaceId, dragging ? store.currentDayId : null)
+  },
+)
 
 const AMAP_URI_MODE = { driving: 'car', walking: 'walk', straight: 'car' } as const
 
@@ -180,6 +186,41 @@ async function copyShareLink() {
 
 const copied = ref(false)
 
+/** 卡片操作菜单（右键/长按/⋯呼出）。 */
+const cardMenu = ref<{ place: Place; x: number; y: number } | null>(null)
+
+function closeCardMenu() {
+  cardMenu.value = null
+}
+
+/** 菜单贴边夹紧：不让它被视口裁掉。 */
+const cardMenuPos = computed(() => {
+  if (!cardMenu.value) return {}
+  return {
+    left: `${Math.min(cardMenu.value.x, window.innerWidth - 190)}px`,
+    top: `${Math.min(cardMenu.value.y, window.innerHeight - 150)}px`,
+  }
+})
+
+async function copyAddress(place: Place) {
+  closeCardMenu()
+  try {
+    await navigator.clipboard.writeText(place.address || `${place.lng}, ${place.lat}`)
+    store.opError = null
+  } catch {
+    window.prompt('复制地址：', place.address || `${place.lng}, ${place.lat}`)
+  }
+}
+
+function closeCardMenuOnClick(e: MouseEvent) {
+  if (!(e.target as HTMLElement).closest('.cardmenu')) closeCardMenu()
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('click', closeCardMenuOnClick)
+  window.addEventListener('resize', closeCardMenu)
+}
+
 // Dev-only handle for console assertions in the two-window verification drills
 // (deep-compare both windows' day order after a concurrent-drag storm).
 if (import.meta.env.DEV) {
@@ -217,7 +258,13 @@ if (import.meta.env.DEV) {
     <div v-else class="shell__body" :class="{ 'map-open': mobileView === 'map' }">
       <div class="panel">
         <div class="panel__scroll panel__content">
-          <div v-if="store.loading" class="muted tiny">正在加载行程…</div>
+          <div v-if="store.loading" class="skeletongroup" aria-label="正在加载行程">
+            <div class="skeleton" style="height: 30px" />
+            <div class="skeleton" style="height: 44px" />
+            <div class="skeleton" style="height: 74px" />
+            <div class="skeleton" style="height: 74px; width: 85%" />
+            <div class="skeleton" style="height: 74px; width: 70%" />
+          </div>
 
           <template v-else-if="store.trip">
             <nav class="daytabs">
@@ -261,7 +308,11 @@ if (import.meta.env.DEV) {
               </div>
             </div>
 
-            <ul v-if="store.currentPlaces.length" ref="placeListEl" class="placelist">
+            <div v-if="store.remoteDragger" class="draghint tiny" :style="{ borderColor: store.remoteDragger.color }">
+              {{ store.remoteDragger.name }} 正在调整顺序…
+            </div>
+
+            <ul v-if="store.currentPlaces.length" ref="placeListEl" class="placelist" :class="{ 'placelist--locked': !!store.remoteDragger }">
               <template v-for="(place, index) in store.currentPlaces" :key="place.id">
                 <li v-if="index > 0" class="leg">
                   <span class="leg__icon">{{ modeIcon }}</span>
@@ -281,13 +332,34 @@ if (import.meta.env.DEV) {
                   @remove="onRemove(place.id)"
                   @lock="(p, locked) => store.setPlaceLocked(p.id, locked)"
                   @patch="onPatch"
+                  @menu="(p, pos) => (cardMenu = { place: p, ...pos })"
                 />
               </template>
             </ul>
 
-            <p v-else class="muted tiny empty-hint">
-              还没有地点。在上面搜索一个（比如「外滩」），点一下就加进今天。
-            </p>
+            <div v-else class="empty">
+              <svg class="empty__art" viewBox="0 0 200 96" aria-hidden="true">
+                <path
+                  d="M18 74 C 52 74, 58 30, 96 30 S 148 66, 182 66"
+                  fill="none"
+                  stroke="var(--accent)"
+                  stroke-width="2.5"
+                  stroke-dasharray="5 6"
+                  stroke-linecap="round"
+                />
+                <g fill="var(--accent)">
+                  <circle cx="18" cy="74" r="6" />
+                  <circle cx="96" cy="30" r="7" />
+                  <circle cx="182" cy="66" r="6" />
+                </g>
+                <g fill="var(--surface)">
+                  <circle cx="96" cy="30" r="2.5" />
+                </g>
+              </svg>
+              <p class="muted tiny empty-hint">
+                还没有地点。在上面搜索一个（比如「外滩」），或打开「发现」挑一个推荐。
+              </p>
+            </div>
           </template>
         </div>
       </div>
@@ -316,10 +388,66 @@ if (import.meta.env.DEV) {
     </nav>
 
     <JoinGate v-if="!joined" @join="onJoin" />
+
+    <div
+      v-if="cardMenu"
+      class="cardmenu card"
+      :style="cardMenuPos"
+    >
+      <button
+        v-if="cardMenu.place.address"
+        class="cardmenu__item"
+        type="button"
+        @click="copyAddress(cardMenu.place)"
+      >
+        复制地址
+      </button>
+      <a
+        class="cardmenu__item"
+        target="_blank"
+        rel="noopener"
+        :href="`https://uri.amap.com/marker?position=${cardMenu.place.lng},${cardMenu.place.lat}&name=${encodeURIComponent(cardMenu.place.name)}`"
+        @click="closeCardMenu"
+      >
+        在高德中查看 ↗
+      </a>
+      <button
+        class="cardmenu__item"
+        type="button"
+        @click="store.setPlaceLocked(cardMenu.place.id, !cardMenu.place.locked); closeCardMenu()"
+      >
+        {{ cardMenu.place.locked ? '📍 取消锁定' : '📍 锁定位置' }}
+      </button>
+    </div>
   </div>
 </template>
 
 <style scoped>
+.cardmenu {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  min-width: 170px;
+  padding: 4px;
+}
+
+.cardmenu__item {
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text);
+  text-align: left;
+  text-decoration: none;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.cardmenu__item:hover {
+  background: var(--surface-2);
+}
+
 .panel__content {
   display: flex;
   flex-direction: column;
@@ -386,10 +514,50 @@ if (import.meta.env.DEV) {
   list-style: none;
 }
 
-.empty-hint {
-  padding: 18px;
-  text-align: center;
+.placelist--locked {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.draghint {
+  padding: 6px 10px;
+  border: 1px dashed var(--border-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  animation: draghint-in 0.2s ease;
+}
+
+@keyframes draghint-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.skeletongroup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  padding: 18px 12px 14px;
   background: var(--surface-2);
   border-radius: var(--radius);
+}
+
+.empty__art {
+  width: 180px;
+  height: auto;
+  opacity: 0.85;
+}
+
+.empty-hint {
+  margin: 0;
+  text-align: center;
 }
 </style>

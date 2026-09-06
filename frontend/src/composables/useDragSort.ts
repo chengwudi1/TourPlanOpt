@@ -17,6 +17,7 @@ import { onBeforeUnmount, watch } from 'vue'
 export function useDragSort(
   container: Ref<HTMLElement | null>,
   onReorder: (orderedIds: string[]) => void,
+  onDragging?: (dragging: boolean) => void,
 ) {
   let sortable: Sortable | null = null
 
@@ -39,7 +40,11 @@ export function useDragSort(
         handle: '.place__drag',
         draggable: '.place',
         ghostClass: 'place--ghost',
+        onStart() {
+          onDragging?.(true)
+        },
         onEnd(evt) {
+          onDragging?.(false)
           const ids = Array.from(el.children ?? [])
             .map(idOf)
             .filter((x): x is string => x !== null)

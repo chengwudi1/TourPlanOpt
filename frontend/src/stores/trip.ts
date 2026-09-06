@@ -12,7 +12,7 @@ import type {
 } from '@/types/domain'
 import type { OpBroadcastFrame } from '@/types/protocol'
 import { Ops } from '@/types/protocol'
-import { colorForClient, useClientIdentity } from '@/composables/useClientIdentity'
+import { colorForClient, getClientId, useClientIdentity } from '@/composables/useClientIdentity'
 import { apiFetch, postJson } from '@/utils/api'
 import { useSocketStore } from '@/stores/socket'
 
@@ -376,6 +376,16 @@ export const useTripStore = defineStore('trip', () => {
 
   // -- presence ------------------------------------------------------------------------
 
+  /** 别人（非自己）正在拖动某天的顺序时给出提示；本人拖动的 presence 自己也会收到，
+   * 按client_id 过滤掉。 */
+  const remoteDragger = computed(() => {
+    if (!currentDayId.value) return null
+    const other = presence.value.find(
+      (p) => p.client_id !== getClientId() && p.dragging_day_id === currentDayId.value,
+    )
+    return other ? { name: other.name, color: other.color } : null
+  })
+
   function applyPresence(p: Presence) {
     if (!p?.client_id) return
     const index = presence.value.findIndex((x) => x.client_id === p.client_id)
@@ -462,6 +472,7 @@ export const useTripStore = defineStore('trip', () => {
     applyReject,
     applyPresence,
     removePresence,
+    remoteDragger,
     creatorColorOf,
     clearPendingOps,
     applyOrder,

@@ -70,10 +70,18 @@ def hello_frame(client_id: str, name: str, color: str) -> dict[str, Any]:
     )
 
 
-def presence_frame(current_day_id: str | None, focusing_place_id: str | None) -> dict[str, Any]:
+def presence_frame(
+    current_day_id: str | None,
+    focusing_place_id: str | None,
+    dragging_day_id: str | None = None,
+) -> dict[str, Any]:
     return _envelope(
         ClientMsg.PRESENCE,
-        data={"current_day_id": current_day_id, "focusing_place_id": focusing_place_id},
+        data={
+            "current_day_id": current_day_id,
+            "focusing_place_id": focusing_place_id,
+            "dragging_day_id": dragging_day_id,
+        },
     )
 
 

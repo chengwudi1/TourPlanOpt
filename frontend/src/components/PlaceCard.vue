@@ -21,7 +21,24 @@ const emit = defineEmits<{
   remove: [place: Place]
   lock: [place: Place, locked: boolean]
   patch: [place: Place, patch: { duration_min?: number; note?: string; start_min?: number | null }]
+  menu: [place: Place, pos: { x: number; y: number }]
 }>()
+
+// 长按（触屏）打开卡片菜单：500ms 按住不动即视为呼出，移动/抬起取消。
+let pressTimer: ReturnType<typeof setTimeout> | null = null
+function pressStart(e: PointerEvent) {
+  if (e.pointerType === 'mouse') return
+  const place = props.place
+  const x = e.clientX
+  const y = e.clientY
+  pressTimer = setTimeout(() => emit('menu', place, { x, y }), 500)
+}
+function pressCancel() {
+  if (pressTimer) {
+    clearTimeout(pressTimer)
+    pressTimer = null
+  }
+}
 
 const duration = ref(String(props.place.duration_min))
 const note = ref(props.place.note)
@@ -86,6 +103,11 @@ function commitStart(value: string) {
     :style="ringStyle"
     :data-place-id="place.id"
     @click="emit('select', place)"
+    @contextmenu.prevent="emit('menu', place, { x: $event.clientX, y: $event.clientY })"
+    @pointerdown="pressStart"
+    @pointerup="pressCancel"
+    @pointermove="pressCancel"
+    @pointercancel="pressCancel"
   >
     <span class="place__drag" title="拖动排序" aria-hidden="true">⋮⋮</span>
     <span
@@ -166,13 +188,22 @@ function commitStart(value: string) {
       </div>
     </div>
 
-    <button
-      class="btn btn--sm btn--ghost place__delete"
-      title="删除这个地点"
-      @click.stop="emit('remove', place)"
-    >
-      ✕
-    </button>
+    <div class="place__side">
+      <button
+        class="btn btn--sm btn--ghost place__menu"
+        title="更多操作"
+        @click.stop="emit('menu', place, { x: $event.clientX, y: $event.clientY })"
+      >
+        ⋯
+      </button>
+      <button
+        class="btn btn--sm btn--ghost place__delete"
+        title="删除这个地点"
+        @click.stop="emit('remove', place)"
+      >
+        ✕
+      </button>
+    </div>
   </li>
 </template>
 
@@ -305,7 +336,16 @@ a.place__editrow,
   text-decoration: none;
 }
 
-.place__delete {
+.place__side {
+  display: flex;
   flex: 0 0 auto;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.place__menu,
+.place__delete {
+  padding: 2px 7px;
+  font-size: 13px;
 }
 </style>

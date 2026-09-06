@@ -111,6 +111,7 @@ class Presence(BaseModel):
     color: str = ""
     current_day_id: str | None = None
     focusing_place_id: str | None = None
+    dragging_day_id: str | None = None  # 该成员正在拖动哪一天的顺序（他人列表给柔和提示）
     joined_at: float = 0.0
 
 

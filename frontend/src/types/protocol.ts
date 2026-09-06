@@ -53,7 +53,7 @@ export interface OpSendFrame {
 export interface PresenceSendFrame {
   v: number
   type: 'presence'
-  data: { current_day_id: string | null; focusing_place_id: string | null }
+  data: { current_day_id: string | null; focusing_place_id: string | null; dragging_day_id?: string | null }
 }
 
 export interface ResyncFrame {

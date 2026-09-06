@@ -139,6 +139,7 @@ async def _presence(conn: ClientConnection, frame: dict) -> Dispatch:
         {
             "current_day_id": data.get("current_day_id"),
             "focusing_place_id": data.get("focusing_place_id"),
+            "dragging_day_id": data.get("dragging_day_id"),
         },
     )
     await _broadcast_presence(
