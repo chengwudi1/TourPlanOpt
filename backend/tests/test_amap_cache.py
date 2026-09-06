@@ -8,8 +8,6 @@ produces a negative-cache row that is never re-requested. Also covers the walkin
 
 from __future__ import annotations
 
-from typing import Any
-
 import httpx
 import pytest
 
@@ -50,21 +48,27 @@ def distance_client(durations: dict[tuple[int, int], int] | None = None, calls: 
     def handler(request: httpx.Request) -> httpx.Response:
         if calls is not None:
             calls.append(request.url.params)
-        origins = [tuple(map(float, o.split(","))) for o in str(request.url.params["origins"]).split("|")]
+        origins = [
+            tuple(map(float, o.split(",")))
+            for o in str(request.url.params["origins"]).split("|")
+        ]
         dest = tuple(map(float, str(request.url.params["destination"]).split(",")))
         # Identify the destination node by its rounded coordinates.
-        dest_idx = next(
-            (k for k, n in enumerate(NODES) if round(n[0] * 1e5) == round(dest[0] * 1e5) and round(n[1] * 1e5) == round(dest[1] * 1e5)),
-            None,
-        )
-        results = []
-        for idx, o in enumerate(origins):
-            o_idx = next(
-                (k for k, n in enumerate(NODES) if round(n[0] * 1e5) == round(o[0] * 1e5) and round(n[1] * 1e5) == round(o[1] * 1e5)),
+        def node_at(c):
+            return next(
+                (k for k, n in enumerate(NODES) if round(n[0] * 1e5) == round(c[0] * 1e5)
+                 and round(n[1] * 1e5) == round(c[1] * 1e5)),
                 None,
             )
+
+        dest_idx = node_at(dest)
+        results = []
+        for idx, o in enumerate(origins):
+            o_idx = node_at(o)
             if dest_idx is None or o_idx is None or o_idx == dest_idx:
-                results.append({"origin_id": str(idx), "info": "20800", "distance": [], "duration": []})
+                results.append(
+                    {"origin_id": str(idx), "info": "20800", "distance": [], "duration": []}
+                )
                 continue
             duration = durations.get((o_idx, dest_idx), 600 + 97 * (o_idx + dest_idx))
             results.append(
@@ -75,7 +79,9 @@ def distance_client(durations: dict[tuple[int, int], int] | None = None, calls: 
                     "duration": str(duration),
                 }
             )
-        return httpx.Response(200, json={"status": "1", "info": "OK", "infocode": "10000", "results": results})
+        return httpx.Response(
+            200, json={"status": "1", "info": "OK", "infocode": "10000", "results": results}
+        )
 
     return AmapWebClient(transport=httpx.MockTransport(handler))
 
@@ -88,7 +94,10 @@ async def test_cache_roundtrip_with_rounded_keys() -> None:
 
     o, d = (121.4737001, 31.2304002), (121.5057003, 31.2453004)
     await db_cache.put(
-        [CacheRow(origin=o, destination=d, mode=1, distance_m=1234, duration_s=567, ok=True, infocode=None)]
+        [
+            CacheRow(origin=o, destination=d, mode=1, distance_m=1234,
+                     duration_s=567, ok=True, infocode=None)
+        ]
     )
 
     # A query nudged by sub-1.1 m amounts still hits the same rounded key.
@@ -104,7 +113,10 @@ async def test_negative_cache_row() -> None:
     db_cache = DistanceCache(get_db())
     o, d = (121.4737, 31.2304), (121.5057, 31.2453)
     await db_cache.put(
-        [CacheRow(origin=o, destination=d, mode=3, distance_m=None, duration_s=None, ok=False, infocode="20800")]
+        [
+            CacheRow(origin=o, destination=d, mode=3, distance_m=None,
+                     duration_s=None, ok=False, infocode="20800")
+        ]
     )
     entries = await db_cache.get([(o, d)], 3)
     entry = entries[next(iter(entries))]
@@ -130,7 +142,11 @@ async def test_matrix_fresh_then_cached() -> None:
     assert all(cell is not None for row in first.seconds for cell in row)
 
     second = await build_matrix(
-        NODES, travel_mode=TravelMode.DRIVING, cost_model="amap", cache=cache, client=distance_client()
+        NODES,
+        travel_mode=TravelMode.DRIVING,
+        cost_model="amap",
+        cache=cache,
+        client=distance_client(),
     )
     assert second.api_calls == 0
     assert second.cache_hits == (n - 1) ** 2  # column 0 (anchor start) never needed
@@ -153,7 +169,10 @@ async def test_unreachable_pair_is_negatively_cached() -> None:
     # seeding the cache with a negative row for that pair BEFORE building.
     o, d = NODES[1], NODES[3]
     await cache.put(
-        [CacheRow(origin=o, destination=d, mode=1, distance_m=None, duration_s=None, ok=False, infocode="20800")]
+        [
+            CacheRow(origin=o, destination=d, mode=1, distance_m=None,
+                     duration_s=None, ok=False, infocode="20800")
+        ]
     )
 
     first = await build_matrix(
@@ -164,7 +183,11 @@ async def test_unreachable_pair_is_negatively_cached() -> None:
 
     before = len(calls)
     second = await build_matrix(
-        NODES, travel_mode=TravelMode.DRIVING, cost_model="amap", cache=cache, client=distance_client(calls=calls)
+        NODES,
+        travel_mode=TravelMode.DRIVING,
+        cost_model="amap",
+        cache=cache,
+        client=distance_client(calls=calls),
     )
     assert second.api_calls == 0
     assert len(calls) == before  # no new requests: the negative cache answered
@@ -191,7 +214,11 @@ async def test_walking_over_5km_falls_back_to_driving() -> None:
     calls: list = []
     client = distance_client(calls=calls)
     result = await build_matrix(
-        far_nodes, travel_mode=TravelMode.WALKING, cost_model="amap", cache=DistanceCache(get_db()), client=client
+        far_nodes,
+        travel_mode=TravelMode.WALKING,
+        cost_model="amap",
+        cache=DistanceCache(get_db()),
+        client=client,
     )
     assert result.fallback_from == "walking"
     assert result.mode_used == "driving"

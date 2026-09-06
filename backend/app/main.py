@@ -110,11 +110,13 @@ def create_app() -> FastAPI:
     )
 
     from app.amap.errors import AmapError
+    from app.api.routes_city import router as city_router
     from app.api.routes_config import router as config_router
     from app.api.routes_health import router as health_router
     from app.api.routes_optimize import router as optimize_router
     from app.api.routes_poi import router as poi_router
     from app.api.routes_trips import router as trips_router
+    from app.auth.routes_auth import router as auth_router
 
     @app.exception_handler(AmapError)
     async def handle_amap_error(request: Request, exc: AmapError) -> JSONResponse:
@@ -136,6 +138,8 @@ def create_app() -> FastAPI:
     app.include_router(trips_router)
     app.include_router(poi_router)
     app.include_router(optimize_router)
+    app.include_router(city_router)
+    app.include_router(auth_router)
 
     @app.websocket("/ws/trips/{trip_id}")
     async def ws_trip_endpoint(websocket: WebSocket, trip_id: str) -> None:

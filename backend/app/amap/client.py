@@ -277,12 +277,21 @@ class AmapWebClient:
         return out
 
     async def place_text(
-        self, keyword: str, city: str | None = None, page: int = 1, page_size: int = 20
+        self,
+        keyword: str | None = None,
+        city: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+        types: str | None = None,
     ) -> PoiPage:
+        # keywords and types are alternative filters; at least one must be present.
+        if not keyword and not types:
+            raise AmapParamError("place_text 需要 keyword 或 types 之一")
         body = await self._get(
             "/v3/place/text",
             {
                 "keywords": keyword,
+                "types": types,
                 "city": city or None,
                 "citylimit": "true" if city else None,
                 "offset": page_size,

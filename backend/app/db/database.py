@@ -55,10 +55,19 @@ class Database:
         try:
             conn.execute("PRAGMA journal_mode = WAL")
             conn.executescript(schema)
+            self._migrate(conn)
             conn.commit()
         finally:
             conn.close()
         logger.info("sqlite ready at %s", self.path)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """Tiny hand-rolled migrations. schema.sql covers NEW tables (IF NOT EXISTS);
+        column additions to existing tables need an explicit ALTER guarded here."""
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(trips)").fetchall()}
+        if "created_by" not in columns:
+            conn.execute("ALTER TABLE trips ADD COLUMN created_by TEXT")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=5.0)

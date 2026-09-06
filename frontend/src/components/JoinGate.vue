@@ -2,10 +2,12 @@
 import { ref } from 'vue'
 
 import { getClientName, setClientName } from '@/composables/useClientIdentity'
+import { useAuthStore } from '@/stores/auth'
 
 const emit = defineEmits<{ join: [name: string] }>()
 
-const name = ref(getClientName())
+const auth = useAuthStore()
+const name = ref(auth.user?.name ?? getClientName())
 const submitted = ref(false)
 
 function join() {

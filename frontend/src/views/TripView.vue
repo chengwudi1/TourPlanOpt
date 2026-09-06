@@ -7,10 +7,12 @@ import MapPanel from '@/components/MapPanel.vue'
 import OptimizeBar from '@/components/OptimizeBar.vue'
 import PlaceCard from '@/components/PlaceCard.vue'
 import PlaceSearch from '@/components/PlaceSearch.vue'
+import RecommendPanel from '@/components/RecommendPanel.vue'
 import RouteSummary from '@/components/RouteSummary.vue'
 import TripHeader from '@/components/TripHeader.vue'
-import { getClientId } from '@/composables/useClientIdentity'
+import { getClientId, setClientName } from '@/composables/useClientIdentity'
 import { useDragSort } from '@/composables/useDragSort'
+import { useAuthStore } from '@/stores/auth'
 import { useSocketStore } from '@/stores/socket'
 import { useTripStore } from '@/stores/trip'
 import type { Place, Poi } from '@/types/domain'
@@ -20,6 +22,7 @@ const props = defineProps<{ tripId: string }>()
 
 const store = useTripStore()
 const socket = useSocketStore()
+const auth = useAuthStore()
 
 /** Per-tab: sessionStorage identity means a reload keeps your name, a new tab asks
  * again -- exactly the granularity the collaboration semantics need. */
@@ -103,10 +106,21 @@ function onJoin() {
 }
 
 onMounted(async () => {
+  await auth.load()
   try {
     await store.load(props.tripId)
   } catch {
     // store.loadError already holds the message/hint pair for the banner below.
+  }
+  // Logged-in users skip the name gate: their account IS the identity, and asking
+  // them to re-type it in every new tab reads as broken. Guests still see the gate
+  // because per-tab identity is what makes two-window collaboration testable.
+  if (auth.user && !joined.value) {
+    joined.value = true
+    // The composable's identity feeds added_by / participant rows; align it with the
+    // account name so creator colours and the roster show the person, not a hex id.
+    setClientName(auth.user.name)
+    sessionStorage.setItem('tourplanopt.joined', '1')
   }
   if (joined.value) socket.connect(props.tripId)
 })
@@ -233,6 +247,8 @@ if (import.meta.env.DEV) {
             </p>
 
             <PlaceSearch :city="store.trip.city" @select="onPoiPicked" />
+
+            <RecommendPanel :city="store.trip.city" />
 
             <OptimizeBar />
 

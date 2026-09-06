@@ -64,6 +64,7 @@ async def create_trip(
     title: str = "",
     city: str = "",
     travel_mode: TravelMode = TravelMode.DRIVING,
+    created_by: str | None = None,
 ) -> tuple[str, str]:
     """Creates the trip and its first day. Returns (trip_id, day_id)."""
     trip_id, day_id = new_id(), new_id()
@@ -72,9 +73,9 @@ async def create_trip(
     def _create(conn: sqlite3.Connection) -> None:
         conn.execute(
             """INSERT INTO trips (id, title, city, travel_mode, cost_model, day_start_min, seq,
-                                  created_at)
-               VALUES (?, ?, ?, ?, 'haversine', 540, 0, ?)""",
-            (trip_id, title, city, str(travel_mode), now),
+                                  created_by, created_at)
+               VALUES (?, ?, ?, ?, 'haversine', 540, 0, ?, ?)""",
+            (trip_id, title, city, str(travel_mode), created_by, now),
         )
         conn.execute(
             """INSERT INTO days (id, trip_id, day_index, date, title, rev)

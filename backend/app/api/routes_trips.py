@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request, status
 
+from app.auth.routes_auth import current_user
 from app.db.database import get_db
 from app.db.repositories import (
     add_place,
@@ -43,11 +44,13 @@ def share_url(request: Request, trip_id: str) -> str:
 
 @router.post("", response_model=TripCreateResult, status_code=status.HTTP_201_CREATED)
 async def create_trip_endpoint(body: TripCreate, request: Request) -> TripCreateResult:
+    user = await current_user(request)
     trip_id, day_id = await create_trip(
         get_db(),
         title=body.title.strip(),
         city=body.city.strip(),
         travel_mode=body.travel_mode,
+        created_by=user["id"] if user else None,
     )
     return TripCreateResult(
         trip_id=trip_id, day_id=day_id, share_url=share_url(request, trip_id)
@@ -55,12 +58,18 @@ async def create_trip_endpoint(body: TripCreate, request: Request) -> TripCreate
 
 
 @router.get("/{trip_id}", response_model=Snapshot)
-async def read_trip(trip_id: str) -> Snapshot:
+async def read_trip(trip_id: str, request: Request) -> Snapshot:
     """The full snapshot over plain HTTP. Deliberately not socket-dependent: this is the
     debug path and the fallback if the WebSocket never comes up."""
     snapshot = await get_snapshot(get_db(), trip_id)
     if snapshot is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"行程 {trip_id} 不存在")
+    # 历史足迹: opening a trip while logged in records the visit for 我的活动 feed.
+    user = await current_user(request)
+    if user is not None:
+        from app.auth import accounts
+
+        await accounts.record_visit(get_db(), trip_id, user["id"])
     return snapshot
 
 

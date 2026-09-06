@@ -15,10 +15,8 @@ from app.routing.schedule import fill_schedule
 from app.routing.tsp import (
     EXACT_MAX_N,
     nearest_neighbour,
-    or_opt_open,
     path_cost,
     solve_tsp_open,
-    two_opt_open,
 )
 
 
@@ -157,7 +155,9 @@ def test_schedule_recurrence_is_self_consistent() -> None:
     ids = ["a", "b", "c"]
     durations = {"a": 60, "b": 45, "c": 90}
     travel = [[0, 10, 20], [10, 0, 15], [20, 15, 0]]
-    result = fill_schedule(ids, durations, {"a": None, "b": None, "c": None}, travel, day_start_min=540)
+    result = fill_schedule(
+        ids, durations, {"a": None, "b": None, "c": None}, travel, day_start_min=540
+    )
     first = result.places[0]
     assert first.start_min == 540 and first.arrive_min == 540 and first.travel_min_before == 0
     second = result.places[1]

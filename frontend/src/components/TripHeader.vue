@@ -3,6 +3,7 @@ import { computed } from 'vue'
 
 import type { Presence } from '@/types/domain'
 import type { SocketStatus } from '@/stores/socket'
+import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{
   title: string
@@ -13,6 +14,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{ share: []; rename: [] }>()
+
+const auth = useAuthStore()
 
 const initials = computed(() =>
   props.presence.map((p) => ({
@@ -53,8 +56,14 @@ const statusLabel = computed(() => {
 
     <span class="triphead__status tiny" :class="`triphead__status--${status}`">
       <span class="dot" :class="`dot--${status === 'online' ? 'ok' : 'warn'}`" />
-      {{ statusLabel }}
+      <span>{{ statusLabel }}</span>
     </span>
+
+    <span v-if="auth.user" class="triphead__user tiny">
+      {{ auth.user.name }}
+      <button class="btn btn--sm btn--ghost" type="button" @click="auth.logout()">退出</button>
+    </span>
+    <a v-else class="triphead__user tiny" href="/">登录</a>
 
     <div v-if="initials.length" class="avatars" title="此刻在线">
       <span
@@ -101,6 +110,19 @@ const statusLabel = computed(() => {
 
 .triphead__status--reconnecting {
   color: var(--warn);
+}
+
+.triphead__user {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+a.triphead__user {
+  color: var(--accent);
+  text-decoration: none;
 }
 
 .avatars {

@@ -84,10 +84,14 @@ def test_optimize_apply_reorders_and_schedules(client) -> None:
     assert ordered[0]["arrive_min"] == 540  # day starts 09:00
 
     # Undo: sending the previous order back through day_reorder restores it.
-    undo = testclient.get(f"/api/trips/{trip_id}").json()  # placeholder to keep flow clear
-    socket_client = testclient
-    with socket_client.websocket_connect(f"/ws/trips/{trip_id}") as ws:
-        ws.send_json({"v": 1, "type": "hello", "data": {"client_id": "c-1", "name": "小明", "color": "#123456"}})
+    with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
+        ws.send_json(
+            {
+                "v": 1,
+                "type": "hello",
+                "data": {"client_id": "c-1", "name": "小明", "color": "#123456"},
+            }
+        )
         ws.receive_json()  # welcome
         ws.receive_json()  # own presence_join
         ws.send_json(
@@ -115,7 +119,13 @@ def test_optimize_respects_locked_anchor(client) -> None:
     current_position = current.index(locked_id)
 
     with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
-        ws.send_json({"v": 1, "type": "hello", "data": {"client_id": "c-1", "name": "小明", "color": "#123456"}})
+        ws.send_json(
+            {
+                "v": 1,
+                "type": "hello",
+                "data": {"client_id": "c-1", "name": "小明", "color": "#123456"},
+            }
+        )
         ws.receive_json()
         ws.receive_json()
         ws.send_json(

@@ -112,3 +112,36 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- -- M10: accounts, sessions, trip history, city recommendation cache ----------------
+
+CREATE TABLE IF NOT EXISTS users (
+    id            TEXT PRIMARY KEY,           -- 8-char base32
+    name          TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,              -- pbkdf2_hmac: salt$hash (hex)
+    created_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token      TEXT PRIMARY KEY,              -- 32-byte hex, cookie value
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TEXT NOT NULL,                 -- ISO timestamp
+    created_at TEXT NOT NULL
+);
+
+-- 历史足迹：按"最近打开过"排序我的行程。created_by 是所有者，visit 是访客。
+CREATE TABLE IF NOT EXISTS trip_visits (
+    trip_id   TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    user_id   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    last_seen TEXT NOT NULL,
+    PRIMARY KEY (trip_id, user_id)
+);
+
+-- 推荐缓存：按 (city, category) 存整页结果，24h TTL——同一城市一天最多烧一次配额。
+CREATE TABLE IF NOT EXISTS city_poi_cache (
+    city       TEXT NOT NULL,
+    category   TEXT NOT NULL,
+    payload    TEXT NOT NULL,                 -- JSON array of PoiOut
+    fetched_at TEXT NOT NULL,
+    PRIMARY KEY (city, category)
+);
