@@ -72,8 +72,8 @@ function openExisting() {
   <div class="home">
     <div class="home__card card">
       <header class="home__head">
-        <h1>TourPlanOpt</h1>
-        <p class="muted">几个人一起把行程排好 —— 同时编辑，自动算路。</p>
+        <h1>把想去的地方，<br />变成走得完的行程</h1>
+        <p class="muted">建一个行程，把链接发给朋友。大家同时往里丢地点，路线我们算。</p>
       </header>
 
       <div class="banner" :class="backend.ok ? 'banner--ok' : 'banner--warn'">
@@ -151,7 +151,9 @@ function openExisting() {
   padding: 26px;
 }
 .home__head h1 {
-  font-size: 22px;
+  font-size: 24px;
+  line-height: 1.25;
+  letter-spacing: 0.01em;
 }
 .home__head p {
   margin: 4px 0 0;

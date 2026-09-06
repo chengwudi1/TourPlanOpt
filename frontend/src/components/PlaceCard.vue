@@ -12,6 +12,8 @@ const props = defineProps<{
   editingBy?: { name: string; color: string } | null
   /** 高德 URI API navigation link into this stop (from the previous one). */
   navHref?: string | null
+  /** Colour of whoever added this place; empty = the theme colour. */
+  creatorColor?: string
 }>()
 
 const emit = defineEmits<{
@@ -86,7 +88,11 @@ function commitStart(value: string) {
     @click="emit('select', place)"
   >
     <span class="place__drag" title="拖动排序" aria-hidden="true">⋮⋮</span>
-    <span class="place__order" :class="{ 'place__order--locked': place.locked }">{{ index + 1 }}</span>
+    <span
+      class="place__order"
+      :class="{ 'place__order--locked': place.locked }"
+      :style="creatorColor ? { background: creatorColor } : undefined"
+    >{{ index + 1 }}</span>
 
     <div class="place__body">
       <div class="place__title">
@@ -179,7 +185,8 @@ function commitStart(value: string) {
   cursor: pointer;
   transition:
     border-color 0.12s ease,
-    box-shadow 0.12s ease;
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
 }
 
 .place--ghost {

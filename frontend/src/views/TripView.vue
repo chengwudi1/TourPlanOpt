@@ -14,7 +14,7 @@ import { useDragSort } from '@/composables/useDragSort'
 import { useSocketStore } from '@/stores/socket'
 import { useTripStore } from '@/stores/trip'
 import type { Place, Poi } from '@/types/domain'
-import { formatDuration } from '@/utils/time'
+import { formatDuration, formatMin } from '@/utils/time'
 
 const props = defineProps<{ tripId: string }>()
 
@@ -27,6 +27,9 @@ const joined = ref(Boolean(sessionStorage.getItem('tourplanopt.joined')))
 
 const selfId = getClientId()
 
+/** Mobile: the two panes become full-screen contexts; this picks which one shows. */
+const mobileView = ref<'list' | 'map'>('list')
+
 /** place id -> who (other than me) is focusing it, for the editing ring. */
 const editorsByPlace = computed(() => {
   const map = new Map<string, { name: string; color: string }>()
@@ -35,6 +38,28 @@ const editorsByPlace = computed(() => {
     map.set(p.focusing_place_id, { name: p.name, color: p.color })
   }
   return map
+})
+
+/** added_by (a display name) -> participant colour, for creator-tinted markers. */
+const creatorColor = computed(() => {
+  const map = new Map<string, string>()
+  for (const p of store.participants) map.set(p.name, p.color)
+  return map
+})
+
+/** One-line day overview: fight the "no clear overview" complaint the category gets. */
+const dayOverview = computed(() => {
+  const list = store.currentPlaces
+  if (!list.length) return null
+  const first = list[0]
+  const last = list[list.length - 1]
+  const scheduled = list.some((p) => p.start_min !== null)
+  const end = (last.start_min ?? 0) + last.duration_min
+  return {
+    count: list.length,
+    start: scheduled ? formatMin(first.start_min ?? 540) : null,
+    end: scheduled ? formatMin(end) : null,
+  }
 })
 
 const placeListEl = ref<HTMLElement | null>(null)
@@ -175,7 +200,7 @@ if (import.meta.env.DEV) {
       </div>
     </div>
 
-    <div v-else class="shell__body">
+    <div v-else class="shell__body" :class="{ 'map-open': mobileView === 'map' }">
       <div class="panel">
         <div class="panel__scroll panel__content">
           <div v-if="store.loading" class="muted tiny">正在加载行程…</div>
@@ -199,6 +224,13 @@ if (import.meta.env.DEV) {
                 ＋
               </button>
             </nav>
+
+            <p v-if="dayOverview" class="daystrip tiny muted">
+              {{ dayOverview.count }} 个地点
+              <template v-if="dayOverview.start">
+                · {{ dayOverview.start }} 出发 · 预计 {{ dayOverview.end }} 结束
+              </template>
+            </p>
 
             <PlaceSearch :city="store.trip.city" @select="onPoiPicked" />
 
@@ -228,6 +260,7 @@ if (import.meta.env.DEV) {
                   :active="place.id === store.selectedPlaceId"
                   :editing-by="editorsByPlace.get(place.id) ?? null"
                   :nav-href="navHref(place, index)"
+                  :creator-color="creatorColor.get(place.added_by) ?? ''"
                   @select="store.selectPlace(place.id)"
                   @remove="onRemove(place.id)"
                   @lock="(p, locked) => store.setPlaceLocked(p.id, locked)"
@@ -246,6 +279,25 @@ if (import.meta.env.DEV) {
         <MapPanel />
       </div>
     </div>
+
+    <nav class="mobile-switch" aria-label="切换视图">
+      <button
+        class="mobile-switch__btn"
+        :class="{ 'mobile-switch__btn--on': mobileView === 'list' }"
+        type="button"
+        @click="mobileView = 'list'"
+      >
+        🧾 行程
+      </button>
+      <button
+        class="mobile-switch__btn"
+        :class="{ 'mobile-switch__btn--on': mobileView === 'map' }"
+        type="button"
+        @click="mobileView = 'map'"
+      >
+        🗺️ 地图
+      </button>
+    </nav>
 
     <JoinGate v-if="!joined" @join="onJoin" />
   </div>
@@ -299,6 +351,14 @@ if (import.meta.env.DEV) {
 .daytab--add {
   padding: 5px 10px;
   color: var(--text-3);
+  border-style: dashed;
+}
+
+.daystrip {
+  padding: 8px 12px;
+  margin: -4px 0 0;
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
 }
 
 .placelist {

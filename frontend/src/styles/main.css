@@ -1,14 +1,16 @@
 :root {
-  --bg: #f6f7f9;
+  --bg: #f6f7f6;
   --surface: #ffffff;
-  --surface-2: #f0f2f5;
-  --border: #e2e5ea;
-  --border-strong: #cdd2da;
-  --text: #1c1f24;
-  --text-2: #5b6472;
-  --text-3: #8b94a3;
-  --accent: #2f6feb;
-  --accent-soft: #e8f0fe;
+  --surface-2: #eef1ef;
+  --border: #e3e7e4;
+  --border-strong: #ccd3cf;
+  --text: #191c1a;
+  --text-2: #5a655f;
+  --text-3: #8a948e;
+  /* 旅程青：地图与指南针的颜色。全站唯一强调色，克制使用。 */
+  --accent: #0e7a6e;
+  --accent-strong: #0a5f56;
+  --accent-soft: #e1f1ee;
   --ok: #1f9d55;
   --ok-soft: #e6f6ec;
   --warn: #b7791f;
@@ -16,10 +18,10 @@
   --danger: #d64545;
   --danger-soft: #fdeaea;
 
-  --radius: 10px;
-  --radius-sm: 6px;
-  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
-  --shadow: 0 4px 16px rgba(16, 24, 40, 0.08);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow-sm: 0 1px 2px rgba(24, 34, 30, 0.06);
+  --shadow: 0 6px 20px rgba(24, 34, 30, 0.09);
   --panel-w: 400px;
   --header-h: 56px;
 
@@ -93,7 +95,10 @@ textarea {
   color: #fff;
 }
 .btn--primary:hover:not(:disabled) {
-  background: #2560d4;
+  background: var(--accent-strong);
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
 }
 .btn--sm {
   padding: 4px 9px;
@@ -227,6 +232,77 @@ textarea {
   position: relative;
   flex: 1;
   min-width: 0;
+}
+
+/* ---------- 手机：上下文切换（行程 / 地图） ---------- */
+/* 390px 实测：桌面双栏在手机上地图宽度为 0、面板溢出。窄屏改为单栏 +
+   底部切换，让两块内容各占全屏。 */
+
+.mobile-switch {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  .shell__body {
+    flex-direction: column;
+  }
+  .panel {
+    flex: 1 1 auto;
+    width: 100%;
+    border-right: 0;
+  }
+  .shell__body.map-open .panel {
+    display: none;
+  }
+  .shell__body:not(.map-open) .map-host {
+    display: none;
+  }
+  .mobile-switch {
+    display: flex;
+    gap: 4px;
+    flex: 0 0 auto;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+  }
+  .mobile-switch__btn {
+    flex: 1;
+    display: inline-flex;
+    justify-content: center;
+    gap: 6px;
+    padding: 9px 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-2);
+    background: var(--surface-2);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+  }
+  .mobile-switch__btn--on {
+    color: var(--accent-strong);
+    background: var(--accent-soft);
+    border-color: var(--accent);
+  }
+  .triphead__status span:last-child,
+  .triphead__status .tiny {
+    display: none;
+  }
+}
+
+/* ---------- 质量底线 ---------- */
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 /* ---------- presence ---------- */

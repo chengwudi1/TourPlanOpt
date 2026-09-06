@@ -387,6 +387,13 @@ export const useTripStore = defineStore('trip', () => {
     presence.value = presence.value.filter((x) => x.client_id !== clientId)
   }
 
+  /** The colour of whoever added a place (matched by display name) -- markers and
+   * order badges wear it, so the map reads as the group's shared record. */
+  function creatorColorOf(addedBy: string): string {
+    if (!addedBy) return ''
+    return participants.value.find((p) => p.name === addedBy)?.color ?? ''
+  }
+
   // -- row helpers ---------------------------------------------------------------------
 
   /** Server rows win on strictly greater rev; equal rev means we already have it. */
@@ -455,6 +462,7 @@ export const useTripStore = defineStore('trip', () => {
     applyReject,
     applyPresence,
     removePresence,
+    creatorColorOf,
     clearPendingOps,
     applyOrder,
   }

@@ -91,9 +91,12 @@ onBeforeUnmount(() => {
   polyline.value = null
 })
 
-function makeNode(index: number, name: string): HTMLElement {
+function makeNode(index: number, name: string, color: string): HTMLElement {
   const node = document.createElement('div')
   node.className = 'tp-marker'
+  // The marker wears the colour of whoever ADDED the place -- the map becomes a
+  // record of the group's contributions, not just geography.
+  if (color) node.style.background = color
   node.title = name
   node.textContent = String(index + 1)
   return node
@@ -120,7 +123,7 @@ function syncMarkers() {
 
     let entry = markers.get(place.id)
     if (!entry) {
-      const el = makeNode(index, place.name)
+      const el = makeNode(index, place.name, store.creatorColorOf(place.added_by))
       el.addEventListener('click', () => store.selectPlace(place.id))
       const marker = new AMap.Marker({
         position: [place.lng, place.lat],
@@ -133,7 +136,7 @@ function syncMarkers() {
       markers.set(place.id, entry)
     } else {
       // Position/order can change via later ops; rebuild content so the number follows.
-      const el = makeNode(index, place.name)
+      const el = makeNode(index, place.name, store.creatorColorOf(place.added_by))
       el.addEventListener('click', () => store.selectPlace(place.id))
       entry.marker.setPosition([place.lng, place.lat])
       entry.marker.setContent(el)
@@ -316,10 +319,24 @@ defineExpose({
   border-radius: 50% 50% 50% 4px;
   box-shadow: var(--shadow-sm);
   cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .tp-marker--sel {
-  background: var(--danger);
-  box-shadow: 0 0 0 4px var(--danger-soft);
+  animation: tp-pop 0.3s ease;
+  transform: scale(1.25);
+  box-shadow: 0 0 0 4px var(--accent-soft), var(--shadow);
+}
+
+@keyframes tp-pop {
+  0% {
+    transform: scale(0.6);
+  }
+  70% {
+    transform: scale(1.35);
+  }
+  100% {
+    transform: scale(1.25);
+  }
 }
 </style>
