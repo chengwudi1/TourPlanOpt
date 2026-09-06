@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 import type { Presence } from '@/types/domain'
 import type { SocketStatus } from '@/stores/socket'
@@ -19,6 +20,14 @@ const emit = defineEmits<{ share: []; rename: [] }>()
 
 const auth = useAuthStore()
 const store = useTripStore()
+const router = useRouter()
+
+/** 返回：站内有上一页就回退（从「我的行程」点进来的常见路径）；
+ * 直接打开分享链接进来的，回落到首页。 */
+function goBack() {
+  if (window.history.state?.back) router.back()
+  else router.push('/')
+}
 
 const sharing = ref(false)
 
@@ -60,6 +69,9 @@ const statusLabel = computed(() => {
 
 <template>
   <header class="triphead">
+    <button class="triphead__back" type="button" title="返回" aria-label="返回首页" @click="goBack">
+      ←
+    </button>
     <strong>TourPlanOpt</strong>
     <span
       class="triphead__title"
@@ -108,6 +120,25 @@ const statusLabel = computed(() => {
   display: flex;
   gap: 10px;
   align-items: center;
+}
+
+.triphead__back {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  font-size: 17px;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.triphead__back:hover {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
 }
 
 .triphead__title {
