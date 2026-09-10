@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 
 import type { Presence } from '@/types/domain'
 import type { SocketStatus } from '@/stores/socket'
+import { ArrowLeft } from '@/components/icons'
 import { useAuthStore } from '@/stores/auth'
 import { useTripStore } from '@/stores/trip'
 import { shareTripCard } from '@/utils/shareCard'
@@ -70,7 +71,7 @@ const statusLabel = computed(() => {
 <template>
   <header class="triphead">
     <button class="triphead__back" type="button" title="返回" aria-label="返回首页" @click="goBack">
-      ←
+      <ArrowLeft :size="16" />
     </button>
     <strong>TourPlanOpt</strong>
     <span

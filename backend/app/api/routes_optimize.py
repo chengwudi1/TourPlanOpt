@@ -21,8 +21,8 @@ from app.amap.client import get_amap_client
 from app.db import repositories
 from app.db.database import get_db
 from app.models.domain import CostModel, MatrixOut, TravelMode
-from app.routing.matrix import build_matrix
-from app.routing.schedule import fill_schedule
+from app.routing.matrix import build_matrix, permute_matrix
+from app.routing.timeline import apply_timeline, trip_defaults
 from app.routing.tsp import optimize_day_order
 
 router = APIRouter(tags=["optimize"])
@@ -30,7 +30,7 @@ router = APIRouter(tags=["optimize"])
 
 class OptimizeRequest(BaseModel):
     cost_model: CostModel = CostModel.HAVERSINE
-    mode: TravelMode = TravelMode.DRIVING
+    mode: TravelMode | None = None
     apply: bool = True
 
 
@@ -46,6 +46,7 @@ class OptimizeResult(BaseModel):
     prev_place_ids: list[str]
     summary: OptimizeSummary
     places: list[dict]
+    end_min: int = 0
     warnings: list[str] = Field(default_factory=list)
     exact: bool = True
 
@@ -95,34 +96,48 @@ async def optimize_day(trip_id: str, day_id: str, body: OptimizeRequest) -> Opti
 
     place_ids = [p.id for p in places]
     nodes = [(p.lng, p.lat) for p in places]
-    durations = {p.id: p.duration_min for p in places}
-    locked_times = {p.id: p.start_min for p in places}
 
     db = get_db()
+    trip_mode, trip_day_start_min = await trip_defaults(db, trip_id)
+    # 没显式指定 mode 就跟随这天/这行程的设置：步行行程不该按车速优化。
+    mode = body.mode or day.travel_mode or trip_mode
+
     matrix = await build_matrix(
         nodes,
-        travel_mode=body.mode,
+        travel_mode=mode,
         cost_model=str(body.cost_model),
         cache=get_distance_cache(),
         client=get_amap_client(),
     )
 
     cost = matrix.seconds
-    locked_flags = [p.locked for p in places]
-    has_time = [p.start_min is not None for p in places]
+    locked_by_id = {p.id: p.locked for p in places}
+    # 锚点只认用户手填的时间。start_min 是排程推导出来的展示值，每次重算都会覆盖，
+    # 把它当锚点等于第一次优化之后所有地点都变成钉子，之后的优化全部空转。
+    timed_by_id = {p.id: p.user_start_min is not None for p in places}
 
-    # 起点锚（day.start_place_id，卡片菜单「设为起点」设置）：先把它旋到当前序列
-    # 首位，优化时leading block 的首节点钉死规则会把它固定为出发地。
-    effective_ids = place_ids
-    start_id = day.start_place_id
-    if start_id in place_ids and place_ids[0] != start_id:
-        idx = place_ids.index(start_id)
-        effective_ids = place_ids[idx:] + place_ids[:idx]
-        locked_flags = locked_flags[idx:] + locked_flags[:idx]
-        has_time = has_time[idx:] + has_time[:idx]
+    # 起点锚（day.start_place_id，卡片菜单「设为起点」设置）：旋到序列首位，优化时
+    # leading block 的首节点钉死规则会把它固定为出发地。终点锚（end_place_id）同理
+    # 旋到末位，但还得多一层：末位本身要成为锚点，否则开放路径会把酒店挪回中间。
+    start_id = day.start_place_id if day.start_place_id in place_ids else None
+    end_id = day.end_place_id if day.end_place_id in place_ids else None
+    if start_id is not None and end_id == start_id:
+        end_id = None  # 同一点两头钉没有意义，按起点处理
 
+    solver_ids = place_ids
+    if start_id is not None and solver_ids[0] != start_id:
+        idx = solver_ids.index(start_id)
+        solver_ids = solver_ids[idx:] + solver_ids[:idx]
+    if end_id is not None and solver_ids[-1] != end_id:
+        solver_ids = [pid for pid in solver_ids if pid != end_id] + [end_id]
+
+    # cost 按节点下标存，重排过的那套 ids 只有配上同样重排的 cost 才对得齐。
+    solver_cost = permute_matrix(cost, place_ids, solver_ids)
     new_ids, _seg_costs, any_exact = optimize_day_order(
-        cost, effective_ids, locked_flags, has_time
+        solver_cost,
+        solver_ids,
+        [locked_by_id[pid] or pid == end_id for pid in solver_ids],
+        [timed_by_id[pid] for pid in solver_ids],
     )
 
     def order_cost(ids: list[str]) -> int:
@@ -137,37 +152,28 @@ async def optimize_day(trip_id: str, day_id: str, body: OptimizeRequest) -> Opti
     before_min = order_cost(place_ids)
     after_min = order_cost(new_ids)
 
-    warnings = list(matrix.warnings)
-
     # Travel legs along the NEW order, position-indexed, in whole minutes.
-    index = {pid: i for i, pid in enumerate(place_ids)}
-    leg_matrix = [
-        [
-            (None if cost[index[a]][index[b]] is None else int(cost[index[a]][index[b]]) // 60)
-            for b in new_ids
-        ]
-        for a in new_ids
+    legs_min = [
+        [None if leg is None else int(leg) // 60 for leg in row]
+        for row in permute_matrix(cost, place_ids, new_ids)
     ]
-    schedule = fill_schedule(
-        new_ids,
-        durations,
-        locked_times,
-        leg_matrix,
-        day_start_min=day.start_min or 540,
-    )
-    warnings.extend(schedule.warnings)
 
     if body.apply:
         reorder = await repositories.reorder_day(db, day_id, new_ids)
         if not reorder.ok:  # pragma: no cover - new_ids is a permutation by construction
             raise HTTPException(status.HTTP_409_CONFLICT, "顺序在优化期间被并发修改，请重试")
-        await repositories.persist_schedule(
-            db,
-            [(s.place_id, s.travel_min_before, s.arrive_min, s.start_min) for s in schedule.places],
-        )
 
-    updated = await repositories.get_db_places(db, day_id)
-    updated_by_id = {p.id: p for p in updated}
+    place_by_id = {p.id: p for p in places}
+    timeline = await apply_timeline(
+        db,
+        day=day,
+        ordered=[place_by_id[pid] for pid in new_ids],
+        legs_min=legs_min,
+        day_start_min=day.start_min or trip_day_start_min,
+        warnings=list(matrix.warnings),
+        exact=any_exact,
+        persist=body.apply,
+    )
 
     result = OptimizeResult(
         day_id=day_id,
@@ -176,12 +182,9 @@ async def optimize_day(trip_id: str, day_id: str, body: OptimizeRequest) -> Opti
         summary=OptimizeSummary(
             before_min=before_min, after_min=after_min, saved_min=max(0, before_min - after_min)
         ),
-        places=[
-            updated_by_id[pid].model_dump(mode="json")
-            for pid in new_ids
-            if pid in updated_by_id
-        ],
-        warnings=warnings,
+        places=[p.model_dump(mode="json") for p in timeline.places],
+        end_min=timeline.end_min,
+        warnings=timeline.warnings,
         exact=any_exact,
     )
 

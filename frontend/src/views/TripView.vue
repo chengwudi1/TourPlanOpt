@@ -2,23 +2,32 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import AmapKeyCheck from '@/components/AmapKeyCheck.vue'
+import DaySection from '@/components/DaySection.vue'
 import JoinGate from '@/components/JoinGate.vue'
 import MapPanel from '@/components/MapPanel.vue'
-import OptimizeBar from '@/components/OptimizeBar.vue'
-import PlaceCard from '@/components/PlaceCard.vue'
 import PlaceSearch from '@/components/PlaceSearch.vue'
 import StashPanel from '@/components/StashPanel.vue'
 import RecommendPanel from '@/components/RecommendPanel.vue'
-import RouteSummary from '@/components/RouteSummary.vue'
 import TripHeader from '@/components/TripHeader.vue'
+import {
+  ArrowRight,
+  BedDouble,
+  Check,
+  ExternalLink,
+  Flag,
+  List,
+  Lock,
+  LockOpen,
+  Map as MapIcon,
+  Plus,
+} from '@/components/icons'
 import { getClientId, setClientName } from '@/composables/useClientIdentity'
-import { useDragSort } from '@/composables/useDragSort'
 import { useAuthStore } from '@/stores/auth'
 import { useSocketStore } from '@/stores/socket'
 import { useTripStore } from '@/stores/trip'
 import type { Place, Poi } from '@/types/domain'
 import { apiFetch } from '@/utils/api'
-import { formatDuration, formatMin } from '@/utils/time'
+import { formatMin } from '@/utils/time'
 
 const props = defineProps<{ tripId: string }>()
 
@@ -35,76 +44,114 @@ const selfId = getClientId()
 /** Mobile: the two panes become full-screen contexts; this picks which one shows. */
 const mobileView = ref<'list' | 'map'>('list')
 
-/** place id -> who (other than me) is focusing it, for the editing ring. */
-const editorsByPlace = computed(() => {
-  const map = new Map<string, { name: string; color: string }>()
-  for (const p of store.presence) {
-    if (p.client_id === selfId || !p.focusing_place_id) continue
-    map.set(p.focusing_place_id, { name: p.name, color: p.color })
+// -- 展开态（M15b）---------------------------------------------------------------------
+// 选中与展开是两件事：点天头选中这一天（并展开它），点箭头只折叠/展开。折叠是本地
+// 偏好，不进协议；记忆按行程分键，重新打开还是上次看到的样子。
+
+const expandKey = `tourplanopt.day-expanded-${props.tripId}`
+const expandedIds = ref<Set<string>>(new Set())
+/** 用户亲手折叠过的天：排程提醒不再强行把它展开。 */
+const touchedDays = new Set<string>()
+let knownDays = new Set<string>()
+
+function persistExpanded() {
+  try {
+    localStorage.setItem(expandKey, JSON.stringify([...expandedIds.value]))
+  } catch {
+    // 无痕模式下 localStorage 会抛；丢掉折叠偏好不影响功能。
   }
-  return map
-})
+}
 
-/** added_by (a display name) -> participant colour, for creator-tinted markers. */
-const creatorColor = computed(() => {
-  const map = new Map<string, string>()
-  for (const p of store.participants) map.set(p.name, p.color)
-  return map
-})
+function setExpanded(dayId: string, on: boolean) {
+  if (expandedIds.value.has(dayId) === on) return
+  const next = new Set(expandedIds.value)
+  if (on) next.add(dayId)
+  else next.delete(dayId)
+  expandedIds.value = next
+  persistExpanded()
+}
 
-/** One-line day overview: fight the "no clear overview" complaint the category gets. */
-const dayOverview = computed(() => {
-  const list = store.currentPlaces
-  if (!list.length) return null
-  const first = list[0]
-  const last = list[list.length - 1]
-  const scheduled = list.some((p) => p.start_min !== null)
-  const end = (last.start_min ?? 0) + last.duration_min
-  return {
-    count: list.length,
-    start: scheduled ? formatMin(first.start_min ?? 540) : null,
-    end: scheduled ? formatMin(end) : null,
+function toggleDay(dayId: string) {
+  touchedDays.add(dayId)
+  setExpanded(dayId, !expandedIds.value.has(dayId))
+}
+
+function selectDay(dayId: string) {
+  store.currentDayId = dayId
+  setExpanded(dayId, true)
+}
+
+function initExpand() {
+  const ids = store.days.map((d) => d.id)
+  knownDays = new Set(ids)
+  let saved: unknown = null
+  try {
+    saved = JSON.parse(localStorage.getItem(expandKey) ?? 'null')
+  } catch {
+    saved = null
   }
-})
+  const next = new Set(
+    Array.isArray(saved) ? saved.filter((id): id is string => ids.includes(id)) : [],
+  )
+  if (!Array.isArray(saved) && store.currentDayId) next.add(store.currentDayId)
+  expandedIds.value = next
+}
 
-const placeListEl = ref<HTMLElement | null>(null)
-useDragSort(
-  placeListEl,
-  (orderedIds) => {
-    if (store.currentDayId) store.reorderDay(store.currentDayId, orderedIds)
-  },
-  (dragging) => {
-    if (store.currentDayId) socket.sendPresence(store.currentDayId, store.selectedPlaceId, dragging ? store.currentDayId : null)
-  },
-)
+function removeDay(dayId: string) {
+  if (window.confirm('删除这个（空的）天？')) store.deleteDay(dayId)
+}
 
-const AMAP_URI_MODE = { driving: 'car', walking: 'walk', straight: 'car' } as const
+function renameDay(dayId: string) {
+  const day = store.days.find((d) => d.id === dayId)
+  if (!day) return
+  const name = window.prompt('这一天的名称（留空恢复默认）：', day.title)
+  if (name === null) return
+  store.updateDay(dayId, { title: name.trim() })
+}
 
-const modeIcon = computed(() => {
-  switch (store.trip?.travel_mode) {
-    case 'walking':
-      return '🚶'
-    case 'straight':
-      return '📏'
-    default:
-      return '🚗'
+function renameTrip(current: string) {
+  const name = window.prompt('行程名称：', current)
+  if (name === null) return
+  store.updateTripFields({ title: name.trim() })
+}
+
+/** 文字版行程：贴群聊用。 */
+const copied = ref(false)
+
+async function copyShareLink() {
+  const url = `${window.location.origin}/trip/${props.tripId}`
+  try {
+    await navigator.clipboard.writeText(url)
+    copied.value = true
+    setTimeout(() => (copied.value = false), 1500)
+  } catch {
+    window.prompt('复制下面的链接分享给朋友：', url)
   }
-})
+}
 
-/** 高德 URI API navigation link: from the previous place to this one. The URI API
- * allows at most ONE via waypoint, so a whole-day handoff is only built for exactly
- * 3 stops (see RouteSummary); per-leg links are always valid. */
-function navHref(place: Place, index: number): string {
-  const list = store.currentPlaces
-  const mode = AMAP_URI_MODE[store.trip?.travel_mode ?? 'driving']
-  const common = `mode=${mode}&src=tourplanopt&coordinate=gaode&callnative=0`
-  const to = `${place.lng},${place.lat},${encodeURIComponent(place.name)}`
-  if (index === 0) {
-    return `https://uri.amap.com/navigation?to=${to}&${common}`
+async function copyTextItinerary() {
+  const lines: string[] = []
+  const title = store.trip?.title || '未命名行程'
+  lines.push(`📍 ${title}${store.trip?.city ? `（${store.trip.city}）` : ''}`)
+  for (const day of store.days) {
+    const list = store.places
+      .filter((p) => p.day_id === day.id)
+      .sort((a, b) => a.sort_index - b.sort_index)
+    lines.push('')
+    lines.push(`DAY ${day.day_index + 1}${day.title ? ` · ${day.title}` : ''}`)
+    for (const place of list) {
+      const time = place.start_min !== null ? `${formatMin(place.start_min)} ` : ''
+      lines.push(`${time}${place.name}${place.address ? `（${place.address}）` : ''}`)
+    }
   }
-  const prev = list[index - 1]
-  const from = `${prev.lng},${prev.lat},${encodeURIComponent(prev.name)}`
-  return `https://uri.amap.com/navigation?from=${from}&to=${to}&${common}`
+  const text = lines.join('\n')
+  try {
+    await navigator.clipboard.writeText(text)
+    copied.value = true
+    setTimeout(() => (copied.value = false), 1500)
+  } catch {
+    window.prompt('复制文字版行程：', text)
+  }
 }
 
 function onJoin() {
@@ -130,6 +177,7 @@ onMounted(async () => {
     setClientName(auth.user.name)
     sessionStorage.setItem('tourplanopt.joined', '1')
   }
+  initExpand()
   if (joined.value) socket.connect(props.tripId)
 })
 
@@ -140,7 +188,33 @@ onBeforeUnmount(() => {
 // Switching days is a presence change too, not just selection changes.
 watch(
   () => store.currentDayId,
-  (dayId) => socket.sendPresence(dayId, store.selectedPlaceId),
+  (dayId) => {
+    socket.sendPresence(dayId, store.selectedPlaceId)
+    if (dayId) setExpanded(dayId, true)
+  },
+)
+
+/** 提醒藏在折叠的天里等于没有提醒：有 warnings 且用户没亲手折叠过的天自动展开。 */
+watch(
+  () => store.timelines,
+  () => {
+    for (const [dayId, t] of Object.entries(store.timelines)) {
+      if (t.warnings.length && !touchedDays.has(dayId)) setExpanded(dayId, true)
+    }
+  },
+)
+
+/** 天增减：清理已消失的展开项，新出现的天默认展开（否则像行程凭空少了几天）。 */
+watch(
+  () => store.days.map((d) => d.id).join(','),
+  () => {
+    const alive = new Set(store.days.map((d) => d.id))
+    const next = new Set([...expandedIds.value].filter((id) => alive.has(id)))
+    for (const id of alive) if (!knownDays.has(id)) next.add(id)
+    knownDays = alive
+    expandedIds.value = next
+    persistExpanded()
+  },
 )
 
 async function onPoiPicked(poi: Poi) {
@@ -151,12 +225,8 @@ async function onPoiPicked(poi: Poi) {
     lat: poi.lat,
     address: poi.address,
     amap_poi_id: poi.id,
+    photo_url: poi.photo,
   })
-}
-
-function onRemove(placeId: string) {
-  store.opError = null
-  store.deletePlace(placeId)
 }
 
 function onStash(poi: Poi) {
@@ -167,10 +237,11 @@ function onStash(poi: Poi) {
     lat: poi.lat,
     address: poi.address,
     amap_poi_id: poi.id,
+    photo_url: poi.photo,
   })
 }
 
-/** 地图选点：右键/长按地图某处 → regeo 预填名称 → 排进今天或存入想去清单。 */
+/** 地图选点：右键/长按地图某处 → regeo 预填名称 → 排进选中的天或存入想去清单。 */
 const mapPick = ref<{
   lng: number
   lat: number
@@ -221,74 +292,6 @@ function stashMapPick() {
   mapPick.value = null
 }
 
-/** 删除空的天：有内容的天服务端会拒绝，这里只对空天显示 ×。 */
-function dayIsEmpty(dayId: string): boolean {
-  return !store.places.some((p) => p.day_id === dayId)
-}
-
-function removeDay(dayId: string, event: MouseEvent) {
-  event.stopPropagation()
-  if (window.confirm('删除这个（空的）天？')) store.deleteDay(dayId)
-}
-
-/** 文字版行程：贴群聊用。 */
-async function copyTextItinerary() {
-  const lines: string[] = []
-  const title = store.trip?.title || '未命名行程'
-  lines.push(`📍 ${title}${store.trip?.city ? `（${store.trip.city}）` : ''}`)
-  for (const day of store.days) {
-    const list = store.places
-      .filter((p) => p.day_id === day.id)
-      .sort((a, b) => a.sort_index - b.sort_index)
-    lines.push('')
-    lines.push(`DAY ${day.day_index + 1}${day.title ? ` · ${day.title}` : ''}`)
-    for (const place of list) {
-      const time =
-        place.start_min !== null
-          ? `${String(Math.floor((place.start_min % 1440) / 60)).padStart(2, '0')}:${String(place.start_min % 60).padStart(2, '0')} `
-          : ''
-      lines.push(`${time}${place.name}${place.address ? `（${place.address}）` : ''}`)
-    }
-  }
-  const text = lines.join('\n')
-  try {
-    await navigator.clipboard.writeText(text)
-    copied.value = true
-    setTimeout(() => (copied.value = false), 1500)
-  } catch {
-    window.prompt('复制文字版行程：', text)
-  }
-}
-
-function onPatch(place: Place, patch: { duration_min?: number; note?: string; start_min?: number | null }) {
-  store.updatePlace(place.id, patch)
-}
-
-function renameDay(dayId: string, current: string) {
-  const name = window.prompt('这一天的名称（留空恢复默认）：', current)
-  if (name === null) return
-  store.updateDay(dayId, { title: name.trim() })
-}
-
-function renameTrip(current: string) {
-  const name = window.prompt('行程名称：', current)
-  if (name === null) return
-  store.updateTripFields({ title: name.trim() })
-}
-
-async function copyShareLink() {
-  const url = `${window.location.origin}/trip/${props.tripId}`
-  try {
-    await navigator.clipboard.writeText(url)
-    copied.value = true
-    setTimeout(() => (copied.value = false), 1500)
-  } catch {
-    window.prompt('复制下面的链接分享给朋友：', url)
-  }
-}
-
-const copied = ref(false)
-
 /** 卡片操作菜单（右键/长按/⋯呼出）。 */
 const cardMenu = ref<{ place: Place; x: number; y: number } | null>(null)
 
@@ -303,6 +306,13 @@ const cardMenuPos = computed(() => {
     left: `${Math.min(cardMenu.value.x, window.innerWidth - 190)}px`,
     top: `${Math.min(cardMenu.value.y, window.innerHeight - 150)}px`,
   }
+})
+
+/** 菜单里地点所在的天：卡片可以在非选中的天上，起点/终点只能落在它自己那一天。 */
+const menuDay = computed(() => {
+  const menu = cardMenu.value
+  if (!menu) return null
+  return store.days.find((d) => d.id === menu.place.day_id) ?? null
 })
 
 /** 卡片菜单里的「移到其他天」候选（地点当前所在的天除外）。 */
@@ -370,52 +380,19 @@ if (import.meta.env.DEV) {
         <div class="panel__scroll panel__content">
           <div v-if="store.loading" class="skeletongroup" aria-label="正在加载行程">
             <div class="skeleton" style="height: 30px" />
-            <div class="skeleton" style="height: 44px" />
+            <div class="skeleton" style="height: 46px" />
             <div class="skeleton" style="height: 74px" />
             <div class="skeleton" style="height: 74px; width: 85%" />
             <div class="skeleton" style="height: 74px; width: 70%" />
           </div>
 
           <template v-else-if="store.trip">
-            <nav class="daytabs">
-              <button
-                v-for="day in store.days"
-                :key="day.id"
-                class="daytab"
-                :class="{ 'daytab--on': day.id === store.currentDayId }"
-                type="button"
-                :title="day.id === store.currentDayId ? '双击重命名这一天' : ''"
-                @click="store.currentDayId = day.id"
-                @dblclick="renameDay(day.id, day.title)"
-              >
-                D{{ day.day_index + 1 }}
-                <span v-if="day.title" class="daytab__title">{{ day.title }}</span>
-                <span
-                  v-if="dayIsEmpty(day.id) && store.days.length > 1"
-                  class="daytab__del"
-                  title="删除这个空的天"
-                  @click.stop="removeDay(day.id, $event)"
-                  @dblclick.stop
-                >
-                  ×
-                </span>
-              </button>
-              <button class="daytab daytab--add" type="button" title="加一天" @click="store.addDay()">
-                ＋
-              </button>
-            </nav>
-
-            <p v-if="dayOverview" class="daystrip tiny muted">
-              <span>
-                {{ dayOverview.count }} 个地点
-                <template v-if="dayOverview.start">
-                  · {{ dayOverview.start }} 出发 · 预计 {{ dayOverview.end }} 结束
-                </template>
-              </span>
-              <button class="daystrip__copy" type="button" @click="copyTextItinerary">
-                {{ copied ? '已复制 ✓' : '复制文字版' }}
-              </button>
-            </p>
+            <div v-if="store.opError" class="banner banner--warn">
+              <div class="banner__body">
+                <div class="banner__title">{{ store.opError.message }}</div>
+                <div v-if="store.opError.hint" class="banner__hint tiny">{{ store.opError.hint }}</div>
+              </div>
+            </div>
 
             <PlaceSearch
               :city="store.trip.city"
@@ -427,47 +404,7 @@ if (import.meta.env.DEV) {
 
             <StashPanel />
 
-            <OptimizeBar />
-
-            <RouteSummary />
-
-            <div v-if="store.opError" class="banner banner--warn">
-              <div class="banner__body">
-                <div class="banner__title">{{ store.opError.message }}</div>
-                <div v-if="store.opError.hint" class="banner__hint tiny">{{ store.opError.hint }}</div>
-              </div>
-            </div>
-
-            <div v-if="store.remoteDragger" class="draghint tiny" :style="{ borderColor: store.remoteDragger.color }">
-              {{ store.remoteDragger.name }} 正在调整顺序…
-            </div>
-
-            <ul v-if="store.currentPlaces.length" ref="placeListEl" class="placelist" :class="{ 'placelist--locked': !!store.remoteDragger }">
-              <template v-for="(place, index) in store.currentPlaces" :key="place.id">
-                <li v-if="index > 0" class="leg">
-                  <span class="leg__icon">{{ modeIcon }}</span>
-                  <span v-if="place.travel_min_before !== null" class="tiny muted">
-                    约 {{ formatDuration(place.travel_min_before) }}
-                  </span>
-                  <span v-else class="tiny muted">路程未知</span>
-                </li>
-                <PlaceCard
-                  :place="place"
-                  :index="index"
-                  :active="place.id === store.selectedPlaceId"
-                  :editing-by="editorsByPlace.get(place.id) ?? null"
-                  :nav-href="navHref(place, index)"
-                  :creator-color="creatorColor.get(place.added_by) ?? ''"
-                  @select="store.selectPlace(place.id)"
-                  @remove="onRemove(place.id)"
-                  @lock="(p, locked) => store.setPlaceLocked(p.id, locked)"
-                  @patch="onPatch"
-                  @menu="(p, pos) => (cardMenu = { place: p, ...pos })"
-                />
-              </template>
-            </ul>
-
-            <div v-else class="empty">
+            <div v-if="!store.places.length" class="empty">
               <svg class="empty__art" viewBox="0 0 200 96" aria-hidden="true">
                 <path
                   d="M18 74 C 52 74, 58 30, 96 30 S 148 66, 182 66"
@@ -490,6 +427,29 @@ if (import.meta.env.DEV) {
                 还没有地点。在上面搜索一个（比如「外滩」），或打开「发现」挑一个推荐。
               </p>
             </div>
+
+            <div v-else class="daylist">
+              <DaySection
+                v-for="day in store.days"
+                :key="day.id"
+                :day="day"
+                :expanded="expandedIds.has(day.id)"
+                @select="selectDay(day.id)"
+                @toggle="toggleDay(day.id)"
+                @rename="renameDay(day.id)"
+                @remove="removeDay(day.id)"
+                @menu="(p, pos) => (cardMenu = { place: p, ...pos })"
+              />
+              <div class="daylist__foot">
+                <button class="btn btn--sm btn--ghost" type="button" @click="store.addDay()">
+                  <Plus class="ic" :size="13" /> 加一天
+                </button>
+                <button class="btn btn--sm btn--ghost" type="button" @click="copyTextItinerary">
+                  <Check v-if="copied" class="ic" :size="12" />
+                  {{ copied ? '已复制' : '复制文字版' }}
+                </button>
+              </div>
+            </div>
           </template>
         </div>
       </div>
@@ -505,7 +465,7 @@ if (import.meta.env.DEV) {
         type="button"
         @click="mobileView = 'list'"
       >
-        🧾 行程
+        <List class="ic" :size="15" /> 行程
       </button>
       <button
         class="mobile-switch__btn"
@@ -513,7 +473,7 @@ if (import.meta.env.DEV) {
         type="button"
         @click="mobileView = 'map'"
       >
-        🗺️ 地图
+        <MapIcon class="ic" :size="15" /> 地图
       </button>
     </nav>
 
@@ -539,22 +499,32 @@ if (import.meta.env.DEV) {
         :href="`https://uri.amap.com/marker?position=${cardMenu.place.lng},${cardMenu.place.lat}&name=${encodeURIComponent(cardMenu.place.name)}`"
         @click="closeCardMenu"
       >
-        在高德中查看 ↗
+        <ExternalLink class="ic" :size="13" /> 在高德中查看
       </a>
       <button
         class="cardmenu__item"
         type="button"
         @click="store.setPlaceLocked(cardMenu.place.id, !cardMenu.place.locked); closeCardMenu()"
       >
-        {{ cardMenu.place.locked ? '📍 取消锁定' : '📍 锁定位置' }}
+        <LockOpen v-if="cardMenu.place.locked" class="ic" :size="13" />
+        <Lock v-else class="ic" :size="13" />
+        {{ cardMenu.place.locked ? '取消锁定' : '锁定位置' }}
       </button>
       <button
-        v-if="store.currentDayId && store.currentDay?.start_place_id !== cardMenu.place.id"
+        v-if="menuDay && menuDay.id && menuDay.start_place_id !== cardMenu.place.id"
         class="cardmenu__item"
         type="button"
-        @click="store.setStartPlace(store.currentDayId, cardMenu.place.id); closeCardMenu()"
+        @click="store.setStartPlace(menuDay.id, cardMenu.place.id); closeCardMenu()"
       >
-        🏁 设为起点
+        <Flag class="ic" :size="13" /> 设为起点
+      </button>
+      <button
+        v-if="menuDay && menuDay.id && menuDay.end_place_id !== cardMenu.place.id"
+        class="cardmenu__item"
+        type="button"
+        @click="store.setEndPlace(menuDay.id, cardMenu.place.id); closeCardMenu()"
+      >
+        <BedDouble class="ic" :size="13" /> 设为终点
       </button>
       <button
         v-for="d in cardMenuOtherDays"
@@ -563,7 +533,7 @@ if (import.meta.env.DEV) {
         type="button"
         @click="store.movePlaceToDay(cardMenu.place.id, d.id); closeCardMenu()"
       >
-        ➜ 移到 D{{ d.day_index + 1 }}{{ d.title ? ` · ${d.title}` : '' }}
+        <ArrowRight class="ic" :size="13" /> 移到 D{{ d.day_index + 1 }}{{ d.title ? ` · ${d.title}` : '' }}
       </button>
     </div>
 
@@ -584,7 +554,7 @@ if (import.meta.env.DEV) {
           :disabled="!mapPick.name.trim()"
           @click="confirmMapPick"
         >
-          ➜ 排进今天
+          <ArrowRight class="ic" :size="13" /> 排进选中的天
         </button>
         <button
           class="btn btn--sm btn--ghost"
@@ -592,7 +562,7 @@ if (import.meta.env.DEV) {
           :disabled="!mapPick.name.trim()"
           @click="stashMapPick"
         >
-          🧺 存入想去
+          存入想去
         </button>
         <button class="btn btn--sm btn--ghost" type="button" @click="mapPick = null">取消</button>
       </div>
@@ -603,14 +573,19 @@ if (import.meta.env.DEV) {
 <style scoped>
 .cardmenu {
   position: fixed;
-  z-index: 60;
+  z-index: var(--z-bar);
   display: flex;
   flex-direction: column;
   min-width: 170px;
   padding: 4px;
+  box-shadow: var(--shadow-lg);
+  animation: cardmenu-in var(--dur-slow) var(--ease-pop);
 }
 
 .cardmenu__item {
+  display: flex;
+  gap: 6px;
+  align-items: center;
   padding: 8px 10px;
   font-size: 13px;
   color: var(--text);
@@ -628,7 +603,7 @@ if (import.meta.env.DEV) {
 
 .mappick {
   position: fixed;
-  z-index: 70;
+  z-index: var(--z-overlay);
   left: 50%;
   bottom: 88px;
   display: flex;
@@ -637,7 +612,8 @@ if (import.meta.env.DEV) {
   width: min(320px, calc(100vw - 32px));
   padding: 14px 16px;
   transform: translateX(-50%);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-pop);
+  animation: mappick-in var(--dur-slow) var(--ease-pop);
 }
 
 .mappick__name {
@@ -658,117 +634,39 @@ if (import.meta.env.DEV) {
   flex-wrap: wrap;
 }
 
+@keyframes cardmenu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* 只有 from 帧：动画结束后回到元素自身的样式，所以 from 里必须重复 translateX(-50%)，
+   否则弹层会在弹出的瞬间横跳一次。 */
+@keyframes mappick-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(10px) scale(0.97);
+  }
+}
+
 .panel__content {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.leg {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  padding: 2px 0 2px 14px;
-  list-style: none;
-}
-
-.leg__icon {
-  font-size: 12px;
-}
-
-.daytabs {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.daytab {
-  padding: 5px 12px;
-  font-size: 13px;
-  color: var(--text-2);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  cursor: pointer;
-}
-
-.daytab--on {
-  color: #fff;
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.daytab__title {
-  margin-left: 4px;
-}
-
-.daytab--add {
-  padding: 5px 10px;
-  color: var(--text-3);
-  border-style: dashed;
-}
-
-.daystrip {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  margin: -4px 0 0;
-  background: var(--accent-soft);
-  border-radius: var(--radius-sm);
-}
-
-.daystrip__copy {
-  padding: 2px 8px;
-  font-size: 12px;
-  color: var(--accent-strong);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  cursor: pointer;
-}
-
-.daytab__del {
-  margin-left: 5px;
-  padding: 0 4px;
-  font-size: 13px;
-  color: var(--text-3);
-  border-radius: 50%;
-}
-
-.daytab__del:hover {
-  color: var(--danger);
-  background: var(--danger-soft);
-}
-
-.placelist {
+.daylist {
   display: flex;
   flex-direction: column;
+  gap: 10px;
+}
+
+.daylist__foot {
+  display: flex;
   gap: 8px;
-  padding: 0;
-  margin: 0;
-  list-style: none;
-}
-
-.placelist--locked {
-  opacity: 0.6;
-  pointer-events: none;
-}
-
-.draghint {
-  padding: 6px 10px;
-  border: 1px dashed var(--border-strong);
-  border-left: 3px solid var(--accent);
-  border-radius: var(--radius-sm);
-  animation: draghint-in 0.2s ease;
-}
-
-@keyframes draghint-in {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
+  align-items: center;
+  padding: 2px 2px 6px;
 }
 
 .skeletongroup {

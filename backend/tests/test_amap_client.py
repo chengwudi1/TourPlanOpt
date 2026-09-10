@@ -7,6 +7,7 @@ must distinguish "retry this" from "retrying hides the real problem".
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from typing import Any
 
@@ -14,7 +15,7 @@ import httpx
 import pytest
 
 from app.amap import client as client_mod
-from app.amap.client import AmapWebClient, DistanceResult
+from app.amap.client import AmapWebClient, DistanceResult, _first_photo_url, _prefer_https
 from app.amap.errors import (
     AmapAuthError,
     AmapErrorKind,
@@ -273,3 +274,148 @@ async def test_rate_limit_exhausts_retries_and_raises() -> None:
         await client.distance([ORIGIN], DEST, mode=1)
     assert calls == client_mod.MAX_ATTEMPTS
     assert excinfo.value.retryable is True
+
+
+# -- M13 地点照片 --------------------------------------------------------------------
+#
+# The load-bearing property: a photo is decoration. Every failure mode below must
+# degrade to "" rather than break "add a place".
+
+
+async def test_place_text_requests_extensions_all_and_yields_photo() -> None:
+    """photos only come back with extensions=all, so the existing search call carries
+    them for free -- no extra request, no extra quota."""
+    seen: dict[str, str] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.update(dict(req.url.params))
+        return ok_body(
+            pois=[
+                {
+                    "id": "B001",
+                    "name": "外滩",
+                    "address": "中山东一路",
+                    "location": "121.4900,31.2400",
+                    "cityname": "上海市",
+                    "adname": "黄浦区",
+                    # Amap's first entry is often a placeholder with url: [].
+                    "photos": [{"title": [], "url": []}, {"title": "夜景", "url": "https://a.com/1.jpg"}],
+                }
+            ]
+        )
+
+    page = await make_client(handler).place_text("外滩", "上海")
+    assert seen["extensions"] == "all"
+    assert page.pois[0].photo == "https://a.com/1.jpg"
+
+
+async def test_inputtips_carries_no_photo() -> None:
+    """Which is exactly why adding from the search box backfills via /place/detail."""
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return ok_body(
+            tips=[{"id": "B1", "name": "外滩", "location": "121.4900,31.2400", "address": "路"}]
+        )
+
+    tips = await make_client(handler).inputtips("外滩")
+    assert tips[0].photo == ""
+
+
+async def test_photo_for_poi_uses_the_detail_endpoint() -> None:
+    seen: dict[str, str] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.update(dict(req.url.params))
+        return ok_body(pois=[{"id": "B001", "photos": [{"url": "https://a.com/2.jpg"}]}])
+
+    url = await make_client(handler).photo_for_poi("B001")
+    assert url == "https://a.com/2.jpg"
+    assert seen == {"id": "B001", "extensions": "all", "key": "test-web-key", "output": "json"}
+
+
+async def test_photo_for_poi_returns_empty_when_poi_has_no_photos() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return ok_body(pois=[{"id": "B001", "name": "某个没图的地点"}])
+
+    assert await make_client(handler).photo_for_poi("B001") == ""
+
+
+@pytest.mark.parametrize(
+    "nodes",
+    [
+        [],
+        [{}],
+        [{"photos": []}],
+        [{"photos": "不是列表"}],
+        ["不是字典"],
+        [{"photos": [{"url": "ftp://不合法/1.jpg"}]}],
+        [{"photos": [None, {"url": None}, {"url": "   "}]}],
+    ],
+)
+def test_first_photo_url_degrades_to_empty_on_any_missing_shape(nodes: list[Any]) -> None:
+    assert _first_photo_url(nodes) == ""
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        # 高德自有图床：同一个 showpic id 两种协议都实测 200，升级协议是免费的。
+        # 页面一旦走 https，http 缩略图会被浏览器当混合内容直接拦掉。
+        (
+            "http://store.is.autonavi.com/showpic/abc123?type=pic",
+            "https://store.is.autonavi.com/showpic/abc123?type=pic",
+        ),
+        ("https://store.is.autonavi.com/showpic/abc123", "https://store.is.autonavi.com/showpic/abc123"),
+        # 其他类别的 photos[].url 可能指向第三方站点，不保证支持 https，不能乱升。
+        ("http://img.third-party.com/a.jpg", "http://img.third-party.com/a.jpg"),
+        ("http://store.is.autonavi.com.evil.example/a.jpg", "http://store.is.autonavi.com.evil.example/a.jpg"),
+    ],
+)
+def test_prefer_https_upgrades_only_amap_own_image_host(url: str, expected: str) -> None:
+    assert _prefer_https(url) == expected
+
+
+def test_first_photo_url_upgrades_scheme() -> None:
+    nodes = [{"photos": [{"url": "http://store.is.autonavi.com/showpic/x.jpg"}]}]
+    assert _first_photo_url(nodes) == "https://store.is.autonavi.com/showpic/x.jpg"
+
+
+async def test_fetch_photo_best_effort_swallows_missing_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "amap_web_key", "")
+    monkeypatch.setattr(client_mod, "get_amap_client", lambda: make_client(lambda req: ok_body()))
+    assert await client_mod.fetch_photo_best_effort("B001") == ""
+
+
+async def test_fetch_photo_best_effort_swallows_transport_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("boom")
+
+    monkeypatch.setattr(client_mod, "get_amap_client", lambda: make_client(handler))
+    assert await client_mod.fetch_photo_best_effort("B001") == ""
+
+
+async def test_fetch_photo_best_effort_swallows_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Slow:
+        async def photo_for_poi(self, poi_id: str) -> str:
+            await asyncio.sleep(0.2)
+            return "https://a.com/late.jpg"
+
+    monkeypatch.setattr(client_mod, "get_amap_client", lambda: _Slow())
+    monkeypatch.setattr(client_mod, "PHOTO_TIMEOUT_S", 0.01)
+    assert await client_mod.fetch_photo_best_effort("B001") == ""
+
+
+async def test_fetch_photo_best_effort_returns_url_on_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return ok_body(pois=[{"id": "B001", "photos": [{"url": "https://a.com/3.jpg"}]}])
+
+    monkeypatch.setattr(client_mod, "get_amap_client", lambda: make_client(handler))
+    assert await client_mod.fetch_photo_best_effort("B001") == "https://a.com/3.jpg"

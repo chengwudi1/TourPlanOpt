@@ -306,7 +306,7 @@ function openExisting() {
   place-items: center;
   width: 34px;
   height: 34px;
-  color: #fff;
+  color: var(--accent-ink);
   font-weight: 700;
   background: var(--accent);
   border-radius: 50%;

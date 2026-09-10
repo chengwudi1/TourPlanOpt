@@ -59,15 +59,18 @@ CREATE TABLE IF NOT EXISTS places (
     lng               REAL NOT NULL,              -- GCJ-02
     lat               REAL NOT NULL,              -- GCJ-02
     duration_min      INTEGER NOT NULL DEFAULT 60,
-    start_min         INTEGER,                    -- derived, but persisted so the timeline
-    arrive_min        INTEGER,                    -- survives a restart without recomputing
-    travel_min_before INTEGER,                    -- (which would cost Amap quota)
-    locked            INTEGER NOT NULL DEFAULT 0, -- 1 = position anchor; also set when the
-                                                  -- user hand-edits start_min
+    user_start_min    INTEGER,                    -- 用户自己填的时间：排程唯一当作"固定"的
+                                                  -- 时间，NULL = 从没设过
+    start_min         INTEGER,                    -- 全部由排程推导，只为了重启后不必重算
+    arrive_min        INTEGER,                    -- （重算会花高德配额）而落库
+    travel_min_before INTEGER,
+    locked            INTEGER NOT NULL DEFAULT 0, -- 1 = 位置锚点；用户手填时间时一并置 1
     status            TEXT NOT NULL DEFAULT 'pending'
                       CHECK (status IN ('confirmed', 'pending')),
     note              TEXT NOT NULL DEFAULT '',
     added_by          TEXT NOT NULL DEFAULT '',   -- client_id of whoever added it
+    photo_url         TEXT NOT NULL DEFAULT '',   -- 首张实拍图（高德 CDN 直链，加地点时随
+                                                  -- 搜索/详情拿，落库后零配额复用）
     rev               INTEGER NOT NULL DEFAULT 1, -- convergence stamp, NOT a rejecting CAS
     created_at        TEXT NOT NULL,
     updated_at        TEXT NOT NULL,
@@ -157,6 +160,7 @@ CREATE TABLE IF NOT EXISTS stash (
     lat         REAL NOT NULL,
     amap_poi_id TEXT NOT NULL DEFAULT '',
     added_by    TEXT NOT NULL DEFAULT '',
+    photo_url   TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_stash_trip ON stash(trip_id, created_at);

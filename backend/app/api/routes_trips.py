@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request, status
 
+from app.amap.client import fetch_photo_best_effort
 from app.auth.routes_auth import current_user
 from app.db.database import get_db
 from app.db.repositories import (
@@ -88,6 +89,11 @@ async def register_participant(trip_id: str, body: ParticipantUpsert) -> Partici
     status_code=status.HTTP_201_CREATED,
 )
 async def add_place_endpoint(trip_id: str, day_id: str, body: PlaceCreate) -> PlaceOut:
+    # 与 WS 路径同一套照片补抓：搜索联想不带图，落库前用 POI id 换一张。
+    if not body.photo_url and body.amap_poi_id:
+        body = body.model_copy(
+            update={"photo_url": await fetch_photo_best_effort(body.amap_poi_id)}
+        )
     place = await add_place(get_db(), day_id, body)
     if place is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"第 {day_id} 天不存在")

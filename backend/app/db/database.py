@@ -68,7 +68,27 @@ class Database:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(trips)").fetchall()}
         if "created_by" not in columns:
             conn.execute("ALTER TABLE trips ADD COLUMN created_by TEXT")
-
+        # M13 地点照片：places/stash 各加一列实拍图直链（老库补列，新库 schema 已含）。
+        for table in ("places", "stash"):
+            cols = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            if "photo_url" not in cols:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN photo_url TEXT NOT NULL DEFAULT ''")
+            # 高德自有图床两种协议实测同源同图，直接升 https；第三方 http 链不动（不保证有
+            # https）。幂等，所以每次启动都跑一遍把 _prefer_https 之前写下的老行补齐。
+            conn.execute(
+                f"UPDATE {table} SET photo_url = 'https://' || substr(photo_url, 8) "
+                "WHERE photo_url LIKE 'http://store.is.autonavi.com/%'"
+            )
+        # M14 时间轴：start_min 从此只存推导值，每次重算都覆盖；用户手填的时间另存
+        # user_start_min，只有它会被排程当作固定时刻。老库里两者混在一列，无法区分，
+        # 按 locked=1（手填时间时一起置上的锚点）回填。
+        place_cols = {row["name"] for row in conn.execute("PRAGMA table_info(places)").fetchall()}
+        if "user_start_min" not in place_cols:
+            conn.execute("ALTER TABLE places ADD COLUMN user_start_min INTEGER")
+            conn.execute(
+                "UPDATE places SET user_start_min = start_min "
+                "WHERE locked = 1 AND start_min IS NOT NULL"
+            )
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=5.0)
@@ -122,3 +142,8 @@ def set_db(db: Database) -> None:
     """For tests: install a Database pointed at a temporary file."""
     global _db
     _db = db
+    # The distance cache wraps a Database. Left alone, it would keep reading the file the
+    # previous test deleted. Imported lazily: app.amap.cache imports this module.
+    from app.amap.cache import set_distance_cache
+
+    set_distance_cache(None)

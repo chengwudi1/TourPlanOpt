@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
-from app.amap.cache import CacheRow, DistanceCache
+from app.amap.cache import CacheRow, DistanceCache, round_key
 from app.amap.client import MAX_ORIGINS_PER_CALL, AmapWebClient, Coord
 from app.models.domain import AMAP_MODE_BY_TRAVEL, TravelMode
 from app.util.coords import haversine_m
@@ -70,6 +70,20 @@ def haversine_seconds_matrix(nodes: list[Coord], travel_mode: TravelMode) -> lis
                     "straight": 30.0,
                 }[str(travel_mode)] * 3600))
     return matrix
+
+
+def permute_matrix(
+    cost: list[list[int | None]], ids: Sequence[str], ordered_ids: Sequence[str]
+) -> list[list[int | None]]:
+    """Reindex a node-keyed cost matrix along ``ordered_ids``.
+
+    The solver works purely in positional indices, so anything that reorders the node
+    list -- the 起点锚 rotation, the leg matrix read off a solution -- has to carry the
+    matrix along. Passing reordered ids with the old matrix silently optimizes pairs
+    that were never compared.
+    """
+    origin = [ids.index(pid) for pid in ordered_ids]
+    return [[cost[i][j] for j in origin] for i in origin]
 
 
 async def build_matrix(
@@ -207,4 +221,42 @@ async def build_matrix(
         await cache.put(store_rows)
 
     result.api_calls = api_calls
+    return result
+
+
+async def cached_or_estimate_matrix(
+    nodes: list[Coord],
+    *,
+    travel_mode: TravelMode = TravelMode.DRIVING,
+    cache: DistanceCache,
+) -> MatrixResult:
+    """Zero-call cost matrix: haversine estimate, overlaid with cached real seconds.
+
+    The timeline recomputes on every edit, so it cannot spend quota. Legs already paid
+    for by an earlier precise run are reused exactly; the rest are estimates -- which is
+    what the UI already labels 「约 X 分钟」.
+    """
+    n = len(nodes)
+    if n < 2:
+        return MatrixResult(seconds=[[0] * n for _ in range(n)])
+
+    result = MatrixResult(
+        seconds=[list(row) for row in haversine_seconds_matrix(nodes, travel_mode)],
+        mode_used=str(travel_mode),
+    )
+
+    amap_mode = AMAP_MODE_BY_TRAVEL[travel_mode]
+    pairs = [(nodes[i], nodes[j]) for j in range(1, n) for i in range(n) if i != j]
+    # The cache rounds to its own 1e5 key space, so resolve hits through the same
+    # round_key rather than re-implementing the scale here.
+    position = {round_key(c): i for i, c in enumerate(nodes)}
+    for key, entry in (await cache.get(pairs, amap_mode)).items():
+        if not entry.ok or entry.duration_s is None:
+            continue
+        # key is (o_lng_r, o_lat_r, d_lng_r, d_lat_r, mode).
+        i, j = position.get(key[:2]), position.get(key[2:4])
+        if i is None or j is None:  # pragma: no cover - same coords, cannot miss
+            continue
+        result.seconds[i][j] = entry.duration_s
+        result.cache_hits += 1
     return result

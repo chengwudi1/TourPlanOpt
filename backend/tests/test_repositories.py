@@ -178,3 +178,54 @@ async def test_upsert_participant_keeps_existing_color_when_blank(db: Database) 
     await repo.upsert_participant(db, trip_id, "c1", "小明", "#E8564A")
     again = await repo.upsert_participant(db, trip_id, "c1", "小明", "")
     assert again.color == "#E8564A"
+
+
+# -- M13 地点照片：photo_url 必须完整往返 --------------------------------------------
+#
+# The stored photo_url is the only copy the client has (it is never re-fetched), so a
+# column dropped on write would silently render every card photo-less without failing
+# anything else.
+
+
+async def test_add_place_persists_photo_url(db: Database) -> None:
+    trip_id, day_id = await repo.create_trip(db)
+    await repo.add_place(
+        db,
+        day_id,
+        PlaceCreate(
+            name="外滩",
+            lng=121.49,
+            lat=31.24,
+            amap_poi_id="B001540WRR",
+            photo_url="https://a.amap.com/外滩.jpg",
+        ),
+    )
+
+    snapshot = await repo.get_snapshot(db, trip_id)
+    assert snapshot.places[0].photo_url == "https://a.amap.com/外滩.jpg"
+
+
+async def test_add_place_defaults_photo_url_to_empty(db: Database) -> None:
+    """No POI id (map-picked place) means no photo, and empty must not become NULL."""
+    trip_id, day_id = await repo.create_trip(db)
+    await repo.add_place(db, day_id, make_place("街角咖啡店"))
+
+    snapshot = await repo.get_snapshot(db, trip_id)
+    assert snapshot.places[0].photo_url == ""
+
+
+async def test_stash_add_persists_photo_url(db: Database) -> None:
+    """想去清单的图片要能跟着搬到正式地点，所以两边都得存下来。"""
+    trip_id, _ = await repo.create_trip(db)
+    await repo.stash_add(
+        db,
+        trip_id,
+        name="城隍庙",
+        lng=121.49,
+        lat=31.23,
+        amap_poi_id="B001540WRR",
+        photo_url="https://a.amap.com/城隍庙.jpg",
+    )
+
+    snapshot = await repo.get_snapshot(db, trip_id)
+    assert snapshot.stash[0].photo_url == "https://a.amap.com/城隍庙.jpg"

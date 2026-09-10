@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from app.util.timefmt import format_min
+
 LATE_NIGHT_MIN = 22 * 60
 
 
@@ -77,6 +79,6 @@ def fill_schedule(
     result.end_min = cursor or 0
     if result.end_min > LATE_NIGHT_MIN:
         result.warnings.append(
-            f"行程预计 {result.end_min // 60:02d}:{result.end_min % 60:02d} 才结束，考虑拆到第二天"
+            f"行程预计 {format_min(result.end_min)} 才结束，考虑拆到第二天"
         )
     return result

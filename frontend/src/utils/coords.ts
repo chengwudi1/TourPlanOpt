@@ -47,3 +47,25 @@ export function wgs84ToGcj02(lng: number, lat: number): Coord {
   dlng = (dlng * 180.0) / ((A / sqrtmagic) * Math.cos(radlat) * PI)
   return [lng + dlng, lat + dlat]
 }
+
+const EARTH_R_M = 6371000
+
+/** 大圆距离（米）。GCJ-02 上算，小尺度下与真实路网距离的偏差可忽略——只用于展示。 */
+export function haversineM(
+  a: { lng: number; lat: number },
+  b: { lng: number; lat: number },
+): number {
+  const rad = PI / 180
+  const dLat = (b.lat - a.lat) * rad
+  const dLng = (b.lng - a.lng) * rad
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2
+  return 2 * EARTH_R_M * Math.asin(Math.sqrt(s))
+}
+
+/** 展示用距离文本：<1km 显示米，其余 1 位小数公里。 */
+export function formatDistance(m: number): string {
+  if (m < 1000) return `${Math.round(m / 10) * 10} 米`
+  return `${m / 1000 >= 10 ? Math.round(m / 1000) : (m / 1000).toFixed(1)} 公里`
+}

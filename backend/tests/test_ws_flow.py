@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from app.db.database import Database, set_db
 from app.models import protocol
+from tests.frames import read_op
 
 
 @pytest.fixture()
@@ -38,12 +39,20 @@ def hello(client_id: str, name: str) -> dict:
 
 
 def join_and_sync(ws, client_id: str, name: str) -> tuple[dict, int]:
-    """Say hello, read the welcome and our own presence_join echo. Returns (welcome, seq)."""
+    """Say hello, read the welcome and our own presence_join echo. Returns (welcome, seq).
+
+    A joiner whose trip already has places gets one extra frame in between: the
+    unicast schedule summary that lets a freshly loaded page show 结束时间 before it
+    touches anything (app/ws/handlers.py). It reuses the welcome's seq and consumes none,
+    so the +1 below still holds.
+    """
     ws.send_json(hello(client_id, name))
     welcome = ws.receive_json()
     assert welcome["type"] == "welcome"
     assert welcome["data"]["you"]["client_id"] == client_id
     own_join = ws.receive_json()
+    while own_join.get("op") == "timeline_updated":
+        own_join = ws.receive_json()
     assert own_join["type"] == "presence_join"
     assert own_join["data"]["client_id"] == client_id
     assert own_join["seq"] == welcome["seq"] + 1
@@ -90,10 +99,15 @@ def test_seq_strictly_increasing_no_gaps(client: tuple[TestClient, str, str]):
                     {"day_id": day_id, "name": f"点{i}", "lng": 121.47, "lat": 31.23},
                 )
             )
-            frame = ws1.receive_json()
-            assert frame["type"] == "op"
-            assert frame["op"] == "place_added"
-            seqs.append(frame["seq"])
+            added = read_op(ws1, "place_added")
+            assert added["type"] == "op"
+            assert added["op"] == "place_added"
+            seqs.append(added["seq"])
+            # Every op that moves or re-times a place owns a second frame: the
+            # recomputed schedule. It consumes a seq too, so the run stays gapless.
+            timeline = ws1.receive_json()
+            assert timeline["op"] == "timeline_updated"
+            seqs.append(timeline["seq"])
 
         assert seqs == sorted(seqs)
         assert all(b - a == 1 for a, b in zip(seqs, seqs[1:], strict=False)), seqs
@@ -140,11 +154,12 @@ def test_duplicate_op_id_is_deduped(client: tuple[TestClient, str, str]):
             {"day_id": day_id, "name": "重复", "lng": 121.47, "lat": 31.23},
         )
         ws1.send_json(frame)
-        first = ws1.receive_json()
+        first = read_op(ws1, "place_added")
         assert first["type"] == "op"
+        assert ws1.receive_json()["op"] == "timeline_updated"  # the place_added's schedule
 
-        # Same op_id again: silent no-op. The very next frame is the pong, proving
-        # nothing else was broadcast.
+        # Same op_id again: silent no-op -- not even a schedule frame. The very next
+        # frame is the pong, proving nothing else was broadcast.
         ws1.send_json(frame)
         ws1.send_json(protocol.ping_frame())
         assert ws1.receive_json()["type"] == "pong"
@@ -169,7 +184,7 @@ def test_day_reorder_non_permutation_rejected_with_authority(
                     {"day_id": day_id, "name": name, "lng": 121.47, "lat": 31.23},
                 )
             )
-            ws1.receive_json()
+            read_op(ws1, "place_added")
 
         ws1.send_json(
             protocol.op_frame(
@@ -178,7 +193,7 @@ def test_day_reorder_non_permutation_rejected_with_authority(
                 {"day_id": day_id, "place_ids": ["nope-1", "nope-2"]},
             )
         )
-        reject = ws1.receive_json()
+        reject = read_op(ws1, "day_reordered")
         assert reject["type"] == "op_reject"
         assert reject["reason"] == "order_stale"
         authoritative = reject["data"]["place_ids"]
@@ -192,7 +207,7 @@ def test_day_reorder_non_permutation_rejected_with_authority(
                 {"day_id": day_id, "place_ids": list(reversed(authoritative))},
             )
         )
-        applied = ws1.receive_json()
+        applied = read_op(ws1, "day_reordered")
         assert applied["type"] == "op" and applied["op"] == "day_reordered"
         assert applied["data"]["place_ids"] == list(reversed(authoritative))
 
@@ -216,8 +231,8 @@ def test_place_update_field_patch_lww(client: tuple[TestClient, str, str]):
                 {"day_id": day_id, "name": "餐厅", "lng": 121.47, "lat": 31.23},
             )
         )
-        place = ws1.receive_json()["data"]["place"]
-        ws2.receive_json()
+        place = read_op(ws1, "place_added")["data"]["place"]
+        read_op(ws2, "place_added")
 
         ws1.send_json(
             protocol.op_frame(
@@ -226,9 +241,9 @@ def test_place_update_field_patch_lww(client: tuple[TestClient, str, str]):
                 {"place_id": place["id"], "patch": {"note": "不吃辣"}},
             )
         )
-        from_1 = ws1.receive_json()
+        from_1 = read_op(ws1, "place_updated")
         assert from_1["data"]["place"]["note"] == "不吃辣"
-        ws2.receive_json()
+        read_op(ws2, "place_updated")
 
         ws2.send_json(
             protocol.op_frame(
@@ -237,9 +252,11 @@ def test_place_update_field_patch_lww(client: tuple[TestClient, str, str]):
                 {"place_id": place["id"], "patch": {"duration_min": 45}},
             )
         )
-        from_2 = ws2.receive_json()
+        from_2 = read_op(ws2, "place_updated")
         assert from_2["data"]["place"]["duration_min"] == 45
-        ws1.receive_json()
+        # duration feeds the schedule, so c-1 gets the timeline frame that note does not.
+        timeline = read_op(ws1, "timeline_updated")
+        assert timeline["data"]["timelines"][0]["places"][0]["duration_min"] == 45
 
         final = testclient.get(f"/api/trips/{trip_id}").json()["places"][0]
         assert final["note"] == "不吃辣"
@@ -258,7 +275,8 @@ def test_resync_returns_full_snapshot(client: tuple[TestClient, str, str]):
                 {"day_id": day_id, "name": "外滩", "lng": 121.49, "lat": 31.23},
             )
         )
-        ws1.receive_json()
+        read_op(ws1, "place_added")
+        ws1.receive_json()  # its timeline_updated frame
 
         ws1.send_json(protocol.resync_frame(0))
         frame = ws1.receive_json()
@@ -281,7 +299,7 @@ def test_setting_time_auto_locks_and_clearing_unlocks(client):
                 {"day_id": day_id, "name": "餐厅", "lng": 121.47, "lat": 31.23},
             )
         )
-        place = ws1.receive_json()["data"]["place"]
+        place = read_op(ws1, "place_added")["data"]["place"]
 
         ws1.send_json(
             protocol.op_frame(
@@ -290,8 +308,9 @@ def test_setting_time_auto_locks_and_clearing_unlocks(client):
                 {"place_id": place["id"], "patch": {"start_min": 19 * 60}},
             )
         )
-        updated = ws1.receive_json()["data"]["place"]
+        updated = read_op(ws1, "place_updated")["data"]["place"]
         assert updated["start_min"] == 19 * 60
+        assert updated["user_start_min"] == 19 * 60  # the anchor is the user's own value
         assert updated["locked"] is True
 
         ws1.send_json(
@@ -301,9 +320,14 @@ def test_setting_time_auto_locks_and_clearing_unlocks(client):
                 {"place_id": place["id"], "patch": {"start_min": None}},
             )
         )
-        cleared = ws1.receive_json()["data"]["place"]
-        assert cleared["start_min"] is None
+        cleared = read_op(ws1, "place_updated")["data"]["place"]
+        assert cleared["user_start_min"] is None
         assert cleared["locked"] is False
+        # start_min is derived: clearing the anchor only detaches it, and the schedule
+        # frame that follows writes a computed time back.
+        timeline = read_op(ws1, "timeline_updated")["data"]["timelines"][0]
+        assert timeline["places"][0]["user_start_min"] is None
+        assert timeline["places"][0]["start_min"] is not None
 
 
 # -- M12：跨天移动 / 删空天 / 想去清单 / 起点锚点 ---------------------------------------

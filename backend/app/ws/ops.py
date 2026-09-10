@@ -14,10 +14,12 @@ from __future__ import annotations
 import logging
 import typing
 
+from app.amap.client import fetch_photo_best_effort
 from app.db import repositories
 from app.db.database import get_db
 from app.models import protocol
 from app.models.domain import PlaceCreate, StashCreate
+from app.routing.timeline import reschedule_days
 from app.ws.hub import TripHub
 
 if typing.TYPE_CHECKING:
@@ -81,6 +83,27 @@ async def _broadcast(
     hub.broadcast(protocol.broadcast_op_frame(seq, op, origin, op_id, data))
 
 
+async def _retimeline(hub: TripHub, db, trip_id: str, day_ids: list[str]) -> None:
+    """Re-time these days and broadcast the authoritative rows.
+
+    Sent as its own frame after the op's own broadcast, so clients first apply the
+    change they made and then the schedule it implies -- never a half-updated timeline.
+    """
+    timelines = await reschedule_days(db, trip_id, day_ids)
+    if not timelines:
+        return
+    seq = await repositories.next_seq(db, trip_id)
+    hub.broadcast(
+        protocol.broadcast_op_frame(
+            seq,
+            "timeline_updated",
+            origin="server",
+            op_id=f"timeline-{seq}",
+            data={"timelines": [t.payload() for t in timelines]},
+        )
+    )
+
+
 async def _reject(
     conn: ClientConnection, op_id: str, reason: str, data: dict | None = None
 ) -> None:
@@ -88,6 +111,12 @@ async def _reject(
 
 
 # -- places ------------------------------------------------------------------------
+
+# Only these patched fields feed the schedule. Recomputing on a rename would bump every
+# rev in the day and make other clients redraw for nothing.
+_TIMELINE_PLACE_FIELDS = frozenset({"duration_min", "start_min", "locked"})
+_TIMELINE_DAY_FIELDS = frozenset({"start_min", "travel_mode", "start_place_id", "end_place_id"})
+_TIMELINE_TRIP_FIELDS = frozenset({"travel_mode", "day_start_min"})
 
 
 async def _place_add(
@@ -110,6 +139,7 @@ async def _place_add(
             note=str(data.get("note") or ""),
             added_by=str(data.get("added_by") or client_id),
             after_place_id=data.get("after_place_id"),
+            photo_url=str(data.get("photo_url") or ""),
         )
     except (TypeError, ValueError):
         await _reject(conn, op_id, "bad_payload")
@@ -117,6 +147,13 @@ async def _place_add(
     if not payload.name:
         await _reject(conn, op_id, "bad_payload")
         return
+
+    # 照片补抓：搜索联想（inputtips）不带照片，落库前用 POI id 换一张实拍图。
+    # best-effort——失败/超时/没配 Key 都不影响加地点本身，photo_url 留空即可。
+    if not payload.photo_url and payload.amap_poi_id:
+        payload = payload.model_copy(
+            update={"photo_url": await fetch_photo_best_effort(payload.amap_poi_id)}
+        )
 
     place = await repositories.add_place(db, day_id, payload)
     if place is None:
@@ -127,6 +164,7 @@ async def _place_add(
         hub, db, trip_id, "place_added", op_id, client_id,
         {"place": place.model_dump(), "day_id": day_id, "place_ids": place_ids},
     )
+    await _retimeline(hub, db, trip_id, [day_id])
 
 
 async def _place_update(
@@ -144,7 +182,9 @@ async def _place_update(
         # 修正 2: a hand-set time IS an anchor. Setting a time locks the place for the
         # optimizer; clearing the time releases it -- in the same atomic patch so the
         # broadcast row never shows a time without the pin (or vice versa).
-        patch = {**patch, "locked": patch["start_min"] is not None}
+        # 值同时写进 start_min：那是展示位，紧随其后的 _retimeline 会按整条时间轴覆盖它。
+        hand_set = patch["start_min"]
+        patch = {**patch, "user_start_min": hand_set, "locked": hand_set is not None}
     updated = (
         await repositories.update_place(db, place_id, patch) if isinstance(patch, dict) else None
     )
@@ -154,6 +194,8 @@ async def _place_update(
     await _broadcast(
         hub, db, trip_id, "place_updated", op_id, client_id, {"place": updated.model_dump()}
     )
+    if _TIMELINE_PLACE_FIELDS & patch.keys():
+        await _retimeline(hub, db, trip_id, [updated.day_id])
 
 
 async def _place_move(
@@ -181,6 +223,7 @@ async def _place_move(
             "place_ids": new_order,
         },
     )
+    await _retimeline(hub, db, trip_id, [old_day_id, new_day_id])
 
 
 async def _place_delete(
@@ -202,6 +245,7 @@ async def _place_delete(
         hub, db, trip_id, "place_deleted", op_id, client_id,
         {"place_id": place_id, "day_id": day_id, "place_ids": place_ids},
     )
+    await _retimeline(hub, db, trip_id, [day_id])
 
 
 async def _place_lock(
@@ -215,13 +259,19 @@ async def _place_lock(
         return
 
     locked = bool(data.get("locked"))
-    updated = await repositories.update_place(db, place_id, {"locked": locked})
+    # 手填时间本身就是锚点（求解器的 has_time），所以解锁必须连它一起清掉，
+    # 否则「解锁」点了地点还是不动。
+    patch: dict[str, object] = {"locked": locked}
+    if not locked:
+        patch["user_start_min"] = None
+    updated = await repositories.update_place(db, place_id, patch)
     if updated is None:  # pragma: no cover - row verified above
         await _reject(conn, op_id, "place_not_found", {"place_id": place_id})
         return
     await _broadcast(
         hub, db, trip_id, "place_locked", op_id, client_id, {"place": updated.model_dump()}
     )
+    await _retimeline(hub, db, trip_id, [updated.day_id])
 
 
 # -- days --------------------------------------------------------------------------
@@ -253,6 +303,7 @@ async def _day_reorder(
         hub, db, trip_id, "day_reordered", op_id, client_id,
         {"day_id": day_id, "place_ids": result.place_ids},
     )
+    await _retimeline(hub, db, trip_id, [day_id])
 
 
 async def _day_add(
@@ -288,6 +339,8 @@ async def _day_update(
     await _broadcast(
         hub, db, trip_id, "day_updated", op_id, client_id, {"day": updated.model_dump()}
     )
+    if isinstance(patch, dict) and _TIMELINE_DAY_FIELDS & patch.keys():
+        await _retimeline(hub, db, trip_id, [day_id])
 
 
 async def _day_delete(
@@ -322,6 +375,11 @@ async def _trip_update(
     await _broadcast(
         hub, db, trip_id, "trip_updated", op_id, client_id, {"trip": updated.model_dump()}
     )
+    if isinstance(patch, dict) and _TIMELINE_TRIP_FIELDS & patch.keys():
+        rows = await db.fetch_all(
+            "SELECT id FROM days WHERE trip_id = ? ORDER BY day_index", (trip_id,)
+        )
+        await _retimeline(hub, db, trip_id, [str(r["id"]) for r in rows])
 
 
 # -- stash（暂存区）--------------------------------------------------------------------
@@ -339,6 +397,7 @@ async def _stash_add(
             address=str(data.get("address") or ""),
             amap_poi_id=str(data.get("amap_poi_id") or ""),
             added_by=str(data.get("added_by") or client_id),
+            photo_url=str(data.get("photo_url") or ""),
         )
     except (TypeError, ValueError):
         await _reject(conn, op_id, "bad_payload")
@@ -346,11 +405,15 @@ async def _stash_add(
     if not payload.name:
         await _reject(conn, op_id, "bad_payload")
         return
+    if not payload.photo_url and payload.amap_poi_id:
+        payload = payload.model_copy(
+            update={"photo_url": await fetch_photo_best_effort(payload.amap_poi_id)}
+        )
     item = await repositories.stash_add(
         db, trip_id,
         name=payload.name, lng=payload.lng, lat=payload.lat,
         address=payload.address, amap_poi_id=payload.amap_poi_id,
-        added_by=payload.added_by,
+        added_by=payload.added_by, photo_url=payload.photo_url,
     )
     await _broadcast(
         hub, db, trip_id, "stash_added", op_id, client_id, {"item": item.model_dump()}

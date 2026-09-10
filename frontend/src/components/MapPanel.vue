@@ -1,19 +1,37 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { h, onBeforeUnmount, onMounted, ref, render, shallowRef, watch } from 'vue'
 
 import { ensureAmap, useAmap } from '@/composables/useAmap'
 import type { AMapNS } from '@/composables/useAmap'
+import { BedDouble, Flag, LocateFixed } from '@/components/icons'
 import { useTripStore } from '@/stores/trip'
+import type { Place } from '@/types/domain'
 import { wgs84ToGcj02 } from '@/utils/coords'
 
 // Default view: Shanghai. Replaced by the trip's own bounds once places exist.
 const DEFAULT_CENTER: [number, number] = [121.4737, 31.2304]
 const DEFAULT_ZOOM = 12
 
+/** 这一天里这个地点的身份：出发锚、收锚，或者只是普通一站。 */
+type AnchorKind = '' | 'start' | 'end'
+
 interface MarkerEntry {
   marker: AMapNS
-  /** The current content node; replaced together with setContent. */
   el: HTMLElement
+  img: HTMLImageElement
+  num: HTMLElement
+  pill: HTMLElement
+  /** 已挂进 pill 的锚点图标。图标只在锚点种类变化时重挂，不做无谓的 mount 抖动。 */
+  pillKind: AnchorKind
+  /** 照片热链加载失败过 → 这个标记永久回落成实心圆。 */
+  photoBroken: boolean
+}
+
+/** 双描边路线 + 选中站那一段的高亮层。 */
+interface RouteOverlays {
+  casing: AMapNS
+  core: AMapNS
+  hl: AMapNS
 }
 
 const host = ref<HTMLDivElement | null>(null)
@@ -33,7 +51,7 @@ const store = useTripStore()
 
 /** place id -> marker. Rebuilt against `currentPlaces` on every sync. */
 const markers = new Map<string, MarkerEntry>()
-const polyline = shallowRef<AMapNS>(null)
+const route = shallowRef<RouteOverlays | null>(null)
 /** Sorted id list the fit-view was last computed for. */
 let fittedSignature = ''
 
@@ -86,6 +104,9 @@ onMounted(async () => {
   map.value.addControl(new AMap.Scale())
   bindPickHandlers()
   syncMarkers()
+  // 芯色读的是 CSS 变量，而变量由 @media (prefers-color-scheme) 换值 -- 主题一翻就得
+  // 重画一次，否则路线会停在旧色上直到下一次编辑。
+  darkScheme.addEventListener('change', onSchemeChange)
 })
 
 // -- 地图选点（右键 = 桌面，长按 = 触屏）------------------------------------------------
@@ -142,24 +163,102 @@ function bindPickHandlers() {
   }
 }
 
+const darkScheme = window.matchMedia('(prefers-color-scheme: dark)')
+const onSchemeChange = () => syncPolyline()
+
 onBeforeUnmount(() => {
   detachPickHandlers?.()
   detachPickHandlers = null
+  darkScheme.removeEventListener('change', onSchemeChange)
+  // 标记 DOM 由地图销毁，但挂进 pill 的 lucide 子树得显式卸载，不然它的 effect 作用域
+  // 就永久留在一个已经不在文档里的容器上。
+  for (const entry of markers.values()) render(null, entry.pill)
+  markers.clear()
+  route.value = null
   map.value?.destroy?.()
   map.value = null
-  markers.clear()
-  polyline.value = null
 })
 
-function makeNode(index: number, name: string, color: string): HTMLElement {
-  const node = document.createElement('div')
-  node.className = 'tp-marker'
-  // The marker wears the colour of whoever ADDED the place -- the map becomes a
-  // record of the group's contributions, not just geography.
-  if (color) node.style.background = color
-  node.title = name
-  node.textContent = String(index + 1)
-  return node
+/** 叠加层配色跟底图走、不跟界面主题走：高德没有暗色底图，瓦片永远偏亮，
+ * 所以描边固定用白，只有芯色读 accent（两套主题下的 teal 在白底上都够对比）。 */
+const CASING_COLOR = '#1b2a26'
+const FALLBACK_ACCENT = '#0e7a6e'
+
+function cssColor(name: string, fallback: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
+}
+
+/**
+ * 标记＝列表行在地图上的分身：34px 圆形照片 + 白描边 + 右下角序号角标，角标底色是创建者
+ * 色，与 PlaceCard 的 .place__order 同一套语义，看图和看列表因此对得上同一站。
+ */
+function createMarker(AMap: AMapNS, m: AMapNS, place: Place, index: number): MarkerEntry {
+  const el = document.createElement('div')
+  el.className = 'tp-marker'
+  const img = document.createElement('img')
+  img.className = 'tp-marker__img'
+  img.alt = ''
+  img.referrerPolicy = 'no-referrer'
+  const num = document.createElement('span')
+  num.className = 'tp-marker__num'
+  const pill = document.createElement('span')
+  pill.className = 'tp-marker__pill'
+  el.append(img, num, pill)
+
+  // 圆标没有尖，指的就是坐标本身 → anchor 从 teardrop 的 bottom-center 回到 center。
+  const marker = new AMap.Marker({
+    position: [place.lng, place.lat],
+    content: el,
+    anchor: 'center',
+    zIndex: 100 + index,
+  })
+  const entry: MarkerEntry = { marker, el, img, num, pill, pillKind: '', photoBroken: false }
+  el.addEventListener('click', () => store.selectPlace(place.id))
+  // 热链挂过一次就把这个标记永久降级成实心圆：反复重试只会一直亮破图。
+  img.addEventListener('error', () => {
+    entry.photoBroken = true
+    el.classList.remove('tp-marker--photo')
+  })
+  m.add(marker)
+  return entry
+}
+
+/** 这个地点在当前天里的锚点身份。起点/终点都是列表里的某一站，只是多带一个 pill。 */
+function anchorKindOf(placeId: string): AnchorKind {
+  const day = store.currentDay
+  if (!day) return ''
+  if (day.start_place_id === placeId) return 'start'
+  return day.end_place_id === placeId ? 'end' : ''
+}
+
+/** 把 store 里这一行投影到已存在的标记节点上：顺序、创建者色、照片、锚点、选中态。 */
+function paintMarker(entry: MarkerEntry, place: Place, index: number) {
+  const { el } = entry
+  el.style.setProperty('--tp-fill', store.creatorColorOf(place.added_by) || FALLBACK_ACCENT)
+  el.title = place.name
+
+  const photo = entry.photoBroken ? '' : place.photo_url
+  if (photo && entry.img.dataset.src !== photo) {
+    entry.img.dataset.src = photo
+    entry.img.src = photo
+  }
+  el.classList.toggle('tp-marker--photo', !!photo)
+
+  const selected = place.id === store.selectedPlaceId
+  el.classList.toggle('tp-marker--sel', selected)
+  entry.marker.setzIndex(selected ? 300 : 100 + index)
+
+  entry.num.textContent = String(index + 1)
+  entry.marker.setPosition([place.lng, place.lat])
+
+  const kind = anchorKindOf(place.id)
+  if (kind !== entry.pillKind) {
+    entry.pillKind = kind
+    el.classList.toggle('tp-marker--anchored', kind !== '')
+    const icon = kind === 'start' ? Flag : kind === 'end' ? BedDouble : null
+    // 图标要出现在命令式建的 DOM 里，只能走 Vue 的低层 render；单一出口规则照旧不破。
+    render(icon ? h(icon, { size: 11, strokeWidth: 2.6 }) : null, entry.pill)
+  }
 }
 
 /** Make markers / current-day / selection agree with the store. Idempotent. */
@@ -173,6 +272,7 @@ function syncMarkers() {
   for (const [id, entry] of markers) {
     if (!wantedIds.has(id)) {
       m.remove(entry.marker)
+      render(null, entry.pill)
       markers.delete(id)
     }
   }
@@ -180,32 +280,14 @@ function syncMarkers() {
   wanted.forEach((place, index) => {
     const AMap = amapNs.value
     if (!AMap) return
-
     let entry = markers.get(place.id)
     if (!entry) {
-      const el = makeNode(index, place.name, store.creatorColorOf(place.added_by))
-      el.addEventListener('click', () => store.selectPlace(place.id))
-      const marker = new AMap.Marker({
-        position: [place.lng, place.lat],
-        content: el,
-        anchor: 'bottom-center',
-        zIndex: 100 + index,
-      })
-      m.add(marker)
-      entry = { marker, el }
+      entry = createMarker(AMap, m, place, index)
       markers.set(place.id, entry)
-    } else {
-      // Position/order can change via later ops; rebuild content so the number follows.
-      const el = makeNode(index, place.name, store.creatorColorOf(place.added_by))
-      el.addEventListener('click', () => store.selectPlace(place.id))
-      entry.marker.setPosition([place.lng, place.lat])
-      entry.marker.setContent(el)
-      entry.marker.setzIndex(100 + index)
-      entry.el = el
     }
+    paintMarker(entry, place, index)
   })
 
-  applySelection(store.selectedPlaceId)
   syncPolyline()
 
   const signature = wanted.map((p) => p.id).join(',')
@@ -216,15 +298,17 @@ function syncMarkers() {
   }
 }
 
-function applySelection(selectedId: string | null) {
-  for (const [id, entry] of markers) {
-    const selected = id === selectedId
-    entry.el.classList.toggle('tp-marker--sel', selected)
-    entry.marker.setzIndex(selected ? 300 : 100)
-  }
+/** 路线一拆就整组丢掉（站点不足两站时）。 */
+function dropRoute() {
+  const r = route.value
+  if (r && map.value) map.value.remove([r.casing, r.core, r.hl])
+  route.value = null
 }
 
-/** The day's route line, drawn through the markers in authoritative order. */
+/**
+ * 双描边：深色 casing 把亮芯从瓦片上「抬」起来，上面再走一条 accent 亮芯 —— 单条亮色
+ * 线压在高德底图上是没有分量的。第三条 hl 只画选中站那一段。
+ */
 function syncPolyline() {
   const m = map.value
   const AMap = amapNs.value
@@ -232,26 +316,67 @@ function syncPolyline() {
 
   const path = store.currentPlaces.map((p) => [p.lng, p.lat])
   if (path.length < 2) {
-    if (polyline.value) {
-      m.remove(polyline.value)
-      polyline.value = null
-    }
+    dropRoute()
     return
   }
-  if (!polyline.value) {
-    polyline.value = new AMap.Polyline({
-      path,
-      strokeColor: '#2f6feb',
-      strokeWeight: 5,
-      strokeOpacity: 0.85,
-      showDir: true,
-      lineJoin: 'round',
-      bubble: true,
-    })
-    m.add(polyline.value)
+
+  const accent = cssColor('--accent', FALLBACK_ACCENT)
+  if (!route.value) {
+    const base = { path, lineJoin: 'round', lineCap: 'round', bubble: true }
+    route.value = {
+      casing: new AMap.Polyline({
+        ...base,
+        strokeColor: CASING_COLOR,
+        strokeWeight: 8,
+        strokeOpacity: 0.25,
+        zIndex: 40,
+      }),
+      core: new AMap.Polyline({
+        ...base,
+        strokeColor: accent,
+        strokeWeight: 4,
+        strokeOpacity: 0.95,
+        showDir: true,
+        zIndex: 50,
+      }),
+      hl: new AMap.Polyline({
+        ...base,
+        strokeColor: accent,
+        strokeWeight: 7,
+        strokeOpacity: 0.95,
+        zIndex: 60,
+      }),
+    }
+    m.add([route.value.casing, route.value.core, route.value.hl])
   } else {
-    polyline.value.setPath(path)
+    const { casing, core, hl } = route.value
+    casing.setPath(path)
+    core.setPath(path)
+    // 芯色是唯一跟着主题走的那个值，所以每次重画都要重新读一遍。
+    core.setOptions({ strokeColor: accent })
+    hl.setOptions({ strokeColor: accent })
   }
+  syncLegHighlight()
+}
+
+/**
+ * 选中某一站 → 点亮「到它」那一段。第一站没有来路，就点亮它的出发段，这样选中任意一站
+ * 地图上都有反馈，不会出现点了却没反应的第一站。
+ */
+function syncLegHighlight() {
+  const r = route.value
+  if (!r) return
+  const places = store.currentPlaces
+  const i = places.findIndex((p) => p.id === store.selectedPlaceId)
+  const from = i > 0 ? places[i - 1] : places[0]
+  const to = i > 0 ? places[i] : places[1]
+  const hasLeg = i >= 0 && !!to
+  if (!hasLeg) {
+    r.hl.hide()
+    return
+  }
+  r.hl.setPath([[from.lng, from.lat], [to.lng, to.lat]])
+  r.hl.show()
 }
 
 /** Clicking a CARD pans to its marker (marker->card is selectPlace on the marker's
@@ -287,7 +412,8 @@ defineExpose({
         :title="locating ? '定位中…' : '把地图移到我所在的位置'"
         @click="locateMe"
       >
-        {{ locating ? '定位中…' : '📍 我的位置' }}
+        <LocateFixed class="ic" :size="13" />
+        {{ locating ? '定位中…' : '我的位置' }}
       </button>
       <span v-if="locateNote" class="map-panel__note tiny">{{ locateNote }}</span>
     </div>
@@ -367,25 +493,87 @@ defineExpose({
 /* Global on purpose: marker nodes live inside the AMap container, outside this
    component's scoped tree, so scoped attributes would never match them. */
 .tp-marker {
+  --tp-fill: #0e7a6e;
+  position: relative;
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  box-sizing: border-box;
+  width: 34px;
+  height: 34px;
+  background: var(--tp-fill);
+  /* 白描边写死不读 --surface：底图永远是亮的，深色主题下用界面底色描边会糊成一片。 */
+  border: 2.5px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.5px var(--tp-fill), var(--shadow-sm);
+  cursor: pointer;
+  transition: transform var(--dur) var(--ease-pop), box-shadow var(--dur) var(--ease-out);
+}
+
+.tp-marker__img {
+  display: none;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+.tp-marker__num {
   font-size: 12px;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
   color: #fff;
-  background: var(--accent);
-  border: 2px solid #fff;
-  border-radius: 50% 50% 50% 4px;
-  box-shadow: var(--shadow-sm);
-  cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* 有照片：照片铺满圆，序号退到右下角的小角标——和列表行的 .place__order 同一个位置。 */
+.tp-marker--photo {
+  background: #e6eae7;
+}
+
+.tp-marker--photo .tp-marker__img {
+  display: block;
+}
+
+.tp-marker--photo .tp-marker__num {
+  position: absolute;
+  right: -5px;
+  bottom: -3px;
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  font-size: 9.5px;
+  color: #fff;
+  background: var(--tp-fill);
+  border: 1.5px solid #fff;
+  border-radius: 50%;
+}
+
+/* 起点/终点锚：右上角一枚白 chip 装 Flag / BedDouble，锚点也是普通一站，只是多这个角。 */
+.tp-marker__pill {
+  position: absolute;
+  top: -8px;
+  right: -7px;
+  display: none;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  color: var(--tp-fill);
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(24, 34, 30, 0.3);
+}
+
+.tp-marker--anchored .tp-marker__pill {
+  display: grid;
 }
 
 .tp-marker--sel {
-  animation: tp-pop 0.3s ease;
+  animation: tp-pop var(--dur-slow) var(--ease-out);
   transform: scale(1.25);
-  box-shadow: 0 0 0 4px var(--accent-soft), var(--shadow);
+  box-shadow:
+    0 0 0 1.5px var(--tp-fill),
+    0 0 0 5px color-mix(in srgb, var(--accent) 30%, transparent),
+    var(--shadow-md);
 }
 
 @keyframes tp-pop {

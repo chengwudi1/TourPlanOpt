@@ -17,6 +17,7 @@ from app.db.database import Database, get_db
 from app.db.repositories import current_seq, get_snapshot, next_seq, upsert_participant
 from app.models import protocol
 from app.models.domain import Presence, Snapshot
+from app.routing.timeline import reschedule_days
 from app.ws.hub import TripHub
 
 if typing.TYPE_CHECKING:
@@ -111,6 +112,24 @@ async def _hello(conn: ClientConnection, frame: dict) -> Dispatch:
         },
     )
     conn.send_json(welcome)
+
+    # The snapshot is a pure read, so it carries no day-level schedule: without this
+    # frame a freshly loaded page shows no 结束时间 / 排程提醒 until the next edit. Dry
+    # run (persist=False): no writes, no rev bumps, and unicast, so nobody else's seq
+    # view moves. The rows inside are already what the client has.
+    timelines = await reschedule_days(
+        db, conn.trip_id, [d.id for d in snapshot.days], persist=False
+    )
+    if timelines:
+        conn.send_json(
+            protocol.broadcast_op_frame(
+                seq,
+                "timeline_updated",
+                origin="server",
+                op_id=f"timeline-join-{conn.client_id}",
+                data={"timelines": [t.payload() for t in timelines]},
+            )
+        )
 
     # Broadcast to everyone including the joiner: every seq-consuming frame must reach
     # every member or the seq-gap heuristic would fire false resyncs. The client applies

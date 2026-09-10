@@ -79,6 +79,7 @@ class PlaceOut(BaseModel):
     lng: float
     lat: float
     duration_min: int = 60
+    user_start_min: int | None = None
     start_min: int | None = None
     arrive_min: int | None = None
     travel_min_before: int | None = None
@@ -86,6 +87,7 @@ class PlaceOut(BaseModel):
     status: PlaceStatus = PlaceStatus.PENDING
     note: str = ""
     added_by: str = ""
+    photo_url: str = ""
     rev: int = 1
     created_at: str = ""
     updated_at: str = ""
@@ -127,6 +129,7 @@ class StashItemOut(BaseModel):
     lat: float
     amap_poi_id: str = ""
     added_by: str = ""
+    photo_url: str = ""
     created_at: str = ""
 
 
@@ -172,6 +175,7 @@ class PoiOut(BaseModel):
     lat: float
     city: str = ""
     district: str = ""
+    photo: str = ""
 
 
 # -- request bodies ---------------------------------------------------------------
@@ -202,6 +206,7 @@ class StashCreate(BaseModel):
     address: str = ""
     amap_poi_id: str = ""
     added_by: str = ""
+    photo_url: str = ""
 
 
 class PlaceCreate(BaseModel):
@@ -214,3 +219,4 @@ class PlaceCreate(BaseModel):
     note: str = ""
     added_by: str = ""
     after_place_id: str | None = None
+    photo_url: str = ""

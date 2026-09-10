@@ -3,6 +3,11 @@ import { createApp } from 'vue'
 
 import App from './App.vue'
 import { router } from './router'
+// Poppins 只带拉丁与数字（中文走系统栈），按需引 4 个字重，不拉无关子集。
+import '@fontsource/poppins/latin-400.css'
+import '@fontsource/poppins/latin-500.css'
+import '@fontsource/poppins/latin-600.css'
+import '@fontsource/poppins/latin-700.css'
 import './styles/main.css'
 
 createApp(App).use(createPinia()).use(router).mount('#app')

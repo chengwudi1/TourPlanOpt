@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 
+import { ChevronDown, ExternalLink, Landmark, MoonStar, Plus, ShoppingBasket, UtensilsCrossed } from '@/components/icons'
 import { useTripStore } from '@/stores/trip'
 import type { Poi } from '@/types/domain'
 import { apiFetch } from '@/utils/api'
@@ -17,10 +18,14 @@ const loading = ref(false)
 const error = ref<{ message: string } | null>(null)
 const loadedCategories = ref(new Set<string>())
 
-const CATEGORIES: { key: 'scenic' | 'food' | 'night'; label: string }[] = [
-  { key: 'scenic', label: '🏛️ 景点' },
-  { key: 'food', label: '🍜 小吃美食' },
-  { key: 'night', label: '🌃 夜市' },
+const CATEGORIES: {
+  key: 'scenic' | 'food' | 'night'
+  label: string
+  icon: typeof Landmark
+}[] = [
+  { key: 'scenic', label: '景点', icon: Landmark },
+  { key: 'food', label: '小吃美食', icon: UtensilsCrossed },
+  { key: 'night', label: '夜市', icon: MoonStar },
 ]
 
 watch(
@@ -53,6 +58,7 @@ function add(poi: Poi) {
     lat: poi.lat,
     address: poi.address,
     amap_poi_id: poi.id,
+    photo_url: poi.photo,
   })
 }
 
@@ -63,6 +69,7 @@ function stash(poi: Poi) {
     lat: poi.lat,
     address: poi.address,
     amap_poi_id: poi.id,
+    photo_url: poi.photo,
   })
 }
 
@@ -78,7 +85,9 @@ function added(poi: Poi): boolean {
       <span class="tiny muted">
         {{ city ? `${city}的景点、小吃和夜市，点一下就加入行程` : '行程里填了目的地城市后，这里会推荐景点和美食' }}
       </span>
-      <span class="reco__chevron" :class="{ 'reco__chevron--open': open }">▾</span>
+      <span class="reco__chevron" :class="{ 'reco__chevron--open': open }">
+        <ChevronDown :size="15" />
+      </span>
     </button>
 
     <div v-if="open" class="reco__body">
@@ -91,7 +100,7 @@ function added(poi: Poi): boolean {
           type="button"
           @click="category = c.key"
         >
-          {{ c.label }}
+          <component :is="c.icon" class="ic" :size="13" /> {{ c.label }}
         </button>
       </div>
 
@@ -103,6 +112,14 @@ function added(poi: Poi): boolean {
 
       <ul v-else-if="pois.length" class="reco__list">
         <li v-for="poi in pois" :key="poi.id || poi.name" class="reco__item">
+          <img
+            v-if="poi.photo"
+            class="reco__photo"
+            :src="poi.photo"
+            :alt="`${poi.name} 的照片`"
+            loading="lazy"
+            referrerpolicy="no-referrer"
+          />
           <div class="reco__info">
             <div class="reco__name">{{ poi.name }}</div>
             <div class="tiny muted reco__addr">{{ poi.address || poi.district }}</div>
@@ -113,7 +130,7 @@ function added(poi: Poi): boolean {
             title="先存进想去清单"
             @click="stash(poi)"
           >
-            🧺
+            <ShoppingBasket class="ic" :size="13" />
           </button>
           <button
             class="btn btn--sm"
@@ -121,7 +138,8 @@ function added(poi: Poi): boolean {
             :disabled="added(poi)"
             @click="add(poi)"
           >
-            {{ added(poi) ? '已加入' : '＋ 加入' }}
+            <template v-if="!added(poi)"><Plus class="ic" :size="13" /> 加入</template>
+            <template v-else>已加入</template>
           </button>
         </li>
       </ul>
@@ -134,7 +152,7 @@ function added(poi: Poi): boolean {
         target="_blank"
         rel="noopener"
       >
-        在高德地图中查看更多 ↗
+        <ExternalLink class="ic" :size="12" /> 在高德地图中查看更多
       </a>
     </div>
   </div>
@@ -166,7 +184,7 @@ function added(poi: Poi): boolean {
 
 .reco__chevron {
   color: var(--text-3);
-  transition: transform 0.15s ease;
+  transition: transform var(--dur) var(--ease-inout);
 }
 .reco__chevron--open {
   transform: rotate(180deg);
@@ -216,6 +234,15 @@ function added(poi: Poi): boolean {
   align-items: center;
   padding: 6px 8px;
   border-radius: var(--radius-sm);
+}
+
+.reco__photo {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 10px;
+  background: var(--surface-2);
 }
 
 .reco__item:hover {

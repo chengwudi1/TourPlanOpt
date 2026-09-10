@@ -12,6 +12,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.db.database import Database, set_db
+from app.models import protocol
+from tests.frames import join, read_op
 
 
 @pytest.fixture()
@@ -44,6 +46,21 @@ def _leg_minutes(seconds: list[list[int | None]], ids: list[str]) -> int:
     return sum(
         seconds[index[a]][index[b]] or 0 for a, b in zip(ids, ids[1:], strict=False)
     ) // 60
+
+
+def run_ws_op(
+    testclient: TestClient, trip_id: str, op: str, applied_op: str, op_id: str, data: dict
+) -> dict:
+    """Apply one op over a throwaway socket and return its broadcast.
+
+    Reordering and day/trip patches only exist as WS ops while optimize is HTTP, so a
+    test that needs both pays this handshake. ``applied_op`` is spelled out because the
+    broadcast is past tense ("day_update" -> "day_updated"), not a derivable suffix.
+    """
+    with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
+        join(ws)
+        ws.send_json(protocol.op_frame(op, op_id, data))
+        return read_op(ws, applied_op)
 
 
 def test_optimize_dry_run_does_not_reorder(client) -> None:
@@ -85,15 +102,7 @@ def test_optimize_apply_reorders_and_schedules(client) -> None:
 
     # Undo: sending the previous order back through day_reorder restores it.
     with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
-        ws.send_json(
-            {
-                "v": 1,
-                "type": "hello",
-                "data": {"client_id": "c-1", "name": "小明", "color": "#123456"},
-            }
-        )
-        ws.receive_json()  # welcome
-        ws.receive_json()  # own presence_join
+        join(ws)
         ws.send_json(
             {
                 "v": 1,
@@ -103,8 +112,7 @@ def test_optimize_apply_reorders_and_schedules(client) -> None:
                 "data": {"day_id": day, "place_ids": body["prev_place_ids"]},
             }
         )
-        frame = ws.receive_json()
-        assert frame["type"] == "op" and frame["op"] == "day_reordered"
+        frame = read_op(ws, "day_reordered")
         assert frame["data"]["place_ids"] == body["prev_place_ids"]
 
     restored = testclient.get(f"/api/trips/{trip_id}").json()["places"]
@@ -119,15 +127,7 @@ def test_optimize_respects_locked_anchor(client) -> None:
     current_position = current.index(locked_id)
 
     with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
-        ws.send_json(
-            {
-                "v": 1,
-                "type": "hello",
-                "data": {"client_id": "c-1", "name": "小明", "color": "#123456"},
-            }
-        )
-        ws.receive_json()
-        ws.receive_json()
+        join(ws)
         ws.send_json(
             {
                 "v": 1,
@@ -137,7 +137,7 @@ def test_optimize_respects_locked_anchor(client) -> None:
                 "data": {"place_id": locked_id, "locked": True},
             }
         )
-        frame = ws.receive_json()
+        frame = read_op(ws, "place_locked")
         assert frame["op"] == "place_locked"
 
     resp = testclient.post(
@@ -184,7 +184,7 @@ def test_optimize_start_place_rotation_keeps_timed_anchor(client) -> None:
                 "data": {"day_id": day, "patch": {"start_place_id": start_id}},
             }
         )
-        assert ws.receive_json()["op"] == "day_updated"
+        assert read_op(ws, "day_updated")["op"] == "day_updated"
         ws.send_json(
             {
                 "v": 1,
@@ -194,7 +194,7 @@ def test_optimize_start_place_rotation_keeps_timed_anchor(client) -> None:
                 "data": {"place_id": timed_id, "patch": {"start_min": 600}},
             }
         )
-        assert ws.receive_json()["op"] == "place_updated"
+        assert read_op(ws, "place_updated")["op"] == "place_updated"
 
     resp = testclient.post(
         f"/api/trips/{trip_id}/days/{day}/optimize",
@@ -207,3 +207,83 @@ def test_optimize_start_place_rotation_keeps_timed_anchor(client) -> None:
     assert result[0] == start_id, "起点必须钉在首位"
     assert result.index(timed_id) == rotated.index(timed_id), "手设时间的锚不能被旋转挤动"
     assert sorted(result) == sorted(current)
+
+
+def test_optimize_is_not_inert_after_the_first_apply(client) -> None:
+    """M14's regression: applying writes a derived start_min onto every row.
+
+    If the solver or the schedule recurrence read that back as a hand-set anchor, every
+    place would become a nail after the first optimize and the second would return the
+    order it was given -- the day would quietly stop being optimizable.
+    """
+    testclient, trip_id, day, _place_ids = client
+    first = testclient.post(
+        f"/api/trips/{trip_id}/days/{day}/optimize",
+        json={"cost_model": "haversine", "apply": True},
+    ).json()
+    assert first["summary"]["saved_min"] > 0
+
+    scheduled = testclient.get(f"/api/trips/{trip_id}").json()["places"]
+    assert all(p["start_min"] is not None for p in scheduled), "apply must schedule every row"
+    assert all(not p["locked"] for p in scheduled), "derived times must not lock anything"
+    assert [p["id"] for p in scheduled] == first["place_ids"]
+
+    run_ws_op(
+        testclient, trip_id, "day_reorder", "day_reordered", "revert-1",
+        {"day_id": day, "place_ids": first["prev_place_ids"]},
+    )
+
+    reverted = testclient.get(f"/api/trips/{trip_id}").json()["places"]
+    assert [p["id"] for p in reverted] == first["prev_place_ids"], "the revert didn't take"
+
+    second = testclient.post(
+        f"/api/trips/{trip_id}/days/{day}/optimize",
+        json={"cost_model": "haversine", "apply": True},
+    ).json()
+    assert second["summary"]["saved_min"] > 0, "第二次优化空转了：推导时间被当成了锚点"
+    assert second["place_ids"] == first["place_ids"]
+
+
+def test_optimize_pins_the_end_anchor(client) -> None:
+    """终点锚：days.end_place_id 以前是一列死数据，现在优化必须把它留在最后一站。
+
+    酒店设在序列头部是最能暴露问题的位置：既要被搬到末位，又要在那儿钉住不让开放路径
+    挪回来。这是求解器内部的锚，不是用户自己钉的，所以行的 locked 必须保持 False。
+    """
+    testclient, trip_id, day, _place_ids = client
+    current = [p["id"] for p in testclient.get(f"/api/trips/{trip_id}").json()["places"]]
+    end_id = current[0]
+    run_ws_op(
+        testclient, trip_id, "day_update", "day_updated", "end-1",
+        {"day_id": day, "patch": {"end_place_id": end_id}},
+    )
+
+    body = testclient.post(
+        f"/api/trips/{trip_id}/days/{day}/optimize",
+        json={"cost_model": "haversine", "apply": True},
+    ).json()
+    assert body["place_ids"][-1] == end_id, "终点没有被钉在最后一站"
+    assert body["summary"]["saved_min"] > 0, "钉住终点后剩下的点仍应优化"
+    rows = testclient.get(f"/api/trips/{trip_id}").json()["places"]
+    end_row = next(p for p in rows if p["id"] == end_id)
+    assert end_row["locked"] is False
+
+
+def test_optimize_uses_the_trips_day_start(client) -> None:
+    """The endpoint used to hardcode 09:00; trip.day_start_min is what the schedule
+    starts from now -- the same resolution the auto-recompute path uses."""
+    testclient, trip_id, day, _place_ids = client
+    run_ws_op(
+        testclient, trip_id, "trip_update", "trip_updated", "start-1",
+        {"patch": {"day_start_min": 8 * 60}},
+    )
+
+    result = testclient.post(
+        f"/api/trips/{trip_id}/days/{day}/optimize",
+        json={"cost_model": "haversine", "apply": True},
+    ).json()
+    by_id = {p["id"]: p for p in testclient.get(f"/api/trips/{trip_id}").json()["places"]}
+    first_place = by_id[result["place_ids"][0]]
+    last_place = by_id[result["place_ids"][-1]]
+    assert first_place["arrive_min"] == 8 * 60
+    assert result["end_min"] == last_place["start_min"] + last_place["duration_min"]

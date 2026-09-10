@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 
+import { Ellipsis, GripVertical, Lock, LockOpen, MapPin, Navigation, X } from '@/components/icons'
 import type { Place } from '@/types/domain'
 import { formatDuration, formatMin, parseHHMM } from '@/utils/time'
 
@@ -42,8 +43,10 @@ function pressCancel() {
 
 const duration = ref(String(props.place.duration_min))
 const note = ref(props.place.note)
-/** HH:MM for the <input type="time">; null start = empty string (auto-schedule). */
-const startTime = ref(startText(props.place.start_min))
+/** HH:MM for the <input type="time">; seeds from user_start_min -- the hand-set
+ * value. start_min is server-derived and would auto-fill the input (and make
+ * re-picking the same time a silent no-op). */
+const startTime = ref(startText(props.place.user_start_min))
 
 function startText(startMin: number | null): string {
   if (startMin === null || startMin === undefined) return ''
@@ -58,7 +61,7 @@ watch(
     if (active) {
       duration.value = String(props.place.duration_min)
       note.value = props.place.note
-      startTime.value = startText(props.place.start_min)
+      startTime.value = startText(props.place.user_start_min)
     }
   },
 )
@@ -68,6 +71,12 @@ const ringStyle = computed(() =>
     ? { borderColor: props.editingBy.color, boxShadow: `0 0 0 3px ${props.editingBy.color}33` }
     : undefined,
 )
+
+/** 右侧时刻列。start_min 是服务端排程结果：没排过时只能给一个占位破折号。 */
+const clock = computed(() =>
+  props.place.start_min === null ? '—' : formatMin(props.place.start_min),
+)
+const stayText = computed(() => `停留 ${formatDuration(props.place.duration_min)}`)
 
 function commitDuration() {
   const value = Math.max(0, Math.min(24 * 60, Math.round(Number(duration.value) || 0)))
@@ -87,10 +96,10 @@ function commitNote() {
 function commitStart(value: string) {
   const minutes = value.trim() === '' ? null : parseHHMM(value)
   if (value.trim() !== '' && minutes === null) {
-    startTime.value = startText(props.place.start_min)
+    startTime.value = startText(props.place.user_start_min)
     return
   }
-  if ((minutes ?? null) !== (props.place.start_min ?? null)) {
+  if ((minutes ?? null) !== (props.place.user_start_min ?? null)) {
     emit('patch', props.place, { start_min: minutes })
   }
 }
@@ -109,29 +118,41 @@ function commitStart(value: string) {
     @pointermove="pressCancel"
     @pointercancel="pressCancel"
   >
-    <span class="place__drag" title="拖动排序" aria-hidden="true">⋮⋮</span>
-    <span
-      class="place__order"
-      :class="{ 'place__order--locked': place.locked }"
-      :style="creatorColor ? { background: creatorColor } : undefined"
-    >{{ index + 1 }}</span>
+    <span class="place__drag" title="拖动排序" aria-hidden="true">
+      <GripVertical :size="14" />
+    </span>
+
+    <span class="place__lead">
+      <img
+        v-if="place.photo_url"
+        class="place__photo"
+        :src="place.photo_url"
+        :alt="`${place.name} 的照片`"
+        loading="lazy"
+        referrerpolicy="no-referrer"
+      />
+      <span v-else class="place__photo place__photo--empty" aria-hidden="true">
+        <MapPin :size="14" />
+      </span>
+      <span
+        class="place__order"
+        :style="creatorColor ? { background: creatorColor } : undefined"
+      >{{ index + 1 }}</span>
+    </span>
 
     <div class="place__body">
       <div class="place__title">
         <span class="place__name">{{ place.name }}</span>
-        <span v-if="place.locked" class="place__pin tiny" title="已锁定，优化时不参与重排">📌</span>
+        <span v-if="place.locked" class="place__pin tiny" title="已锁定，优化时不参与重排">
+          <Lock :size="11" />
+        </span>
+        <span v-if="place.status === 'confirmed'" class="place__confirmed tiny">已确认</span>
         <span v-if="editingBy" class="place__editor tiny" :style="{ color: editingBy.color }">
           {{ editingBy.name }} 正在编辑
         </span>
       </div>
 
-      <div v-if="place.address" class="place__address tiny muted">{{ place.address }}</div>
-
-      <div class="place__facts tiny muted">
-        <span>停留 {{ formatDuration(place.duration_min) }}</span>
-        <span v-if="place.start_min !== null">· {{ formatMin(place.start_min) }} 开始</span>
-        <span v-if="place.status === 'confirmed'" class="place__confirmed">· 已确认</span>
-      </div>
+      <div v-if="place.address" class="place__address tiny">{{ place.address }}</div>
 
       <div v-if="place.note" class="place__note tiny">{{ place.note }}</div>
 
@@ -152,7 +173,7 @@ function commitStart(value: string) {
           />
         </label>
         <label class="place__field">
-          <span class="tiny muted">开始时间（设置即锁定 📌；留空自动排）</span>
+          <span class="tiny muted">开始时间（设置即锁定；留空自动排）</span>
           <input
             :value="startTime"
             class="input"
@@ -172,7 +193,9 @@ function commitStart(value: string) {
         </label>
         <div class="place__editrow">
           <button class="btn btn--sm" type="button" @click="emit('lock', place, !place.locked)">
-            {{ place.locked ? '📍 取消锁定' : '📌 锁定位置' }}
+            <LockOpen v-if="place.locked" class="ic" :size="13" />
+            <Lock v-else class="ic" :size="13" />
+            {{ place.locked ? '取消锁定' : '锁定位置' }}
           </button>
           <a
             v-if="navHref"
@@ -182,10 +205,15 @@ function commitStart(value: string) {
             rel="noopener"
             title="跳转到高德地图导航"
           >
-            🧭 导航到这里
+            <Navigation class="ic" :size="13" /> 导航到这里
           </a>
         </div>
       </div>
+    </div>
+
+    <div class="place__time">
+      <span class="place__clock">{{ clock }}</span>
+      <span class="place__stay tiny">{{ stayText }}</span>
     </div>
 
     <div class="place__side">
@@ -194,14 +222,14 @@ function commitStart(value: string) {
         title="更多操作"
         @click.stop="emit('menu', place, { x: $event.clientX, y: $event.clientY })"
       >
-        ⋯
+        <Ellipsis :size="14" />
       </button>
       <button
         class="btn btn--sm btn--ghost place__delete"
         title="删除这个地点"
         @click.stop="emit('remove', place)"
       >
-        ✕
+        <X :size="14" />
       </button>
     </div>
   </li>
@@ -212,12 +240,21 @@ function commitStart(value: string) {
   display: flex;
   gap: 8px;
   align-items: flex-start;
-  padding: 10px;
+  padding: 8px 10px;
   cursor: pointer;
   transition:
-    border-color 0.12s ease,
-    box-shadow 0.15s ease,
-    transform 0.15s ease;
+    border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur) var(--ease-out),
+    transform var(--dur) var(--ease-out);
+}
+
+/* 浮起 1px + 阴影升一级：行卡是列表里唯一可点的对象，靠这点位移认领 hover。
+   拖拽中的幽灵不跟浮，否则它会跟旁边的行错开半像素。 */
+.place:hover:not(.place--ghost) {
+  background: var(--surface-hover);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 .place--ghost {
@@ -226,33 +263,64 @@ function commitStart(value: string) {
 
 .place--active {
   border-color: var(--accent);
+  box-shadow: var(--shadow-sm);
 }
 
 .place__drag {
+  display: flex;
   flex: 0 0 auto;
-  padding: 0 2px;
-  color: var(--text-3);
-  font-size: 12px;
-  letter-spacing: -2px;
+  align-items: center;
+  align-self: stretch;
+  padding: 0 1px;
+  color: var(--text-faint);
   cursor: grab;
   user-select: none;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
 }
 
-.place__order {
-  display: grid;
+.place:hover .place__drag,
+.place--active .place__drag {
+  opacity: 1;
+}
+
+.place__lead {
+  position: relative;
   flex: 0 0 auto;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #fff;
-  background: var(--accent);
+}
+
+.place__photo {
+  display: block;
+  width: 34px;
+  height: 34px;
+  background: var(--surface-2);
+  object-fit: cover;
   border-radius: 50%;
 }
 
-.place__order--locked {
-  background: var(--warn);
+.place__photo--empty {
+  display: grid;
+  place-items: center;
+  color: var(--text-faint);
+}
+
+/* 序号＝地图标记上的同一个数字与同一个创建者颜色，读图与读列表因此对得上。 */
+.place__order {
+  position: absolute;
+  right: -5px;
+  bottom: -2px;
+  display: grid;
+  place-items: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  background: var(--accent);
+  border: 1.5px solid var(--surface);
+  border-radius: 999px;
 }
 
 .place__body {
@@ -262,34 +330,33 @@ function commitStart(value: string) {
 
 .place__title {
   display: flex;
-  gap: 6px;
+  gap: 5px;
   align-items: baseline;
 }
 
 .place__name {
   overflow: hidden;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.place__pin {
+  display: inline-flex;
+  color: var(--warn);
 }
 
 .place__editor {
   white-space: nowrap;
 }
 
-.place__address,
-.place__note {
-  margin-top: 2px;
+.place__address {
+  margin-top: 1px;
   overflow: hidden;
+  color: var(--text-2);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.place__facts {
-  display: flex;
-  gap: 4px;
-  margin-top: 4px;
 }
 
 .place__confirmed {
@@ -298,10 +365,31 @@ function commitStart(value: string) {
 
 .place__note {
   padding: 4px 6px;
-  margin-top: 6px;
+  margin-top: 5px;
   white-space: pre-wrap;
-  background: var(--bg);
-  border-radius: 4px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+}
+
+.place__time {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 1px;
+  align-items: flex-end;
+  padding-top: 1px;
+}
+
+.place__clock {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+.place__stay {
+  color: var(--text-2);
+  white-space: nowrap;
 }
 
 .place__edit {
@@ -329,7 +417,6 @@ function commitStart(value: string) {
   flex-wrap: wrap;
 }
 
-a.place__editrow,
 .place__editrow a {
   display: inline-flex;
   align-items: center;
@@ -339,13 +426,29 @@ a.place__editrow,
 .place__side {
   display: flex;
   flex: 0 0 auto;
-  flex-direction: column;
   gap: 2px;
+  align-items: flex-start;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.place:hover .place__side,
+.place--active .place__side {
+  opacity: 1;
 }
 
 .place__menu,
 .place__delete {
-  padding: 2px 7px;
+  padding: 2px 6px;
   font-size: 13px;
 }
+
+/* 触屏没有 hover：把手与行内按钮常驻，否则无法拖动或删除。 */
+@media (hover: none) {
+  .place__drag,
+  .place__side {
+    opacity: 1;
+  }
+}
+
 </style>

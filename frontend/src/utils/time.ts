@@ -37,10 +37,3 @@ export function parseHHMM(text: string): number | null {
   if (hours < 0 || hours > 23 || mins < 0 || mins > 59) return null
   return hours * 60 + mins
 }
-
-/** 1250 -> '1.25 km', 800 -> '800 m'. Amap distances are metres. */
-export function formatDistance(metres: number | null | undefined): string {
-  if (metres === null || metres === undefined || metres < 0) return ''
-  if (metres < 1000) return `${Math.round(metres)} 米`
-  return `${(metres / 1000).toFixed(metres < 10000 ? 1 : 0)} 公里`
-}

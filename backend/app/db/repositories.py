@@ -190,8 +190,8 @@ async def add_place(db: Database, day_id: str, payload: PlaceCreate) -> PlaceOut
         conn.execute(
             """INSERT INTO places (id, day_id, trip_id, sort_index, name, amap_poi_id, address,
                                    lng, lat, duration_min, locked, status, note, added_by,
-                                   rev, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'pending', ?, ?, 1, ?, ?)""",
+                                   photo_url, rev, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'pending', ?, ?, ?, 1, ?, ?)""",
             (
                 place_id,
                 day_id,
@@ -205,6 +205,7 @@ async def add_place(db: Database, day_id: str, payload: PlaceCreate) -> PlaceOut
                 payload.duration_min,
                 payload.note,
                 payload.added_by,
+                payload.photo_url,
                 now,
                 now,
             ),
@@ -311,7 +312,9 @@ async def persist_schedule(
 ) -> int:
     """Write (place_id, travel_min_before, arrive_min, start_min) rows after an
     optimize. Server-derived values, so this bypasses the client patch whitelist but
-    still bumps rev so other clients accept the new rows."""
+    still bumps rev so other clients accept the new rows. Never touches
+    user_start_min -- that column is the user's intent, and overwriting it would pin
+    the whole day to last run's clock times."""
 
     def _persist(conn: sqlite3.Connection) -> int:
         conn.executemany(
@@ -344,6 +347,7 @@ PLACE_PATCH_FIELDS: dict[str, Callable[[object], object]] = {
     "address": str,
     "duration_min": _coerce_int,
     "start_min": _coerce_int,
+    "user_start_min": _coerce_int,
     "note": str,
     "locked": lambda v: 1 if v else 0,
     "status": str,
@@ -530,15 +534,19 @@ async def stash_add(
     address: str = "",
     amap_poi_id: str = "",
     added_by: str = "",
+    photo_url: str = "",
 ) -> StashItemOut:
     item_id = new_id()
 
     def _insert(conn: sqlite3.Connection) -> dict:
         conn.execute(
             """INSERT INTO stash (id, trip_id, name, address, lng, lat, amap_poi_id,
-                                  added_by, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (item_id, trip_id, name, address, lng, lat, amap_poi_id, added_by, now_iso()),
+                                  added_by, photo_url, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                item_id, trip_id, name, address, lng, lat,
+                amap_poi_id, added_by, photo_url, now_iso(),
+            ),
         )
         return dict(conn.execute("SELECT * FROM stash WHERE id = ?", (item_id,)).fetchone())
 

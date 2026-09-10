@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 
 import type {
   Day,
+  DayTimeline,
   Participant,
   Place,
   PlaceCreateInput,
@@ -33,6 +34,9 @@ export interface OptimizeResult {
   place_ids: string[]
   prev_place_ids: string[]
   summary: OptimizeSummary
+  /** 排程后的权威行（含 start_min/arrive_min/travel_min_before）。 */
+  places: Place[]
+  end_min: number
   warnings: string[]
   exact: boolean
 }
@@ -66,6 +70,14 @@ export const useTripStore = defineStore('trip', () => {
   const optimizing = ref(false)
   const optimizeResult = ref<OptimizeResult | null>(null)
 
+  /**
+   * day_id -> the server's schedule for that day. Populated by `timeline_updated` frames,
+   * which follow every op that moves or re-times a place, and by optimize results. The
+   * place rows inside are already in `places` (higher rev, since persist_schedule bumps
+   * it); this map exists for the day-level numbers the rows cannot express.
+   */
+  const timelines = ref<Record<string, DayTimeline>>({})
+
   /** op_id -> optimistic bookkeeping (e.g. which temp row a place_add created). */
   const pendingOps = new Map<string, PlaceAddPending>()
 
@@ -85,6 +97,14 @@ export const useTripStore = defineStore('trip', () => {
     () => currentPlaces.value.find((p) => p.id === selectedPlaceId.value) ?? null,
   )
 
+  /** 当天的排程结果（结束时刻、全程交通、警告）。只在收到过 timeline 帧后有值。 */
+  const currentTimeline = computed(
+    () => (currentDayId.value ? timelines.value[currentDayId.value] ?? null : null),
+  )
+
+  /** 排程提醒（「23:30 才结束」「固定时间早于预计到达」）。不点优化也看得到。 */
+  const currentWarnings = computed(() => currentTimeline.value?.warnings ?? [])
+
   function selectPlace(placeId: string | null) {
     selectedPlaceId.value = placeId
     if (trip.value) {
@@ -99,6 +119,10 @@ export const useTripStore = defineStore('trip', () => {
     participants.value = snap.participants
     presence.value = snap.presence ?? []
     stash.value = snap.stash ?? []
+    const alive = new Set(snap.days.map((d) => d.id))
+    timelines.value = Object.fromEntries(
+      Object.entries(timelines.value).filter(([dayId]) => alive.has(dayId)),
+    )
     if (!currentDayId.value || !snap.days.some((d) => d.id === currentDayId.value)) {
       currentDayId.value = snap.days[0]?.id ?? null
     }
@@ -167,9 +191,11 @@ export const useTripStore = defineStore('trip', () => {
       name: input.name,
       amap_poi_id: input.amap_poi_id ?? '',
       address: input.address ?? '',
+      photo_url: input.photo_url ?? '',
       lng: input.lng,
       lat: input.lat,
       duration_min: input.duration_min ?? 60,
+      user_start_min: null,
       start_min: null,
       arrive_min: null,
       travel_min_before: null,
@@ -241,9 +267,20 @@ export const useTripStore = defineStore('trip', () => {
     useSocketStore().sendOp(Ops.DAY_DELETE, { day_id: dayId })
   }
 
-  /** 设为起点：优化器把这一天从这个地点出发。 */
-  function setStartPlace(dayId: string, placeId: string) {
-    useSocketStore().sendOp(Ops.DAY_UPDATE, { day_id: dayId, patch: { start_place_id: placeId } })
+  /** 设为起点：优化器把这一天从这个地点出发。传空即清除锚点（NULL，不是空串）。 */
+  function setStartPlace(dayId: string, placeId: string | null) {
+    useSocketStore().sendOp(Ops.DAY_UPDATE, {
+      day_id: dayId,
+      patch: { start_place_id: placeId || null },
+    })
+  }
+
+  /** 设为终点：优化器把这一天收在这个地点，排程给出「几点到」。 */
+  function setEndPlace(dayId: string, placeId: string | null) {
+    useSocketStore().sendOp(Ops.DAY_UPDATE, {
+      day_id: dayId,
+      patch: { end_place_id: placeId || null },
+    })
   }
 
   /** Rename a day (or set its date/mode later -- full patch goes through the op). */
@@ -259,11 +296,16 @@ export const useTripStore = defineStore('trip', () => {
     lat: number
     address?: string
     amap_poi_id?: string
+    photo_url?: string
   }
 
   /** 收进想去清单。条目 id 由服务端生成，靠 stash_added 回广播落地。 */
   function stashAdd(input: StashAddInput) {
-    useSocketStore().sendOp(Ops.STASH_ADD, { ...input, added_by: useClientIdentity().name })
+    useSocketStore().sendOp(Ops.STASH_ADD, {
+      ...input,
+      photo_url: input.photo_url ?? '',
+      added_by: useClientIdentity().name,
+    })
   }
 
   function stashRemove(id: string) {
@@ -279,6 +321,7 @@ export const useTripStore = defineStore('trip', () => {
       lat: item.lat,
       address: item.address,
       amap_poi_id: item.amap_poi_id,
+      photo_url: item.photo_url,
     })
     stashRemove(item.id)
   }
@@ -299,17 +342,21 @@ export const useTripStore = defineStore('trip', () => {
 
   // -- optimization --------------------------------------------------------------------
 
-  /** Run the optimizer over the current day over HTTP (it can take seconds on a cold
-   * cache); the resulting order/schedule also arrives as a route_optimized broadcast
-   * for everyone else in the room. */
-  async function optimize(costModel: 'haversine' | 'amap' = 'haversine'): Promise<void> {
-    const dayId = currentDayId.value
-    if (!dayId || !trip.value || optimizing.value) return
+  /** Run the optimizer over one day over HTTP (it can take seconds on a cold cache);
+   * the resulting order/schedule also arrives as a route_optimized broadcast for
+   * everyone else in the room. Day defaults to the selected one (section footers pass
+   * their own dayId so any expanded day can optimize without being selected). */
+  async function optimize(
+    costModel: 'haversine' | 'amap' = 'haversine',
+    dayId: string | null = null,
+  ): Promise<void> {
+    const id = dayId ?? currentDayId.value
+    if (!id || !trip.value || optimizing.value) return
     optimizing.value = true
     opError.value = null
     try {
       const result = await apiFetch<OptimizeResult>(
-        `/api/trips/${trip.value.id}/days/${dayId}/optimize`,
+        `/api/trips/${trip.value.id}/days/${id}/optimize`,
         postJson({ cost_model: costModel, apply: true }),
       )
       applyOptimizeResult(result)
@@ -323,9 +370,22 @@ export const useTripStore = defineStore('trip', () => {
 
   function applyOptimizeResult(result: OptimizeResult) {
     applyOrder(result.day_id, result.place_ids)
-    const incoming = (result as unknown as { places?: Place[] }).places ?? []
-    for (const place of incoming) upsertPlaceIfNewer(place)
+    for (const place of result.places ?? []) upsertPlaceIfNewer(place)
     optimizeResult.value = result
+    // The optimize response is authoritative for the day it ran on: seed the schedule
+    // map exactly like a timeline_updated frame, so 结束时间/警告 appear without
+    // waiting for (or depending on) the route_optimized broadcast echo.
+    timelines.value = {
+      ...timelines.value,
+      [result.day_id]: {
+        day_id: result.day_id,
+        places: result.places ?? [],
+        end_min: result.end_min ?? 0,
+        travel_min: (result.places ?? []).reduce((sum, p) => sum + (p.travel_min_before ?? 0), 0),
+        warnings: result.warnings ?? [],
+        exact: result.exact ?? false,
+      },
+    }
   }
 
   /** One-click undo: replay the previous order through the normal reorder op. */
@@ -422,6 +482,13 @@ export const useTripStore = defineStore('trip', () => {
         pendingOps.delete(frame.op_id)
         break
       }
+      case 'timeline_updated': {
+        // Follows every schedule-affecting op (and greets a joining client). Rows ride
+        // the normal rev guard -- a dry-run join frame carries equal revs and only
+        // refreshes the day-level numbers below.
+        for (const t of (data.timelines ?? []) as DayTimeline[]) applyTimelineSummary(t)
+        break
+      }
       case 'route_optimized': {
         // Someone else ran the optimizer (or we did, via HTTP): converge on the
         // authoritative order and schedule. The op_id is server-generated, so every
@@ -468,14 +535,14 @@ export const useTripStore = defineStore('trip', () => {
 
   // -- presence ------------------------------------------------------------------------
 
-  /** 别人（非自己）正在拖动某天的顺序时给出提示；本人拖动的 presence 自己也会收到，
-   * 按client_id 过滤掉。 */
-  const remoteDragger = computed(() => {
-    if (!currentDayId.value) return null
-    const other = presence.value.find(
-      (p) => p.client_id !== getClientId() && p.dragging_day_id === currentDayId.value,
-    )
-    return other ? { name: other.name, color: other.color } : null
+  /** 谁（非自己）正在拖动哪一天：day_id -> 提示信息。天区块头各自展示自己那天的。 */
+  const draggersByDay = computed(() => {
+    const map = new Map<string, { name: string; color: string }>()
+    for (const p of presence.value) {
+      if (p.client_id === getClientId() || !p.dragging_day_id) continue
+      map.set(p.dragging_day_id, { name: p.name, color: p.color })
+    }
+    return map
   })
 
   function applyPresence(p: Presence) {
@@ -497,6 +564,13 @@ export const useTripStore = defineStore('trip', () => {
   }
 
   // -- row helpers ---------------------------------------------------------------------
+
+  /** One day's authoritative schedule: rows go through the rev guard, the day-level
+   * numbers (end_min/travel_min/warnings/exact) always land. */
+  function applyTimelineSummary(t: DayTimeline) {
+    for (const place of t.places) upsertPlaceIfNewer(place)
+    timelines.value = { ...timelines.value, [t.day_id]: t }
+  }
 
   /** Server rows win on strictly greater rev; equal rev means we already have it. */
   function upsertPlaceIfNewer(place: Place) {
@@ -535,6 +609,7 @@ export const useTripStore = defineStore('trip', () => {
     places,
     participants,
     presence,
+    stash,
     currentDayId,
     selectedPlaceId,
     loading,
@@ -542,9 +617,12 @@ export const useTripStore = defineStore('trip', () => {
     opError,
     optimizing,
     optimizeResult,
+    timelines,
     currentDay,
     currentPlaces,
     selectedPlace,
+    currentTimeline,
+    currentWarnings,
     selectPlace,
     applySnapshot,
     load,
@@ -559,7 +637,7 @@ export const useTripStore = defineStore('trip', () => {
     updateDay,
     deleteDay,
     setStartPlace,
-    stash,
+    setEndPlace,
     stashAdd,
     stashRemove,
     promoteFromStash,
@@ -571,7 +649,7 @@ export const useTripStore = defineStore('trip', () => {
     applyReject,
     applyPresence,
     removePresence,
-    remoteDragger,
+    draggersByDay,
     creatorColorOf,
     clearPendingOps,
     applyOrder,

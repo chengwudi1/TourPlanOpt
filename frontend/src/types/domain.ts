@@ -42,9 +42,13 @@ export interface Place {
   name: string
   amap_poi_id: string
   address: string
+  photo_url: string
   lng: number
   lat: number
   duration_min: number
+  /** 用户手填的时刻：排程唯一当作固定的时间。null = 从没设过。 */
+  user_start_min: number | null
+  /** 以下三个都由服务端排程推导，每次顺序/时长变更都会覆盖，只当展示值用。 */
   start_min: number | null
   arrive_min: number | null
   travel_min_before: number | null
@@ -81,6 +85,7 @@ export interface StashItem {
   id: string
   name: string
   address: string
+  photo_url: string
   lng: number
   lat: number
   amap_poi_id: string
@@ -88,6 +93,11 @@ export interface StashItem {
   created_at: string
 }
 
+/**
+ * The whole trip over REST. Deliberately WITHOUT any schedule summary: recomputing one
+ * for every day would turn the read-only snapshot path into a routing pass, so day-level
+ * results arrive separately as `timeline_updated` frames (and ride along with optimize).
+ */
 export interface Snapshot {
   trip: Trip
   days: Day[]
@@ -95,6 +105,16 @@ export interface Snapshot {
   participants: Participant[]
   presence: Presence[]
   stash: StashItem[]
+}
+
+/** One day's authoritative schedule: mirrored from timeline.py DayTimeline.payload(). */
+export interface DayTimeline {
+  day_id: string
+  places: Place[]
+  end_min: number
+  travel_min: number
+  warnings: string[]
+  exact: boolean
 }
 
 /** A POI from the backend proxy. Coordinates are GCJ-02 -- never convert them. */
@@ -106,6 +126,8 @@ export interface Poi {
   lat: number
   city: string
   district: string
+  /** 首张实拍图直链（place_text extensions=all 才有；inputtips 没有）。 */
+  photo?: string
 }
 
 export interface TripCreateResult {
@@ -119,6 +141,7 @@ export interface PlaceCreateInput {
   lng: number
   lat: number
   address?: string
+  photo_url?: string
   amap_poi_id?: string
   duration_min?: number
   note?: string

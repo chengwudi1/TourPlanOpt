@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from 'vue'
 
+import { ShoppingBasket } from '@/components/icons'
 import type { Poi } from '@/types/domain'
 import { ApiError, apiFetch } from '@/utils/api'
 
@@ -123,7 +124,7 @@ onBeforeUnmount(() => {
           title="先存进想去清单，不排进今天"
           @mousedown.stop.prevent="emit('stash', poi)"
         >
-          🧺
+          <ShoppingBasket :size="14" />
         </button>
       </li>
     </ul>
@@ -141,7 +142,7 @@ onBeforeUnmount(() => {
 
 .search__list {
   position: absolute;
-  z-index: 20;
+  z-index: var(--z-pop);
   top: calc(100% + 4px);
   right: 0;
   left: 0;
@@ -153,7 +154,7 @@ onBeforeUnmount(() => {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-md);
 }
 
 .search__item {

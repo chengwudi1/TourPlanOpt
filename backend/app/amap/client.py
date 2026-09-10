@@ -39,6 +39,10 @@ MAX_ATTEMPTS = 3
 # Base for exponential backoff. A module constant so tests can zero it out
 # rather than sleeping for real seconds.
 RETRY_BASE_DELAY = 0.5
+# Hard ceiling on the best-effort photo lookup. A slow /place/detail must never stall
+# adding a place, so this is deliberately short. A constant so tests can drive the
+# timeout path without waiting for real.
+PHOTO_TIMEOUT_S = 3.0
 
 
 def fmt_coord(c: Coord) -> str:
@@ -87,6 +91,8 @@ class Poi:
     lat: float
     city: str
     district: str
+    # 首张实拍图 URL（extensions=all 才有）。仅在高德返回 http(s) 链接时填，缺省空串。
+    photo: str = ""
 
 
 @dataclass(slots=True)
@@ -304,6 +310,7 @@ class AmapWebClient:
         # keywords and types are alternative filters; at least one must be present.
         if not keyword and not types:
             raise AmapParamError("place_text 需要 keyword 或 types 之一")
+        # extensions=all 才带 photos；place_text 一次请求顺带拿到，零额外配额。
         body = await self._get(
             "/v3/place/text",
             {
@@ -313,7 +320,7 @@ class AmapWebClient:
                 "citylimit": "true" if city else None,
                 "offset": page_size,
                 "page": page,
-                "extensions": "base",
+                "extensions": "all",
             },
         )
         pois = [_to_poi(p) for p in (body.get("pois") or [])]
@@ -328,6 +335,30 @@ class AmapWebClient:
         )
         tips = [_to_tip(t) for t in (body.get("tips") or [])]
         return [t for t in tips if t is not None]
+
+    async def photo_for_poi(self, poi_id: str) -> str:
+        """POI 详情里的首张实拍图 URL；没有照片或字段异常时返回空串。
+
+        inputtips（搜索框联想）不带照片，所以「搜索→加地点」路径在落库前用这个补一张，
+        每个地点只花 1 次调用。"""
+        body = await self._get(
+            "/v3/place/detail",
+            {"id": poi_id, "extensions": "all"},
+        )
+        return _first_photo_url(body.get("pois") or [])
+
+
+async def fetch_photo_best_effort(poi_id: str) -> str:
+    """POI id → 首张实拍图 URL。照片是锦上添花：任何失败（没配 Key、限流、超时、
+    无照片）都返回空串，绝不阻塞或破坏加地点/收清单这个主操作。
+
+    REST 与 WS 两条加地点路径共用这一个实现。"""
+    try:
+        return await asyncio.wait_for(
+            get_amap_client().photo_for_poi(poi_id), timeout=PHOTO_TIMEOUT_S
+        )
+    except Exception:  # noqa: BLE001 - 照片拿不到就算了，原因不重要
+        return ""
 
 
 def _is_int(value: Any) -> bool:
@@ -353,7 +384,40 @@ def _to_poi(raw: dict[str, Any]) -> Poi | None:
         lat=coord[1],
         city=_as_str(raw.get("cityname")),
         district=_as_str(raw.get("adname")),
+        photo=_first_photo_url([raw] if isinstance(raw, dict) else []),
     )
+
+
+def _first_photo_url(nodes: list[Any]) -> str:
+    """extensions=all 响应里 pois[*].photos[*].url 的第一个 http(s) 链接。
+
+    高德偶尔给非 http 前缀或空 url 的占位项，一律跳过；解析容错——照片拿不到
+    不应该影响地点本身入库。"""
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        photos = node.get("photos")
+        if not isinstance(photos, list):
+            continue
+        for photo in photos:
+            url = photo.get("url") if isinstance(photo, dict) else None
+            if isinstance(url, str) and url.startswith(("http://", "https://")):
+                return _prefer_https(url)
+    return ""
+
+
+# 高德自有图床，同一个 showpic id 换协议即可取到（已实测两种都 200）。其他类别的
+# photos[].url 可能指向第三方站点，不保证支持 https，所以只升这一个 host。
+_HTTPS_CAPABLE_PHOTO_HOSTS = frozenset({"store.is.autonavi.com"})
+
+
+def _prefer_https(url: str) -> str:
+    """页面一旦走 https，http 缩略图会被浏览器当混合内容直接拦掉。"""
+    if not url.startswith("http://"):
+        return url
+    rest = url[len("http://") :]
+    host = rest.split("/", 1)[0]
+    return f"https://{rest}" if host in _HTTPS_CAPABLE_PHOTO_HOSTS else url
 
 
 def _to_tip(raw: dict[str, Any]) -> Poi | None:
