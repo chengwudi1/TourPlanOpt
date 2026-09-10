@@ -8,6 +8,7 @@
  */
 import { computed, onMounted, ref } from 'vue'
 
+import { ShieldCheck } from '@/components/icons'
 import { ensureAmap, useAmap } from '@/composables/useAmap'
 
 interface KeyCheck {
@@ -28,6 +29,7 @@ const webKey = ref<KeyCheck | null>(null)
 const jsKey = ref<KeyCheck | null>(null)
 
 const dismissed = ref(false)
+const expanded = ref(false)
 
 // The backend already reports "AMAP_JS_KEY is not configured". Suppressing the
 // browser's duplicate of that same diagnosis keeps the panel to one line per
@@ -59,6 +61,7 @@ async function checkBackend() {
 
 async function recheckAll() {
   dismissed.value = false
+  expanded.value = true
   await Promise.all([checkBackend(), ensureAmap().catch(() => undefined)])
 }
 
@@ -77,8 +80,16 @@ const allGood = () =>
 </script>
 
 <template>
-  <div v-if="!dismissed" class="keycheck">
-    <div v-if="allGood()" class="banner banner--ok">
+  <div v-if="!dismissed" class="keycheck" :class="{ 'keycheck--quiet': allGood() && !expanded }">
+    <!-- 自检通过时只留一行：这块诊断是给「出问题了」看的，正常状态不该占走首屏。 -->
+    <div v-if="allGood() && !expanded" class="keycheck__quiet">
+      <ShieldCheck class="ic keycheck__ok-icon" :size="14" />
+      <span>高德 Key 已就绪</span>
+      <span class="tiny muted">Web服务 {{ webKey?.latency_ms }}ms · JS API {{ status }}</span>
+      <button class="btn btn--sm btn--ghost" type="button" @click="expanded = true">详情</button>
+    </div>
+
+    <div v-else-if="allGood()" class="banner banner--ok">
       <span class="dot dot--ok" />
       <div class="banner__body">
         <div class="banner__title">高德 Key 自检通过</div>
@@ -86,7 +97,12 @@ const allGood = () =>
           Web服务 Key 探活 {{ webKey?.latency_ms }}ms · JS API {{ status }}
         </div>
       </div>
-      <button class="btn btn--sm btn--ghost" type="button" @click="dismissed = true">收起</button>
+      <button class="btn btn--sm btn--ghost" type="button" @click="expanded = false">
+        收起详情
+      </button>
+      <button class="btn btn--sm btn--ghost" type="button" @click="dismissed = true">
+        不再显示
+      </button>
     </div>
 
     <template v-else>
@@ -200,6 +216,29 @@ const allGood = () =>
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
 }
+
+.keycheck--quiet {
+  padding: 6px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-faint);
+}
+
+.keycheck__quiet {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.keycheck__ok-icon {
+  color: var(--ok);
+}
+
+.keycheck__quiet .btn--ghost {
+  margin-left: auto;
+}
+
 .keycheck__actions {
   display: flex;
   gap: 8px;

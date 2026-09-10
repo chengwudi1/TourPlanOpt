@@ -92,8 +92,10 @@ def test_recommendations_cached_and_shaped(client: TestClient, monkeypatch: pyte
 
     calls: list[str] = []
 
-    async def fake_place_text(self, keyword=None, city=None, page=1, page_size=20, types=None):
-        calls.append(f"{city}:{types}:{keyword}")
+    async def fake_place_text(
+        self, keyword=None, city=None, page=1, page_size=20, types=None, sort_rule=None
+    ):
+        calls.append(f"{city}:{types}:{keyword}:{sort_rule}")
         return PoiPage(
             count=1,
             pois=[Poi(id="B001", name="外滩", address="中山东一路", lng=121.49, lat=31.23,

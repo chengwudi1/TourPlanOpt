@@ -89,6 +89,28 @@ class Database:
                 "UPDATE places SET user_start_min = start_min "
                 "WHERE locked = 1 AND start_min IS NOT NULL"
             )
+        # M21 发现面板排序：缓存键从 (city, category) 扩到 (city, category, sort)。SQLite
+        # 改不了主键，只能建新表搬数据——老库里那一份就是默认的综合序。
+        cache_cols = {
+            row["name"] for row in conn.execute("PRAGMA table_info(city_poi_cache)").fetchall()
+        }
+        if cache_cols and "sort" not in cache_cols:
+            conn.executescript(
+                """
+                CREATE TABLE city_poi_cache_new (
+                    city       TEXT NOT NULL,
+                    category   TEXT NOT NULL,
+                    sort       TEXT NOT NULL,
+                    payload    TEXT NOT NULL,
+                    fetched_at TEXT NOT NULL,
+                    PRIMARY KEY (city, category, sort)
+                );
+                INSERT INTO city_poi_cache_new
+                    SELECT city, category, 'composite', payload, fetched_at FROM city_poi_cache;
+                DROP TABLE city_poi_cache;
+                ALTER TABLE city_poi_cache_new RENAME TO city_poi_cache;
+                """
+            )
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=5.0)

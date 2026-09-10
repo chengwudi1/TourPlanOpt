@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from 'vue'
 
-import { ShoppingBasket } from '@/components/icons'
+import { LoaderCircle, Search, ShoppingBasket } from '@/components/icons'
 import type { Poi } from '@/types/domain'
 import { ApiError, apiFetch } from '@/utils/api'
 
@@ -14,6 +14,9 @@ const open = ref(false)
 const busy = ref(false)
 const failure = ref<{ message: string; hint: string } | null>(null)
 const activeIndex = ref(-1)
+const inputEl = ref<HTMLInputElement | null>(null)
+
+defineExpose({ focus: () => inputEl.value?.focus() })
 
 let timer: ReturnType<typeof setTimeout> | null = null
 
@@ -85,20 +88,23 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="search">
-    <input
-      v-model="keyword"
-      class="input"
-      type="text"
-      placeholder="搜索地点，例如「外滩」"
-      autocomplete="off"
-      @input="onInput"
-      @keydown="onKeydown"
-      @focus="open = results.length > 0"
-    />
+    <div class="search__bar">
+      <Search class="ic search__icon" :size="15" />
+      <input
+        ref="inputEl"
+        v-model="keyword"
+        class="search__input"
+        type="text"
+        placeholder="搜索地点，例如「外滩」"
+        autocomplete="off"
+        @input="onInput"
+        @keydown="onKeydown"
+        @focus="open = results.length > 0"
+      />
+      <LoaderCircle v-if="busy" class="ic search__spin" :size="15" />
+    </div>
 
-    <div v-if="busy" class="search__status tiny muted">搜索中…</div>
-
-    <div v-if="failure" class="banner banner--danger">
+    <div v-if="failure" class="banner banner--danger search__fail">
       <div class="banner__body">
         <div class="banner__title">{{ failure.message }}</div>
         <div v-if="failure.hint" class="banner__hint">{{ failure.hint }}</div>
@@ -136,8 +142,57 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
-.search__status {
-  margin-top: 4px;
+.search__bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  height: 38px;
+  padding: 0 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.search__bar:focus-within {
+  background: var(--surface);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.search__icon {
+  color: var(--text-3);
+}
+
+.search__input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  outline: none;
+}
+
+.search__input::placeholder {
+  color: var(--text-2);
+}
+
+.search__spin {
+  color: var(--text-2);
+  animation: search-spin 0.9s linear infinite;
+}
+
+@keyframes search-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.search__fail {
+  margin-top: 6px;
 }
 
 .search__list {

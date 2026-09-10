@@ -8,8 +8,11 @@ is the one place a mistake destroys existing trips rather than just failing a te
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
+
+import pytest
 
 from app.db.database import Database
 
@@ -46,6 +49,10 @@ CREATE TABLE stash (
     lat REAL NOT NULL, amap_poi_id TEXT NOT NULL DEFAULT '',
     added_by TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
 );
+CREATE TABLE city_poi_cache (
+    city TEXT NOT NULL, category TEXT NOT NULL, payload TEXT NOT NULL,
+    fetched_at TEXT NOT NULL, PRIMARY KEY (city, category)
+);
 """
 
 ROWS = {
@@ -78,6 +85,10 @@ def build_old_db(path: Path) -> None:
             """INSERT INTO stash (id, trip_id, name, lng, lat, created_at)
                VALUES (?, ?, ?, 121.5, 31.2, 'x')""",
             ROWS["stash"],
+        )
+        conn.execute(
+            "INSERT INTO city_poi_cache (city, category, payload, fetched_at)"
+            " VALUES ('上海', 'scenic', '[{\"id\": \"B001\", \"name\": \"外滩\"}]', 'x')",
         )
         conn.commit()
     finally:
@@ -224,6 +235,41 @@ async def test_trips_created_by_column_is_added_too(tmp_path: Path) -> None:
     trip = await (Database(path)).fetch_one("SELECT created_by FROM trips WHERE id = ?", ("T0",))
     assert "created_by" in trip
     assert trip["created_by"] is None
+
+
+async def test_city_poi_cache_key_gains_sort(tmp_path: Path) -> None:
+    """M21：缓存主键从 (city, category) 扩到 (city, category, sort)。
+
+    SQLite 改不了主键，只能建新表搬数据。这里守三件事：老行原样落到 composite 档（不
+    能丢缓存，丢了就是白烧配额）、新主键真能容纳同一 (city, category) 的第二档、以及
+    重复启动不会再搬一次表。
+    """
+    path = tmp_path / "old.db"
+    build_old_db(path)
+    db = Database(path)
+    await db.init()
+    await db.init()  # 第二次必须认出 sort 列已存在，不再重建
+
+    row = await db.fetch_one(
+        "SELECT * FROM city_poi_cache WHERE city = '上海' AND category = 'scenic'"
+    )
+    assert row is not None and row["sort"] == "composite"
+    assert json.loads(row["payload"])[0]["name"] == "外滩"
+
+    await db.execute(
+        "INSERT INTO city_poi_cache (city, category, sort, payload, fetched_at)"
+        " VALUES ('上海', 'scenic', 'hot', '[]', 'x')"
+    )
+    hot = await db.fetch_one(
+        "SELECT sort FROM city_poi_cache WHERE city = '上海' AND sort = 'hot'"
+    )
+    assert hot["sort"] == "hot"
+    # 老主键的排他性也还在：同一条 (city, category, sort) 插两次要炸
+    with pytest.raises(sqlite3.IntegrityError):
+        await db.execute(
+            "INSERT INTO city_poi_cache (city, category, sort, payload, fetched_at)"
+            " VALUES ('上海', 'scenic', 'hot', '[]', 'x')"
+        )
 
 
 async def _snapshot_trip(path: Path) -> dict:

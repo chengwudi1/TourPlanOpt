@@ -15,6 +15,9 @@ backend/data/
 .env.local
 .env.*.local
 !.env.example
+# httpx 在 INFO 级会把带 AMAP_WEB_KEY 的完整请求 URL 打进 stdout，
+# 而 dev.sh / 手动起服务都会把它重定向到这个文件
+.dev-backend.log
 
 # --- Node / Vite ---
 node_modules/

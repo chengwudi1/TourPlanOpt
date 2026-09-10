@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 
 import type { Presence } from '@/types/domain'
 import type { SocketStatus } from '@/stores/socket'
-import { ArrowLeft } from '@/components/icons'
+import { ArrowLeft, ImageDown, Link2, User } from '@/components/icons'
 import { useAuthStore } from '@/stores/auth'
 import { useTripStore } from '@/stores/trip'
 import { shareTripCard } from '@/utils/shareCard'
@@ -17,7 +17,7 @@ const props = defineProps<{
   status: SocketStatus
 }>()
 
-const emit = defineEmits<{ share: []; rename: [] }>()
+const emit = defineEmits<{ share: []; rename: []; setCity: [] }>()
 
 const auth = useAuthStore()
 const store = useTripStore()
@@ -70,30 +70,50 @@ const statusLabel = computed(() => {
 
 <template>
   <header class="triphead">
-    <button class="triphead__back" type="button" title="返回" aria-label="返回首页" @click="goBack">
+    <button
+      class="iconbtn triphead__back"
+      type="button"
+      title="返回"
+      aria-label="返回首页"
+      @click="goBack"
+    >
       <ArrowLeft :size="16" />
     </button>
-    <strong>TourPlanOpt</strong>
-    <span
-      class="triphead__title"
+
+    <h1
+      class="triphead__name"
       :title="props.title ? '点击重命名行程' : '点击设置行程名'"
       @click="emit('rename')"
     >
-      {{ title || '未命名行程' }}
-      <span v-if="city" class="muted tiny">· {{ city }}</span>
-    </span>
+      <span class="triphead__text">{{ title || '未命名行程' }}</span>
+      <button
+        class="triphead__city tiny"
+        type="button"
+        :title="city ? '点击修改目的地城市' : '点击设置目的地城市：推荐与搜索定位都靠它'"
+        @click.stop="emit('setCity')"
+      >
+        {{ city || '设城市' }}
+      </button>
+    </h1>
+
     <span class="triphead__spacer" />
 
-    <span class="triphead__status tiny" :class="`triphead__status--${status}`">
-      <span class="dot" :class="`dot--${status === 'online' ? 'ok' : 'warn'}`" />
-      <span>{{ statusLabel }}</span>
+    <span
+      class="triphead__status tiny"
+      :class="`triphead__status--${status}`"
+      :title="statusLabel"
+    >
+      <span class="dot dot--pulse" :class="`dot--${status === 'online' ? 'ok' : 'warn'}`" />
+      <span v-if="status !== 'online'">{{ statusLabel }}</span>
     </span>
 
     <span v-if="auth.user" class="triphead__user tiny">
       {{ auth.user.name }}
       <button class="btn btn--sm btn--ghost" type="button" @click="auth.logout()">退出</button>
     </span>
-    <a v-else class="triphead__user tiny" href="/">登录</a>
+    <a v-else class="triphead__login tiny" href="/">
+      <User :size="13" /> 登录
+    </a>
 
     <div v-if="initials.length" class="avatars" title="此刻在线">
       <span
@@ -107,11 +127,17 @@ const statusLabel = computed(() => {
       </span>
     </div>
 
-    <button class="btn btn--sm" type="button" :disabled="sharing || !store.currentPlaces.length" @click="shareImage">
-      {{ sharing ? '生成中…' : '分享图' }}
+    <button
+      class="iconbtn"
+      type="button"
+      :disabled="sharing || !store.currentPlaces.length"
+      :title="sharing ? '正在生成分享图…' : '生成分享图'"
+      @click="shareImage"
+    >
+      <ImageDown :size="16" />
     </button>
-    <button class="btn btn--sm" type="button" @click="emit('share')">
-      分享链接
+    <button class="iconbtn" type="button" title="复制协作链接" @click="emit('share')">
+      <Link2 :size="16" />
     </button>
   </header>
 </template>
@@ -119,33 +145,55 @@ const statusLabel = computed(() => {
 <style scoped>
 .triphead {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
+  flex: 0 0 var(--header-h);
+  height: var(--header-h);
+  padding: 0 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
 }
 
 .triphead__back {
-  display: grid;
-  flex: 0 0 auto;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  font-size: 17px;
-  color: var(--text-2);
   background: var(--surface-2);
-  border: 0;
   border-radius: 50%;
+}
+
+/* 行程名是这一屏的主角；品牌字留在首页，这里不占位。 */
+.triphead__name {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
   cursor: pointer;
 }
 
-.triphead__back:hover {
-  color: var(--accent-strong);
-  background: var(--accent-soft);
-}
-
-.triphead__title {
+.triphead__text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.triphead__city {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.triphead__city:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .triphead__spacer {
@@ -172,9 +220,19 @@ const statusLabel = computed(() => {
   white-space: nowrap;
 }
 
-a.triphead__user {
+.triphead__login {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding: 4px 9px;
   color: var(--accent);
   text-decoration: none;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.triphead__login:hover {
+  background: var(--accent-soft);
 }
 
 .avatars {

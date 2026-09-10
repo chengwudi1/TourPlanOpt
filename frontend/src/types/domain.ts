@@ -21,6 +21,26 @@ export interface Trip {
   created_at: string
 }
 
+/**
+ * 首页仪表盘用的只读摘要（GET /api/trips/summary）。
+ *
+ * 不复用 Trip + 完整快照：`GET /api/trips/{id}` 在登录态下会顺手写一条 trip_visits
+ * 足迹，把仪表盘渲染变成「打开过」——刚排好的「最近打开」顺序会被自己的渲染刷掉。
+ * 摘要接口只读，且一次请求换一批行程。
+ */
+export interface TripSummary {
+  id: string
+  title: string
+  city: string
+  travel_mode: TravelMode
+  day_count: number
+  place_count: number
+  companion_count: number
+  cover_photo: string
+  updated_at: string
+  created_at: string
+}
+
 export interface Day {
   id: string
   trip_id: string
@@ -128,11 +148,27 @@ export interface Poi {
   district: string
   /** 首张实拍图直链（place_text extensions=all 才有；inputtips 没有）。 */
   photo?: string
+  /** 「发现」按距离排序时服务端回填的直线距离（米）；其余排序为 null。 */
+  distance_m?: number | null
+}
+
+/** 与后端 `TripCreate` 对齐。除 title 外全部可选：建行程这一步不许因为缺字段而失败。 */
+export interface TripCreate {
+  title: string
+  city: string
+  travel_mode: TravelMode
+  days: number
+  /** 'YYYY-MM-DD'；服务端读不懂就当没填，不会报错。 */
+  start_date: string | null
+  /** null 表示沿用服务端默认的 09:00。 */
+  day_start_min: number | null
 }
 
 export interface TripCreateResult {
   trip_id: string
   day_id: string
+  /** 服务端实际建出的天数——`days` 会被夹取，不能拿自己发出去的那个数显示。 */
+  day_count: number
   share_url: string
 }
 

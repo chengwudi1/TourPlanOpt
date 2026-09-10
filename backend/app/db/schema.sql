@@ -140,13 +140,15 @@ CREATE TABLE IF NOT EXISTS trip_visits (
     PRIMARY KEY (trip_id, user_id)
 );
 
--- 推荐缓存：按 (city, category) 存整页结果，24h TTL——同一城市一天最多烧一次配额。
+-- 推荐缓存：按 (city, category, sort) 存整页结果，24h TTL——同一城市一天最多烧一次配额。
 CREATE TABLE IF NOT EXISTS city_poi_cache (
     city       TEXT NOT NULL,
     category   TEXT NOT NULL,
+    sort       TEXT NOT NULL,                  -- 'composite' | 'hot'
     payload    TEXT NOT NULL,                 -- JSON array of PoiOut
     fetched_at TEXT NOT NULL,
-    PRIMARY KEY (city, category)
+    -- 'distance' 不在这一列里：它不查上游，拿 composite 那份自己算直线距离重排。
+    PRIMARY KEY (city, category, sort)
 );
 
 -- 暂存区（想去清单）：先丢想法，再择日排进行程。与 places 分表——

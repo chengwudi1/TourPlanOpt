@@ -10,6 +10,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import date, timedelta
 
 from app.db.database import Database
 from app.models.domain import (
@@ -21,9 +22,10 @@ from app.models.domain import (
     StashItemOut,
     TravelMode,
     TripOut,
+    TripSummary,
 )
 from app.util.ids import new_id
-from app.util.timefmt import now_iso
+from app.util.timefmt import clamp_min, now_iso
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +60,29 @@ def _ordered_ids(conn: sqlite3.Connection, day_id: str) -> list[str]:
 
 # -- trips -------------------------------------------------------------------------
 
+# 创建表单上的天数是可选字段：可能有人填 99，也可能被脚本灌进一个负数。
+MAX_TRIP_DAYS = 30
+
+
+def clamp_trip_days(days: int) -> int:
+    """Clamp instead of reject: building a trip must never fail on a bad count."""
+    return max(1, min(int(days), MAX_TRIP_DAYS))
+
+
+def day_dates(start_date: str | None, count: int) -> list[str | None]:
+    """['2026-10-01', '2026-10-02', ...], or all-NULL when `start_date` is absent or junk.
+
+    A date the user has only half-typed must not block creation, so an unparseable
+    value degrades to "no dates" rather than a 422.
+    """
+    if not start_date:
+        return [None] * count
+    try:
+        first = date.fromisoformat(start_date.strip())
+    except ValueError:
+        return [None] * count
+    return [(first + timedelta(days=i)).isoformat() for i in range(count)]
+
 
 async def create_trip(
     db: Database,
@@ -66,26 +91,35 @@ async def create_trip(
     city: str = "",
     travel_mode: TravelMode = TravelMode.DRIVING,
     created_by: str | None = None,
+    days: int = 1,
+    start_date: str | None = None,
+    day_start_min: int | None = None,
 ) -> tuple[str, str]:
-    """Creates the trip and its first day. Returns (trip_id, day_id)."""
-    trip_id, day_id = new_id(), new_id()
+    """Creates the trip and its first `days` days. Returns (trip_id, first_day_id)."""
+    count = clamp_trip_days(days)
+    dates = day_dates(start_date, count)
+    trip_id = new_id()
+    day_ids = [new_id() for _ in range(count)]
     now = now_iso()
+    start_min = 540 if day_start_min is None else clamp_min(day_start_min)
 
     def _create(conn: sqlite3.Connection) -> None:
         conn.execute(
             """INSERT INTO trips (id, title, city, travel_mode, cost_model, day_start_min, seq,
                                   created_by, created_at)
-               VALUES (?, ?, ?, ?, 'haversine', 540, 0, ?, ?)""",
-            (trip_id, title, city, str(travel_mode), created_by, now),
+               VALUES (?, ?, ?, ?, 'haversine', ?, 0, ?, ?)""",
+            (trip_id, title, city, str(travel_mode), start_min, created_by, now),
         )
-        conn.execute(
+        # 天标题一律留空。这里原先写的是**行程**标题，于是天头读起来像行程名而不是
+        # 「第 1 天」；DaySection 自己会在空标题时回落到 `第 N 天`。
+        conn.executemany(
             """INSERT INTO days (id, trip_id, day_index, date, title, rev)
-               VALUES (?, ?, 0, NULL, ?, 1)""",
-            (day_id, trip_id, title or "第 1 天"),
+               VALUES (?, ?, ?, ?, '', 1)""",
+            [(day_ids[i], trip_id, i, dates[i]) for i in range(count)],
         )
 
     await db.run(_create)
-    return trip_id, day_id
+    return trip_id, day_ids[0]
 
 
 async def get_snapshot(db: Database, trip_id: str) -> Snapshot | None:
@@ -114,6 +148,61 @@ async def get_snapshot(db: Database, trip_id: str) -> Snapshot | None:
             participants=[ParticipantOut.model_validate(dict(r)) for r in participant_rows],
             stash=[StashItemOut.model_validate(dict(r)) for r in stash_rows],
         )
+
+    return await db.run(_load)
+
+
+async def get_trip_summaries(db: Database, trip_ids: Sequence[str]) -> list[TripSummary]:
+    """Card data for several trips at once, in the caller's id order.
+
+    Two queries whatever the number of trips -- the correlated-subquery idiom
+    `accounts.my_trips` already uses, batched with ``WHERE id IN (...)`` instead of a loop
+    (N+1 on a dashboard of 24 cards is 24 snapshots' worth of rows for 9 fields).
+
+    Performs no writes at all: no `record_visit`, no `trips.seq` bump. That is the whole
+    point of this function existing next to `get_snapshot` rather than being replaced by
+    it. Unknown ids simply produce no row.
+    """
+    if not trip_ids:
+        return []
+    placeholders = ", ".join("?" for _ in trip_ids)
+    params = tuple(trip_ids)
+
+    def _load(conn: sqlite3.Connection) -> list[TripSummary]:
+        rows = conn.execute(
+            f"""SELECT t.id, t.title, t.city, t.travel_mode, t.created_at,
+                       (SELECT COUNT(*) FROM days d WHERE d.trip_id = t.id) AS day_count,
+                       (SELECT COUNT(*) FROM places p WHERE p.trip_id = t.id) AS place_count,
+                       (SELECT COUNT(DISTINCT pc.client_id) FROM participants pc
+                          WHERE pc.trip_id = t.id) AS companion_count,
+                       COALESCE(
+                           (SELECT MAX(p2.updated_at) FROM places p2
+                              WHERE p2.trip_id = t.id),
+                           t.created_at) AS updated_at
+                FROM trips t
+                WHERE t.id IN ({placeholders})""",
+            params,
+        ).fetchall()
+
+        # 封面：第一个真的带图的地点。按 (trip_id, day_index, sort_index) 排好后在
+        # Python 里取每程首条命中，省掉窗口函数，也不必为每程单发一条查询。
+        photo_rows = conn.execute(
+            f"""SELECT p.trip_id, p.photo_url FROM places p
+                JOIN days d ON d.id = p.day_id
+                WHERE p.trip_id IN ({placeholders}) AND p.photo_url <> ''
+                ORDER BY p.trip_id, d.day_index, p.sort_index""",
+            params,
+        ).fetchall()
+        covers: dict[str, str] = {}
+        for row in photo_rows:
+            covers.setdefault(str(row["trip_id"]), str(row["photo_url"]))
+
+        by_id: dict[str, TripSummary] = {}
+        for row in rows:
+            item = dict(row)
+            item["cover_photo"] = covers.get(item["id"], "")
+            by_id[item["id"]] = TripSummary.model_validate(item)
+        return [by_id[trip_id] for trip_id in trip_ids if trip_id in by_id]
 
     return await db.run(_load)
 

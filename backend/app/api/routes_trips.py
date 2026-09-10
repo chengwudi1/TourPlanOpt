@@ -7,16 +7,18 @@ repository functions, so there is one implementation of every mutation.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from app.amap.client import fetch_photo_best_effort
 from app.auth.routes_auth import current_user
 from app.db.database import get_db
 from app.db.repositories import (
     add_place,
+    clamp_trip_days,
     create_trip,
     delete_place,
     get_snapshot,
+    get_trip_summaries,
     upsert_participant,
 )
 from app.models.domain import (
@@ -27,9 +29,29 @@ from app.models.domain import (
     Snapshot,
     TripCreate,
     TripCreateResult,
+    TripSummaryList,
 )
 
 router = APIRouter(prefix="/api/trips", tags=["trips"])
+
+# 首页仪表盘一次最多要 24 张卡：超出部分直接忽略，而不是回 400 —— 前端数不准自己
+# 本地攒了多少条，让它少画几张比让它处理一个失败请求便宜得多。
+SUMMARY_MAX_IDS = 24
+
+
+def parse_summary_ids(raw: str | None) -> list[str]:
+    """`?ids=a, b,,a` -> ['a', 'b']: trimmed, empties dropped, deduped in first-seen
+    order, capped at SUMMARY_MAX_IDS."""
+    if not raw:
+        return []
+    ordered: dict[str, None] = {}  # a dict is the ordered set this needs no more of
+    for chunk in raw.split(","):
+        trip_id = chunk.strip()
+        if trip_id:
+            ordered.setdefault(trip_id, None)
+        if len(ordered) >= SUMMARY_MAX_IDS:
+            break
+    return list(ordered)
 
 
 def share_url(request: Request, trip_id: str) -> str:
@@ -52,10 +74,32 @@ async def create_trip_endpoint(body: TripCreate, request: Request) -> TripCreate
         city=body.city.strip(),
         travel_mode=body.travel_mode,
         created_by=user["id"] if user else None,
+        days=body.days,
+        start_date=body.start_date,
+        day_start_min=body.day_start_min,
     )
     return TripCreateResult(
-        trip_id=trip_id, day_id=day_id, share_url=share_url(request, trip_id)
+        trip_id=trip_id,
+        day_id=day_id,
+        day_count=clamp_trip_days(body.days),
+        share_url=share_url(request, trip_id),
     )
+
+
+@router.get("/summary", response_model=TripSummaryList)
+async def read_trip_summary(ids: str | None = Query(default=None)) -> TripSummaryList:
+    """Batched card data for the home dashboard: N trips in one request, and strictly
+    read-only -- unlike `read_trip` below it never calls `accounts.record_visit`, so
+    displaying a wall of cards cannot rewrite 「我的活动」 ordering as a side effect of
+    looking at it, and it never touches `trips.seq`. Unknown ids are omitted rather than
+    404'd, because the frontend prunes the stale local records that no longer come back.
+
+    路由顺序是契约的一部分：本条必须声明在 ``/{trip_id}`` **之前**。FastAPI 按声明顺序
+    匹配，挪到下面 "summary" 就会被当成一个行程 id，这个接口会静默变成 404。
+    """
+    trip_ids = parse_summary_ids(ids)
+    trips = await get_trip_summaries(get_db(), trip_ids) if trip_ids else []
+    return TripSummaryList(trips=trips)
 
 
 @router.get("/{trip_id}", response_model=Snapshot)

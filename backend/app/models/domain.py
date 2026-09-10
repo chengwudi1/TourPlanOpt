@@ -51,6 +51,38 @@ class TripOut(BaseModel):
     created_at: str = ""
 
 
+class TripSummary(BaseModel):
+    """One home-dashboard card. Deliberately NOT a Snapshot: no days, no places, no
+    presence, so N cards cost one batched read instead of N full snapshots -- and, the
+    reason this endpoint exists at all, reading it records nothing (opening a trip is
+    what moves it to the top of 「我的活动」; merely showing it must not).
+
+    `cover_photo` is the first place that actually carries a photo, in the order the trip
+    is read (day_index, then sort_index). `updated_at` is the newest edit among the trip's
+    places, falling back to the trip's own `created_at` while it has none.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    title: str = ""
+    city: str = ""
+    travel_mode: str = TravelMode.DRIVING.value
+    day_count: int = 0
+    place_count: int = 0
+    companion_count: int = 0
+    cover_photo: str = ""
+    updated_at: str = ""
+    created_at: str = ""
+
+
+class TripSummaryList(BaseModel):
+    """`GET /api/trips/summary` 的响应体。请求里不存在的 id 被静默丢弃（不报错、不给
+    null），所以这个数组可以比请求的 ids 短 —— 首页据此清理本地失效记录。"""
+
+    trips: list[TripSummary] = Field(default_factory=list)
+
+
 class DayOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -176,20 +208,30 @@ class PoiOut(BaseModel):
     city: str = ""
     district: str = ""
     photo: str = ""
+    # 关键字搜索不返回距离：按距离排序时由服务端拿坐标自己算直线距离填上。其余排序这个键
+    # 根本不在响应里（接口把缓存的上游原始字典直接透出），前端把缺失当作「没有距离」。
+    distance_m: int | None = None
 
 
 # -- request bodies ---------------------------------------------------------------
 
 
 class TripCreate(BaseModel):
+    """Everything except `title` is optional on purpose: the create sheet must be able
+    to build a trip with a single tap and enrich it later inside the trip."""
+
     title: str = ""
     city: str = ""
     travel_mode: TravelMode = TravelMode.DRIVING
+    days: int = 1
+    start_date: str | None = None  # 'YYYY-MM-DD'; junk is ignored, never rejected
+    day_start_min: int | None = None  # NULL keeps the schema default (09:00)
 
 
 class TripCreateResult(BaseModel):
     trip_id: str
     day_id: str
+    day_count: int = 1  # what the server actually built -- `days` gets clamped
     share_url: str
 
 

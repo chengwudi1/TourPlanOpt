@@ -1,24 +1,32 @@
 :root {
-  --bg: #f6f7f6;
-  --surface: #ffffff;
-  --surface-2: #eef1ef;
-  --surface-3: #e6eae7;
-  --surface-hover: #eef1ef;
-  --surface-selected: #e1f1ee;
-  --border: #e3e7e4;
-  --border-strong: #ccd3cf;
-  --border-faint: rgba(25, 28, 26, 0.07);
-  --text: #191c1a;
-  --text-2: #5a655f;
-  --text-3: #8a948e;
-  --text-faint: #aab4ae;
-  /* 旅程青：地图与指南针的颜色。全站唯一强调色，克制使用。 */
+  --bg: #faf5ee;
+  --surface: #fffdf9;
+  --surface-2: #f4ece1;
+  --surface-3: #ebe1d4;
+  --surface-hover: #f4ece1;
+  --surface-selected: #e4efe9;
+  --border: #e9dfd2;
+  --border-strong: #d8cabb;
+  --border-faint: rgba(61, 49, 36, 0.08);
+  --text: #2b221a;
+  --text-2: #6b5d4d;
+  --text-3: #93826e;
+  --text-faint: #b6a692;
+  /* 旅程青：地图与指南针的颜色，也是全站唯一的「可交互」强调色——按钮、选中、链接。
+     暖橙 --ember 只做氛围（首页封面、徽标、计数点），绝不上到可点控件上，
+     否则两个强调色抢同一层的注意力，就又回到「哪儿都能点」的老毛病了。 */
   --accent: #0e7a6e;
   --accent-strong: #0a5f56;
-  --accent-soft: #e1f1ee;
+  --accent-soft: #dcebe2;
   /* 压在 --accent 实心上的字色：亮色是白字（5.2:1），深色主题下 accent 变亮青，
      白字只剩 3.1:1，所以那边换成近黑的墨色（5.5:1）。 */
   --accent-ink: #ffffff;
+  /* 暖橙：--ember 是实心/图标的颜色（on 卡片 4.5:1），文字一律用 --ember-deep（6.3:1）。
+     这条分界是算出来的，不是试出来的——#b85c2c 直接当正文只有 4.49:1，差一点点就是不合格。 */
+  --ember: #b85c2c;
+  --ember-deep: #98481f;
+  --ember-soft: #f8e8db;
+  --ember-ink: #ffffff;
   --ok: #1f9d55;
   --ok-soft: #e6f6ec;
   --ok-border: #bfe6cd;
@@ -33,12 +41,15 @@
   --radius-sm: 8px;
   --radius: 12px;
   --radius-lg: 16px;
-  /* 阴影阶梯：卡片 → 悬浮 → 浮层 → 弹窗，越浮越重，不许发明中间值。 */
-  --shadow-sm: 0 1px 2px rgba(24, 34, 30, 0.06);
-  --shadow-md: 0 2px 6px rgba(24, 34, 30, 0.08);
-  --shadow-lg: 0 6px 20px rgba(24, 34, 30, 0.1);
-  --shadow-pop: 0 12px 32px rgba(24, 34, 30, 0.14);
-  --shadow-modal: 0 20px 48px rgba(24, 34, 30, 0.2);
+  /* 只给贴边的大浮层用（底部抽屉的顶部圆角）。按钮和输入框永远不许碰这一档。 */
+  --radius-xl: 22px;
+  /* 阴影阶梯：卡片 → 悬浮 → 浮层 → 弹窗，越浮越重，不许发明中间值。
+     色调跟着中性阶走暖棕（rgba(82,55,26)）——压在奶油底上，青灰阴影会发脏。 */
+  --shadow-sm: 0 1px 2px rgba(82, 55, 26, 0.07);
+  --shadow-md: 0 2px 6px rgba(82, 55, 26, 0.09);
+  --shadow-lg: 0 6px 20px rgba(82, 55, 26, 0.11);
+  --shadow-pop: 0 12px 32px rgba(82, 55, 26, 0.15);
+  --shadow-modal: 0 20px 48px rgba(82, 55, 26, 0.22);
   /* z 阶梯：局部下拉 → 浮动条 → 遮罩对话框 → 导航 → 通知 → toast → 模态。 */
   --z-pop: 40;
   --z-bar: 60;
@@ -54,6 +65,14 @@
   --dur-fast: 120ms;
   --dur: 180ms;
   --dur-slow: 260ms;
+  /* 入场比状态切换慢一倍：首屏那一下要「有重量」，不是闪出来。错峰步长给模板算 --i 用。 */
+  --dur-entrance: 520ms;
+  --stagger: 62ms;
+  /* 照片呼吸一个来回 22s——慢到注意力不会跟着它跑，但画面不再是死的。 */
+  --dur-drift: 22s;
+  --rise-sm: 6px;
+  --rise: 14px;
+  --rise-lg: 26px;
 
   --panel-w: 400px;
   --header-h: 56px;
@@ -71,23 +90,29 @@
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --bg: #14171a;
-    --surface: #1d2125;
-    --surface-2: #262b30;
-    --surface-3: #2d333a;
-    --surface-hover: #262b30;
+    --bg: #191512;
+    --surface: #221c17;
+    --surface-2: #2c241d;
+    --surface-3: #352b22;
+    --surface-hover: #2c241d;
     --surface-selected: #123c37;
-    --border: #2e343a;
-    --border-strong: #3d454c;
+    --border: #3a2f26;
+    --border-strong: #4b3d31;
     --border-faint: rgba(255, 255, 255, 0.06);
-    --text: #e8ecea;
-    --text-2: #a5b0aa;
-    --text-3: #6e7a74;
-    --text-faint: #59655e;
+    --text: #f0e7dd;
+    --text-2: #bfae9c;
+    --text-3: #8d7c6a;
+    --text-faint: #6f6152;
     --accent: #2aa393;
     --accent-strong: #45c0b0;
     --accent-soft: #123c37;
     --accent-ink: #08201c;
+    /* 深色下 ember 反过来走亮（同 accent-strong 的处理），且实心上的字必须是深墨：
+       亮橙压近白字只有 2.2:1，压 #241407 才有 6.6:1。 */
+    --ember: #d98a54;
+    --ember-deep: #e8a675;
+    --ember-soft: #3a2618;
+    --ember-ink: #241407;
     --ok: #34b96f;
     --ok-soft: #12291b;
     --ok-border: #1f4430;
@@ -161,7 +186,7 @@ textarea {
   transition:
     background var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-out),
-    transform var(--dur-fast) var(--ease-out);
+    transform var(--dur) var(--ease-pop);
 }
 .btn:hover:not(:disabled) {
   background: var(--surface-2);
@@ -191,6 +216,36 @@ textarea {
 }
 .btn--ghost:hover:not(:disabled) {
   background: var(--surface-2);
+}
+
+/* 纯图标动作按钮：天头与卡片上的次要动作用它，文字交给 title/aria-label——
+   省下来的横向空间要给行程标题本身。 */
+.iconbtn {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    transform var(--dur) var(--ease-pop);
+}
+.iconbtn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-2);
+  transform: scale(1.06);
+}
+.iconbtn:active:not(:disabled) {
+  transform: scale(0.94);
+}
+.iconbtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .field {
@@ -287,16 +342,6 @@ textarea {
   flex-direction: column;
   height: 100%;
 }
-.shell__header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: var(--header-h);
-  flex: 0 0 var(--header-h);
-  padding: 0 16px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-}
 .shell__body {
   display: flex;
   flex: 1;
@@ -376,6 +421,84 @@ textarea {
   }
 }
 
+/* ---------- 动效基建 ---------- */
+
+/* 入场一律走 animation 而不是 transition：transition 需要一个「从 A 变到 B」的触发，
+   首屏元素挂载之后没有变化可言。另外 animation 被下面 prefers-reduced-motion 的
+   全局规则关掉时，元素直接停在自然态（可见）；要是把 opacity: 0 写成常态再用
+   transition 翻，无障碍用户会永远看不见这些内容。 */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--rise, 14px));
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(var(--rise-sm, 6px));
+  }
+}
+/* Ken Burns：一张静止的照片最容易显假。呼吸放在 img 上、hover 推进放在外层容器上，
+   同一元素的 animation 会永久压过 transition，分两层才能叠加。 */
+@keyframes ken-burns {
+  from {
+    transform: scale(1.02) translate3d(0, 0, 0);
+  }
+  to {
+    transform: scale(1.11) translate3d(-1.6%, -2%, 0);
+  }
+}
+@keyframes pulse-ring {
+  from {
+    opacity: 0.45;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+}
+
+/* 错峰入场：`--i` 给序号、`--base` 给这一段的起跑线，延迟用 calc 拼出来——步长只有
+   `--stagger` 一个真源，模板里不写字面毫秒。不枚举 nth-child 是因为卡片数量是动态的。
+   填充模式必须是 backwards 而不是 both：both/forwards 会把合成的末帧（transform: none）
+   永久钉在元素上，而 animation 的层叠优先级高于普通声明，之后 hover 的 translateY
+   就再也推不动了。backwards 只兜住延迟那一段，结束后自然值归位，末帧本来就等于自然态。 */
+.reveal {
+  animation: rise-in var(--dur-entrance) var(--ease-out)
+    calc(var(--base, 0ms) + var(--i, 0) * var(--stagger)) backwards;
+}
+.reveal--fade {
+  animation-name: fade-in;
+}
+.reveal--pop {
+  animation-name: pop-in;
+}
+.reveal--lg {
+  --rise: var(--rise-lg);
+}
+
+/* 首页 ↔ 行程页：退场快、进场慢半拍，读起来像翻开下一页而不是两块墙互换。
+   页面内部的内容编排另有 .reveal 负责，这里只管整层的明暗。 */
+.view-leave-active {
+  transition: opacity var(--dur-fast) linear;
+}
+.view-leave-to {
+  opacity: 0;
+}
+.view-enter-active {
+  transition: opacity var(--dur) var(--ease-out);
+}
+.view-enter-from {
+  opacity: 0;
+}
+
 /* ---------- 质量底线 ---------- */
 
 /* 骨架屏：内容加载中的占位，shimmer 顺着阅读方向扫过 */
@@ -396,6 +519,18 @@ textarea {
     transparent
   );
   animation: skeleton-sweep 1.4s ease-in-out infinite;
+}
+/* 深色底的扫光另算一档：0.55 的白压在近黑的 surface-2 上是一道硬闪光，
+   和它在浅奶油底上的观感完全不是一回事。 */
+@media (prefers-color-scheme: dark) {
+  .skeleton::after {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.08),
+      transparent
+    );
+  }
 }
 @keyframes skeleton-sweep {
   from {
@@ -427,6 +562,7 @@ textarea {
   align-items: center;
 }
 .avatar {
+  position: relative;
   display: grid;
   place-items: center;
   width: 26px;
@@ -437,6 +573,14 @@ textarea {
   color: #fff;
   font-size: 11px;
   font-weight: 700;
+  /* 挂在 animation 而不是 transition 上：Vue 移动已有节点不会重放动画，所以只有
+     「新加入的那个人」会弹一下，别人进出不会让整排头像集体重播。 */
+  animation: pop-in var(--dur) var(--ease-pop) backwards;
+  transition: transform var(--dur-fast) var(--ease-pop);
+}
+.avatar:hover {
+  z-index: 1;
+  transform: translateY(-2px) scale(1.08);
 }
 .avatar:first-child {
   margin-left: 0;
@@ -448,11 +592,26 @@ textarea {
   border-radius: 50%;
   background: var(--text-3);
 }
+/* 连接状态点：一个不动的绿点读起来像「没渲染完」，扩散环才像「活着在跳」。
+   环用 ::after 复制点位颜色，状态一换环跟着换，不需要第二处标记。 */
+.dot--pulse {
+  position: relative;
+}
+.dot--pulse::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: var(--dot-ring, var(--text-3));
+  border-radius: 50%;
+  animation: pulse-ring 2.6s var(--ease-out) infinite;
+}
 .dot--ok {
   background: var(--ok);
+  --dot-ring: var(--ok);
 }
 .dot--warn {
   background: var(--warn);
+  --dot-ring: var(--warn);
 }
 .dot--danger {
   background: var(--danger);

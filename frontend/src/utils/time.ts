@@ -37,3 +37,22 @@ export function parseHHMM(text: string): number | null {
   if (hours < 0 || hours > 23 || mins < 0 || mins > 59) return null
   return hours * 60 + mins
 }
+
+/**
+ * 这个文件里唯一处理 ISO 时间戳的函数——其余都只认「零点起算的分钟数」。
+ * 首页要说「最近编辑 3 天前」，那是一堵墙上时间，不是行程里的时刻，所以放这儿而不是另开文件。
+ */
+export function formatAgo(iso: string): string {
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return ''
+  const mins = Math.floor((Date.now() - then) / 60000)
+  if (mins < 1) return '刚刚'
+  if (mins < 60) return `${mins} 分钟前`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours} 小时前`
+  const days = Math.floor(hours / 24)
+  if (days === 1) return '昨天'
+  if (days < 30) return `${days} 天前`
+  const d = new Date(then)
+  return `${d.getMonth() + 1}月${d.getDate()}日`
+}

@@ -13,6 +13,7 @@ import {
   ArrowRight,
   BedDouble,
   Check,
+  Compass,
   ExternalLink,
   Flag,
   List,
@@ -20,8 +21,10 @@ import {
   LockOpen,
   Map as MapIcon,
   Plus,
+  Search,
 } from '@/components/icons'
 import { getClientId, setClientName } from '@/composables/useClientIdentity'
+import { recordRecentTrip } from '@/composables/useRecentTrips'
 import { useAuthStore } from '@/stores/auth'
 import { useSocketStore } from '@/stores/socket'
 import { useTripStore } from '@/stores/trip'
@@ -109,6 +112,23 @@ function renameDay(dayId: string) {
   store.updateDay(dayId, { title: name.trim() })
 }
 
+const searchEl = ref<InstanceType<typeof PlaceSearch> | null>(null)
+const recoEl = ref<InstanceType<typeof RecommendPanel> | null>(null)
+
+function startFromSearch() {
+  searchEl.value?.focus()
+}
+
+function startFromDiscover() {
+  recoEl.value?.show()
+}
+
+function setTripCity() {
+  const city = window.prompt('目的地城市（推荐与搜索定位都靠它）：', store.trip?.city ?? '')
+  if (city === null) return
+  store.updateTripFields({ city: city.trim() })
+}
+
 function renameTrip(current: string) {
   const name = window.prompt('行程名称：', current)
   if (name === null) return
@@ -178,6 +198,8 @@ onMounted(async () => {
     sessionStorage.setItem('tourplanopt.joined', '1')
   }
   initExpand()
+  // 打不开就不记：分享 ID 敲错一次，不该在首页留一条永远点不进去的历史。
+  if (!store.loadError) recordRecentTrip(props.tripId)
   if (joined.value) socket.connect(props.tripId)
 })
 
@@ -359,6 +381,7 @@ if (import.meta.env.DEV) {
       :status="socket.status"
       @share="copyShareLink"
       @rename="renameTrip(store.trip?.title ?? '')"
+      @set-city="setTripCity"
     />
 
     <AmapKeyCheck />
@@ -395,17 +418,61 @@ if (import.meta.env.DEV) {
             </div>
 
             <PlaceSearch
+              ref="searchEl"
               :city="store.trip.city"
               @select="onPoiPicked"
               @stash="onStash"
             />
 
-            <RecommendPanel :city="store.trip.city" />
+            <RecommendPanel ref="recoEl" :city="store.trip.city" :trip-id="tripId" />
 
             <StashPanel />
 
-            <div v-if="!store.places.length" class="empty">
-              <svg class="empty__art" viewBox="0 0 200 96" aria-hidden="true">
+            <div class="daylist">
+              <DaySection
+                v-for="(day, i) in store.days"
+                :key="day.id"
+                :day="day"
+                :expanded="expandedIds.has(day.id)"
+                class="reveal"
+                :style="{ '--i': i > 4 ? 4 : i, '--base': '140ms' }"
+                @select="selectDay(day.id)"
+                @toggle="toggleDay(day.id)"
+                @rename="renameDay(day.id)"
+                @remove="removeDay(day.id)"
+                @menu="(p, pos) => (cardMenu = { place: p, ...pos })"
+              />
+              <div class="daylist__foot">
+                <button class="btn btn--sm btn--ghost" type="button" @click="store.addDay()">
+                  <Plus class="ic" :size="13" /> 加一天
+                </button>
+                <button class="btn btn--sm btn--ghost" type="button" @click="copyTextItinerary">
+                  <Check v-if="copied" class="ic" :size="12" />
+                  {{ copied ? '已复制' : '复制文字版' }}
+                </button>
+              </div>
+            </div>
+
+            <!-- 天块自己会说「这一天还没有安排」，所以这里只回答「那我从哪儿开始」。 -->
+            <div v-if="!store.places.length" class="start card">
+              <div class="start__head">
+                <strong>从哪儿开始？</strong>
+                <span class="tiny muted">加进第一个地点，时间线就自动排好，不用点优化</span>
+              </div>
+
+              <div class="start__actions">
+                <button class="btn btn--sm btn--primary" type="button" @click="startFromSearch">
+                  <Search class="ic" :size="13" /> 搜索地点
+                </button>
+                <button class="btn btn--sm" type="button" @click="startFromDiscover">
+                  <Compass class="ic" :size="13" /> 打开发现
+                </button>
+                <span class="tiny muted start__hint">
+                  地图空白处右键／长按，也能把那个位置直接加进来
+                </span>
+              </div>
+
+              <svg class="start__art" viewBox="0 0 200 96" aria-hidden="true">
                 <path
                   d="M18 74 C 52 74, 58 30, 96 30 S 148 66, 182 66"
                   fill="none"
@@ -423,32 +490,6 @@ if (import.meta.env.DEV) {
                   <circle cx="96" cy="30" r="2.5" />
                 </g>
               </svg>
-              <p class="muted tiny empty-hint">
-                还没有地点。在上面搜索一个（比如「外滩」），或打开「发现」挑一个推荐。
-              </p>
-            </div>
-
-            <div v-else class="daylist">
-              <DaySection
-                v-for="day in store.days"
-                :key="day.id"
-                :day="day"
-                :expanded="expandedIds.has(day.id)"
-                @select="selectDay(day.id)"
-                @toggle="toggleDay(day.id)"
-                @rename="renameDay(day.id)"
-                @remove="removeDay(day.id)"
-                @menu="(p, pos) => (cardMenu = { place: p, ...pos })"
-              />
-              <div class="daylist__foot">
-                <button class="btn btn--sm btn--ghost" type="button" @click="store.addDay()">
-                  <Plus class="ic" :size="13" /> 加一天
-                </button>
-                <button class="btn btn--sm btn--ghost" type="button" @click="copyTextItinerary">
-                  <Check v-if="copied" class="ic" :size="12" />
-                  {{ copied ? '已复制' : '复制文字版' }}
-                </button>
-              </div>
             </div>
           </template>
         </div>
@@ -675,24 +716,35 @@ if (import.meta.env.DEV) {
   gap: 10px;
 }
 
-.empty {
+.start {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
+  padding: 12px;
+}
+
+.start__head {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.start__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   align-items: center;
-  padding: 18px 12px 14px;
-  background: var(--surface-2);
-  border-radius: var(--radius);
 }
 
-.empty__art {
-  width: 180px;
+.start__hint {
+  flex: 1 0 100%;
+}
+
+/* 插图退成装饰：结构已经由上面的天块表达了，这里只留一点旅程感。 */
+.start__art {
+  width: 150px;
   height: auto;
-  opacity: 0.85;
-}
-
-.empty-hint {
-  margin: 0;
-  text-align: center;
+  margin: 0 auto;
+  opacity: 0.45;
 }
 </style>

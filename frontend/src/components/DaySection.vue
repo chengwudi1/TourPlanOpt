@@ -4,6 +4,7 @@ import { computed, ref } from 'vue'
 import PlaceCard from '@/components/PlaceCard.vue'
 import { BedDouble, Car, ChevronDown, Flag, Footprints, Navigation, Ruler, X, Zap } from '@/components/icons'
 import { useDragSort } from '@/composables/useDragSort'
+import { useFlipList } from '@/composables/useFlipList'
 import { useSocketStore } from '@/stores/socket'
 import { useTripStore } from '@/stores/trip'
 import type { OptimizeResult } from '@/stores/trip'
@@ -117,6 +118,11 @@ useDragSort(
   (dragging) =>
     socket.sendPresence(props.day.id, store.selectedPlaceId, dragging ? props.day.id : null),
 )
+// 一键优化、别人把地点挪走、跨天移动之后，行与行之间要看得见位移而不是瞬间换位。
+useFlipList(
+  listEl,
+  () => places.value.map((p) => p.id),
+)
 
 /** 别人正在编辑哪张卡（光环），只关心本天内的。 */
 const editorsByPlace = computed(() => {
@@ -198,7 +204,7 @@ function runOptimize() {
             :class="{ 'daysec__list--locked': !!dragger }"
           >
             <template v-for="(place, index) in places" :key="place.id">
-              <li v-if="index > 0" class="leg">
+              <li v-if="index > 0" class="leg" :data-flip-key="`leg:${place.id}`">
                 <span class="leg__line" />
                 <component :is="modeIcon" class="leg__icon" :size="12" />
                 <span class="leg__text tiny">{{ legText(place, index) }}</span>
@@ -434,6 +440,19 @@ function runOptimize() {
   gap: 8px;
   padding: 2px 10px 10px;
   border-top: 1px solid var(--border-faint);
+}
+
+/* 展开时内容分两拍落位：书挡先到、列表跟上，折叠动画就不再是一整块被"掀开"。
+   只动 opacity 不动 transform——列表容器上挂着 sortablejs，祖先有位移会让它在拖拽
+   起点量到错的几何；动画用 backwards，结束后不留合成层也不留层叠上下文。 */
+.daysec__fold.is-open .daysec__body > * {
+  animation: fade-in var(--dur-slow) var(--ease-out) backwards;
+}
+.daysec__fold.is-open .daysec__body > *:nth-child(2) {
+  animation-delay: calc(var(--stagger) * 1);
+}
+.daysec__fold.is-open .daysec__body > *:nth-child(n + 3) {
+  animation-delay: calc(var(--stagger) * 2);
 }
 
 .bookend {

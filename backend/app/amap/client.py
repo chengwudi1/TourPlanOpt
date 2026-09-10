@@ -306,11 +306,14 @@ class AmapWebClient:
         page: int = 1,
         page_size: int = 20,
         types: str | None = None,
+        sort_rule: int | None = None,
     ) -> PoiPage:
         # keywords and types are alternative filters; at least one must be present.
         if not keyword and not types:
             raise AmapParamError("place_text 需要 keyword 或 types 之一")
         # extensions=all 才带 photos；place_text 一次请求顺带拿到，零额外配额。
+        # sort_rule 实测只有 2（热度）会换序：关键字搜索没有中心点，1（距离）与不传
+        # 返回的是同一份顺序，所以传 1 是白传——距离排序只能在拿到坐标之后自己算。
         body = await self._get(
             "/v3/place/text",
             {
@@ -321,6 +324,7 @@ class AmapWebClient:
                 "offset": page_size,
                 "page": page,
                 "extensions": "all",
+                "sortrule": sort_rule,
             },
         )
         pois = [_to_poi(p) for p in (body.get("pois") or [])]
