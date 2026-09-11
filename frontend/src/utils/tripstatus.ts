@@ -33,6 +33,14 @@ export function parseDateOnly(value: string | null | undefined): Date | null {
   if (!match) return null
   const [, y, m, d] = match
   const date = new Date(Number(y), Number(m) - 1, Number(d))
+  // JS 的 Date 不会为 2月30日 报错，它会顺成 3月2日。不回头核对，一个根本不存在的
+  // 日期就能带着「3 天后出发」的口气上首页。对不上就按没填处理。
+  if (
+    date.getFullYear() !== Number(y) ||
+    date.getMonth() !== Number(m) - 1 ||
+    date.getDate() !== Number(d)
+  )
+    return null
   return Number.isNaN(date.getTime()) ? null : date
 }
 

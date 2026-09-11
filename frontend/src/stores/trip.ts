@@ -709,6 +709,7 @@ export const useTripStore = defineStore('trip', () => {
       checklist_not_found: '这条清单已被删除',
       expense_not_found: '这笔开销已被删除',
       bad_expense: '这笔没记上：标题或金额不对',
+      op_failed: '服务端处理这一步时出了错，请重试',
     }
     opError.value = {
       message: messages[reason] ?? `操作被拒绝（${reason}）`,

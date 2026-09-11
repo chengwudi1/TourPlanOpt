@@ -127,6 +127,19 @@ function daysOut(trip: TripSummary): number | null {
 }
 
 /**
+ * 出发日从前往后排，同一天出发的按「最近还在编辑」排。
+ *
+ * 不能写成 `(a < b ? -1 : 1)`：两段的 start_date 相等时它对 (a,b) 和 (b,a) 都回答
+ * 「b 在前」，比较器一旦自相矛盾，排序结果就取决于数组原来的摆法，同一份数据两次进
+ * 首页能给出两种顺序。
+ */
+function byDeparture(a: TripSummary, b: TripSummary): number {
+  const dates = (a.start_date ?? '').localeCompare(b.start_date ?? '')
+  if (dates) return dates
+  return (b.updated_at ?? '').localeCompare(a.updated_at ?? '')
+}
+
+/**
  * 门面只给「规划中」这一档——已完成和已归档是归档架，那里摆大卡会把列表里的一条吸走，
  * 看着像少了一段。门面内容优先给「最近要出发的」：14 天内出发且还没走的那条最该占第一屏，
  * 其次是最近编辑过且有内容的，最后退回最新一条。全是空行程时新手至少还有个 CTA 可点。
@@ -136,7 +149,7 @@ const hero = computed<TripSummary | null>(() => {
   const ready = inTab.value.flatMap((t) => (t.summary ? [t.summary] : []))
   const soon = ready
     .filter((s) => phaseOf(s.start_date, s.end_date) === 'upcoming' && (daysOut(s) ?? 99) <= 14)
-    .sort((a, b) => ((a.start_date as string) < (b.start_date as string) ? -1 : 1))
+    .sort(byDeparture)
   return soon[0] ?? ready.find((s) => s.place_count > 0) ?? ready[0] ?? null
 })
 const grid = computed(() => inTab.value.filter((t) => t.summary?.id !== hero.value?.id))
@@ -171,7 +184,7 @@ const upcoming = computed<BoardRow[]>(() => {
   return inTab.value
     .map((t) => t.summary)
     .filter((s): s is TripSummary => !!s && s.id !== hero.value?.id && phaseOf(s.start_date, s.end_date) === 'upcoming')
-    .sort((a, b) => ((a.start_date as string) < (b.start_date as string) ? -1 : 1))
+    .sort(byDeparture)
     .slice(0, 3)
     .map(toRow)
 })

@@ -17,6 +17,7 @@ from app.db.database import Database
 from app.models.domain import (
     EXPENSE_CATEGORIES,
     ChecklistItemOut,
+    CostModel,
     DayOut,
     ExpenseCreate,
     ExpenseOut,
@@ -194,9 +195,11 @@ async def get_trip_summaries(db: Database, trip_ids: Sequence[str]) -> list[Trip
                        (SELECT COUNT(DISTINCT pc.client_id) FROM participants pc
                           WHERE pc.trip_id = t.id) AS companion_count,
                        (SELECT MIN(d2.date) FROM days d2
-                          WHERE d2.trip_id = t.id AND d2.date IS NOT NULL) AS start_date,
+                          WHERE d2.trip_id = t.id AND d2.date IS NOT NULL
+                            AND d2.date != '') AS start_date,
                        (SELECT MAX(d3.date) FROM days d3
-                          WHERE d3.trip_id = t.id AND d3.date IS NOT NULL) AS end_date,
+                          WHERE d3.trip_id = t.id AND d3.date IS NOT NULL
+                            AND d3.date != '') AS end_date,
                        (SELECT COUNT(*) FROM checklist_items c WHERE c.trip_id = t.id)
                            AS checklist_total,
                        (SELECT COUNT(*) FROM checklist_items c
@@ -459,20 +462,51 @@ def _coerce_int(value: object) -> int | None:
     return int(value)  # type: ignore[arg-type]
 
 
+def _text(value: object) -> str:
+    """自由文本列。null 的语义是「清空」，那就落成空串——``str(None)`` 会写出字面量
+    "None"，那不是清空，是一段用户从没打过、界面上也改不掉的文字。"""
+    return "" if value is None else str(value)
+
+
+def _coerce_day_date(value: object) -> str | None:
+    """天日期只存规范的 ``YYYY-MM-DD``，读不懂就当「没填」。
+
+    日期是 TEXT 列，首页的起止日期靠 ``MIN(date)`` / ``MAX(date)`` 按字典序取。混进一条
+    空串或「10月1日」，整段行程的倒计时就会消失或跳到别处去，而这颗雷是某**一**天埋的、
+    炸的是整段行程。
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text).isoformat()
+    except ValueError:
+        return None
+
+
+def _coerce_day_start_min(value: object) -> int:
+    """行程起始时刻 NOT NULL 且必须落在一天之内：null 不是合法的清空意图，越界夹回边缘。"""
+    if value is None:
+        raise ValueError("day_start_min 不能是 null")
+    return clamp_min(int(value))  # type: ignore[arg-type]
+
+
 PLACE_PATCH_FIELDS: dict[str, Callable[[object], object]] = {
-    "name": str,
-    "address": str,
+    "name": _text,
+    "address": _text,
     "duration_min": _coerce_int,
     "start_min": _coerce_int,
     "user_start_min": _coerce_int,
-    "note": str,
+    "note": _text,
     "locked": lambda v: 1 if v else 0,
     "status": str,
 }
 
 DAY_PATCH_FIELDS: dict[str, Callable[[object], object]] = {
-    "title": str,
-    "date": lambda v: str(v) if v is not None else None,
+    "title": _text,
+    "date": _coerce_day_date,
     "start_min": _coerce_int,
     "travel_mode": lambda v: str(v) if v is not None else None,
     "start_place_id": lambda v: str(v) if v is not None else None,
@@ -490,22 +524,40 @@ def _coerce_budget_cents(value: object) -> int:
 
 
 TRIP_PATCH_FIELDS: dict[str, Callable[[object], object]] = {
-    "title": str,
-    "city": str,
+    "title": _text,
+    "city": _text,
     "travel_mode": str,
     "cost_model": str,
-    "day_start_min": _coerce_int,
+    "day_start_min": _coerce_day_start_min,
     "status": str,
     "budget_cents": _coerce_budget_cents,
 }
 
 
 def _validate_patched_trip(patch: dict[str, object]) -> str | None:
-    """状态是一枚写死的枚举，不是自由文本：认不出的值拒绝整个 patch，
-    而不是悄悄收下再让首页画出一个不属于任何一档的行程。"""
-    status = patch.get("status")
-    if status is not None and str(status) not in {s.value for s in TripStatus}:
-        return "bad_status"
+    """状态、出行方式、距离模型都是写死的枚举，不是自由文本：这三列都带 CHECK，
+    认不出的值必须在 UPDATE 之前拒掉。让 SQLite 去拒绝等于把一次坏输入升级成
+    ``IntegrityError`` —— REST 那边是 500，WS 那边是整条连接被异常带走，
+    客户端连「你这笔没生效」都收不到。null 在这里同样算非法：这三列没有「空」这一档。
+    """
+    for key, allowed in (
+        ("status", TripStatus),
+        ("travel_mode", TravelMode),
+        ("cost_model", CostModel),
+    ):
+        if key in patch:
+            value = patch[key]
+            if value is None or str(value) not in {member.value for member in allowed}:
+                return f"bad_{key}"
+    return None
+
+
+def _validate_patched_day(patch: dict[str, object]) -> str | None:
+    """days.travel_mode 同样带 CHECK（NULL 合法 = 跟随行程）。"""
+    mode = patch.get("travel_mode")
+    if "travel_mode" in patch and mode is not None:
+        if str(mode) not in {member.value for member in TravelMode}:
+            return "bad_travel_mode"
     return None
 
 
@@ -532,10 +584,15 @@ def _patch_assignments(
 
 
 def _validate_patched_place(patch: dict[str, object]) -> str | None:
-    """Domain checks the DB cannot express. Returns a rejection reason or None."""
-    status = patch.get("status")
-    if status is not None and str(status) not in ("confirmed", "pending"):
-        return "bad_status"
+    """Domain checks the DB cannot express. Returns a rejection reason or None.
+
+    ``status`` 这里连 null 一起拒：那列只有 confirmed / pending 两档，没有「空」这一档，
+    放 null 过去只会在 CHECK 上撞出一个 IntegrityError。
+    """
+    if "status" in patch:
+        status = patch["status"]
+        if status is None or str(status) not in ("confirmed", "pending"):
+            return "bad_status"
     if "duration_min" in patch:
         duration = patch["duration_min"]
         if duration is not None and not (0 <= int(duration) <= 24 * 60):  # type: ignore[arg-type]
@@ -601,6 +658,9 @@ async def create_day(
 
 
 async def update_day(db: Database, day_id: str, patch: dict[str, object]) -> DayOut | None:
+    if _validate_patched_day(patch) is not None:
+        return None
+
     def _update(conn: sqlite3.Connection) -> dict | None:
         row = conn.execute("SELECT * FROM days WHERE id = ?", (day_id,)).fetchone()
         if row is None:
@@ -919,14 +979,23 @@ EXPENSE_PATCH_FIELDS: dict[str, Callable[[object], object]] = {
 
 
 def _validate_patched_expense(patch: dict[str, object]) -> str | None:
-    amount = patch.get("amount_cents")
-    if amount is not None:
+    if "amount_cents" in patch:
+        amount = patch["amount_cents"]
+        # bool 是 int 的子类：不挡的话 True 悄悄变成 1 分。
+        if isinstance(amount, bool):
+            return "bad_amount"
         try:
-            cents = int(amount)
+            cents = int(amount)  # type: ignore[arg-type]
         except (TypeError, ValueError):
             return "bad_amount"
         if not 1 <= cents <= 1_000_000_000:
             return "bad_amount"
+    if "paid_by" in patch:
+        # 付款人是「谁垫的」这份事实本身。清成空会让应摊照算、垫付无处落账，
+        # AA 的合计从此不平账——而账本上看不出任何一处错。
+        payer = patch["paid_by"]
+        if payer is None or not str(payer).strip():
+            return "bad_payer"
     return None
 
 

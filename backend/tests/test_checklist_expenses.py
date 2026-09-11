@@ -4,11 +4,15 @@
 op、回广播落地、拒绝时附上权威顺序」；REST 层管首页那三件事——改状态、设预算、取关——
 以及首页卡片读到的聚合值。
 
+第四层是「坏 patch 必须死在进 SQLite 之前」：让 CHECK 或 NOT NULL 去拒绝，REST 那边是
+500、WS 那边是整条连接被异常掀掉，两种都比一句拒绝难查得多。
+
 金额一律整数分：这里断言的也都是分，前端换算不参与。
 """
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -358,3 +362,153 @@ async def _all_checklist(db: Database, trip_id: str) -> list:
         "SELECT * FROM checklist_items WHERE trip_id = ? ORDER BY sort_index", (trip_id,)
     )
     return [repo.ChecklistItemOut.model_validate(dict(r)) for r in rows]
+
+
+# -- 边界：坏 patch 必须在进 SQLite 之前被拒（让 CHECK 去拒会升级成 500 / 断线）----------
+
+
+def test_trip_patch_clears_text_but_never_blanks_an_enum(client: tuple[TestClient, str]) -> None:
+    """协议写明白「显式 null = 清空」。文本列清空成空串；枚举列没有「空」这一档。
+
+    修之前：null 走的是 ``str(v)``，于是 title/city 里躺着字面量 "None"（用户没打过、界面
+    也改不掉），而 status 撞在 CHECK 上——REST 得 500、WS 那边整条连接被异常带走，客户端
+    连「这笔没生效」都收不到。travel_mode / cost_model / day_start_min 不在 ``TripPatch``
+    里（首页不改这三样），它们的同类断言在下面那条 WS 测试里。
+    """
+    testclient, trip_id = client
+
+    cleared = testclient.patch(f"/api/trips/{trip_id}", json={"title": None, "city": None})
+    assert cleared.status_code == 200
+    assert (cleared.json()["title"], cleared.json()["city"]) == ("", "")
+
+    for body in (
+        {"status": None},
+        {"status": "去他喵的"},
+        {"status": None, "title": "顺手改的名"},  # 一个字段坏 = 整个 patch 都不落
+    ):
+        assert testclient.patch(f"/api/trips/{trip_id}", json=body).status_code == 400, body
+
+    after = testclient.get(f"/api/trips/{trip_id}").json()["trip"]
+    assert after["status"] == "planning"
+    assert after["title"] == ""  # 被拒的那次没把上一步的清空改掉，也没写进 "顺手改的名"
+
+
+async def test_day_date_stays_canonical_or_becomes_null(db: Database) -> None:
+    """一天的日期写歪，炸的是整段行程的倒计时：首页起止日期靠 MIN/MAX 按字典序取。"""
+    trip_id, day_id = await repo.create_trip(db, title="甲")
+
+    for raw, want in (
+        ("2026-10-01", "2026-10-01"),
+        (" 2026-10-01 ", "2026-10-01"),
+        ("", None),
+        ("10月1日", None),
+        ("2026-02-30", None),  # 不存在的日子不顺成 3 月 2 日，按没填处理
+        ("2026-13-01", None),
+        (None, None),
+    ):
+        day = await repo.update_day(db, day_id, {"date": raw})
+        assert day is not None and day.date == want, raw
+
+    # 老库里可能已经躺着一行空串：MIN('') 会赢过所有真日期，摘要必须当它不存在。
+    await repo.update_day(db, day_id, {"date": "2026-10-05"})
+
+    def _seed_legacy(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "INSERT INTO days (id, trip_id, day_index, date) VALUES ('legacy', ?, 1, '')",
+            (trip_id,),
+        )
+
+    await db.run(_seed_legacy)
+    [card] = await repo.get_trip_summaries(db, [trip_id])
+    assert (card.start_date, card.end_date) == ("2026-10-05", "2026-10-05")
+
+
+async def test_place_and_expense_patches_reject_the_values_the_ui_cannot_show(
+    db: Database,
+) -> None:
+    """note 清空是合法的（空串），paid_by 清空不是：垫付无处落账，AA 合计从此不平。"""
+    trip_id, day_id = await repo.create_trip(db, title="甲")
+    place = await repo.add_place(
+        db, day_id, repo.PlaceCreate(name="中山陵", lng=118.0, lat=32.0)
+    )
+    assert place is not None
+
+    noted = await repo.update_place(db, place.id, {"note": None})
+    assert noted is not None and noted.note == ""
+    assert await repo.update_place(db, place.id, {"status": None}) is None
+
+    expense = await repo.expense_add(
+        db, trip_id, repo.ExpenseCreate(title="高铁", amount_cents=29700, paid_by="c-1")
+    )
+    for patch in (
+        {"paid_by": ""},
+        {"paid_by": None},
+        {"amount_cents": True},
+        {"amount_cents": None},
+    ):
+        assert await repo.update_expense(db, expense.id, patch) is None, patch
+    row = await db.fetch_one(
+        "SELECT paid_by, amount_cents FROM expenses WHERE id = ?", (expense.id,)
+    )
+    assert (row["paid_by"], row["amount_cents"]) == ("c-1", 29700)
+
+
+def test_poisoned_trip_patch_is_rejected_without_dropping_the_socket(
+    client: tuple[TestClient, str],
+) -> None:
+    """WS 侧同一条规矩：坏 patch 回 op_reject，连接留着继续用。
+
+    这三列都带 CHECK / NOT NULL，放进 SQL 就是 IntegrityError 掀翻整条连接；
+    ``day_start_min`` 更阴——它没约束，越界值能安然落库，然后把每一天的排程算成半夜三点。
+    """
+    testclient, trip_id = client
+    with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
+        join(ws, "c-1", "小明")
+        for patch in (
+            {"travel_mode": None},
+            {"travel_mode": "boat"},
+            {"cost_model": None},
+            {"cost_model": "google"},
+            {"day_start_min": None},
+            {"status": None},
+        ):
+            ws.send_json(protocol.op_frame(Ops.TRIP_UPDATE, f"t-{patch}", {"patch": patch}))
+            assert read_op(ws, "op_reject")["reason"] == "bad_patch", patch
+
+        trip = testclient.get(f"/api/trips/{trip_id}").json()["trip"]
+        assert (trip["travel_mode"], trip["cost_model"], trip["day_start_min"]) == (
+            "driving",
+            "haversine",
+            540,
+        )
+
+        # 越界的出发时刻夹回一天之内：那不是脏数据，是一个还算得动的数。
+        ws.send_json(
+            protocol.op_frame(Ops.TRIP_UPDATE, "t-clamp", {"patch": {"day_start_min": 99999}})
+        )
+        assert read_op(ws, "trip_updated")["data"]["trip"]["day_start_min"] == 1439
+
+        # 走到这里连接还活着：坏 patch 之后用户照常能记账。
+        ws.send_json(protocol.op_frame(Ops.CHECKLIST_ADD, "c1", {"texts": ["身份证"]}))
+        assert read_op(ws, "checklist_added")["data"]["items"][0]["text"] == "身份证"
+
+
+def test_an_internal_blowup_answers_reject_instead_of_silence(
+    client: tuple[TestClient, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """给整个 op 通道兜底：服务端自己出意外时也要回一句话，不能让用户对着「重连中」猜。"""
+    from app.ws import ops
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("模拟服务端内部错误")
+
+    testclient, trip_id = client
+    monkeypatch.setattr(ops, "_checklist_add", boom)
+    with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
+        join(ws, "c-1", "小明")
+        ws.send_json(protocol.op_frame(Ops.CHECKLIST_ADD, "a", {"texts": ["充电宝"]}))
+        assert read_op(ws, "op_reject")["reason"] == "op_failed"
+
+        monkeypatch.undo()
+        ws.send_json(protocol.op_frame(Ops.CHECKLIST_ADD, "b", {"texts": ["雨伞"]}))
+        assert read_op(ws, "checklist_added")["data"]["items"][0]["text"] == "雨伞"

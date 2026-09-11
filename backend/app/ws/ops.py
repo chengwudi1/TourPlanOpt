@@ -75,7 +75,13 @@ async def apply_op(conn: ClientConnection, hub: TripHub, frame: dict) -> None:
         return
 
     db = get_db()
-    await handler(conn, hub, db, client_id, op_id, data)
+    try:
+        await handler(conn, hub, db, client_id, op_id, data)
+    except Exception:  # noqa: BLE001 - 一个 op 的意外不能带走整条连接
+        # 抛出去的后果是 socket 被异常关掉：客户端既没有回执也没有错误，只看到「重连中」，
+        # 而它那条乐观改过的行还留在原地。失败时没有 remember_op，客户端可以照原样重试。
+        logger.exception("op %s (op_id=%s) 在服务端异常", op, op_id)
+        await _reject(conn, op_id, "op_failed")
 
 
 async def _broadcast(

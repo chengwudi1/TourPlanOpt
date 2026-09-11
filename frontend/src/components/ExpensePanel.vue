@@ -73,6 +73,9 @@ function toggleSplit(clientId: string) {
   if (next.has(clientId)) next.delete(clientId)
   else next.add(clientId)
   // 一个都不留等于「谁都没摊」，那不是记账意图，是误点——退回付款人独担。
+  // 补上自己还有一层：不补的话 chips 显示「没人摊」，而实际记下的是「我一个人摊」，
+  // 界面和账各说一套。
+  if (!next.size) next.add(selfId)
   splitSel.value = [...next]
 }
 
