@@ -13,7 +13,7 @@ import {
 } from '@/components/icons'
 import SegmentedControl, { type SegOption } from '@/components/SegmentedControl.vue'
 import { useTripStore } from '@/stores/trip'
-import type { Place, Poi } from '@/types/domain'
+import type { Poi } from '@/types/domain'
 import { apiFetch } from '@/utils/api'
 
 const props = defineProps<{ city: string; tripId: string }>()
@@ -28,9 +28,11 @@ const sort = ref<Sort>('composite')
 const pois = ref<Poi[]>([])
 const amapUrl = ref('')
 const loading = ref(false)
-const error = ref<{ message: string } | null>(null)
-const loaded = ref(new Set<string>())
-// 在途去重：loaded 要等响应回来才写，同一 key 在那之前能被 watch 的多次触发钻过去
+const error = ref<{ message: string; hint: string } | null>(null)
+/** key = 城市:类目:排序:基准点。命中就换数据，不重新打接口；distance 档零配额，
+    换基准点只是本地重排，缓存里躺着的是同一批候选的不同顺序，值得各存一份。 */
+const cache = new Map<string, { pois: Poi[]; amapUrl: string }>()
+// 在途去重：缓存要等响应回来才写，同一 key 在那之前能被 watch 的多次触发钻过去
 // （实测挪一次基准点就发出两条一模一样的请求）。配额在服务端有缓存兜着，但这条请求本就不该发。
 const inFlight = new Set<string>()
 
@@ -44,43 +46,76 @@ const CATEGORIES: {
   { key: 'night', label: '夜市', icon: MoonStar },
 ]
 
-const SORT_OPTIONS = computed<SegOption[]>(() => [
+const SORT_OPTIONS: SegOption[] = [
   { value: 'composite', label: '综合' },
   { value: 'hot', label: '热度' },
-  { value: 'distance', label: '距离', disabled: !origin.value },
-])
+  { value: 'distance', label: '距离' },
+]
 
-/* ---------- 距离基准：当天地点中心 → 全行程地点中心 → 没有 ---------- */
+/* ---------- 距离基准：用户显式选定的一个地点 ---------- */
 
-function centroid(list: Place[]): [number, number] | null {
-  if (!list.length) return null
-  let lng = 0
-  let lat = 0
-  for (const p of list) {
-    lng += p.lng
-    lat += p.lat
-  }
-  return [lng / list.length, lat / list.length]
+/** 基准点必须是行程里看得见的一个地点（或想去清单一员），不许是凭空坐标，也不许是几个地点的
+    平均位置——「距此」的「此」要能在界面上指出来，质心就指不出来了。 */
+const originId = ref('')
+
+/** 高德坐标一律 6 位小数，1e-6 已经比它更细，拿来判「就是同一处」。 */
+function sameCoord(a: [number, number], b: [number, number]): boolean {
+  return Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6
 }
 
-const origin = computed<[number, number] | null>(() => {
-  const today = store.currentPlaces
-  if (today.length) return centroid(today)
-  return centroid(store.places)
-})
-/** 基准点是从哪儿来的，直接写在界面上——「距此」的「此」不能让人猜。 */
-const originScope = computed<'day' | 'trip' | null>(() => {
-  if (!origin.value) return null
-  return store.currentPlaces.length ? 'day' : 'trip'
-})
+function rowById(id: string): { name: string; lng: number; lat: number } | null {
+  const place = store.places.find((p) => p.id === id)
+  if (place) return { name: place.name, lng: place.lng, lat: place.lat }
+  // 酒店常常还躺在想去清单里，没排进某一天，但「离酒店多远」正是用户要的那个数。
+  const item = store.stash.find((s) => s.id === id)
+  return item ? { name: item.name, lng: item.lng, lat: item.lat } : null
+}
+
+function rowAt(coord: [number, number]): string | null {
+  const place = store.places.find((p) => sameCoord([p.lng, p.lat], coord))
+  if (place) return place.id
+  return store.stash.find((s) => sameCoord([s.lng, s.lat], coord))?.id ?? null
+}
+
+const originPlace = computed(() => (originId.value ? rowById(originId.value) : null))
+
+/** 行 id 的备胎：基准点最后一次活着时的坐标。只在 id 失效时用得上。 */
+const originAt = ref<[number, number] | null>(null)
+
+const origin = computed<[number, number] | null>(() =>
+  originPlace.value ? [originPlace.value.lng, originPlace.value.lat] : null,
+)
+
+/** 下拉按天分组，项前带天内序号：一天里可以有三行都叫「地图选点」，光靠天头分不开。 */
+const originGroups = computed(() =>
+  store.days
+    .map((day) => ({
+      label: `D${day.day_index + 1}${day.title ? ` · ${day.title}` : ''}`,
+      items: store.places
+        .filter((p) => p.day_id === day.id)
+        .sort((a, b) => a.sort_index - b.sort_index)
+        .map((p, i) => ({
+          id: p.id,
+          label: `${i + 1}. ${p.name}${
+            day.start_place_id === p.id
+              ? '（当天起点）'
+              : day.end_place_id === p.id
+                ? '（当天终点）'
+                : ''
+          }`,
+        })),
+    }))
+    .filter((g) => g.items.length),
+)
+
+const originStash = computed(() => store.stash.map((s) => ({ id: s.id, label: s.name })))
+
 const originNote = computed(() => {
-  if (originScope.value === 'day') {
-    return `距离按这一天已加入的 ${store.currentPlaces.length} 个地点的中心算（直线距离）`
+  if (originPlace.value) return `距离按「${originPlace.value.name}」算直线距离，不是路况时间`
+  if (originGroups.value.length || originStash.value.length) {
+    return '还没有基准点：在上方挑一个地点，这一档才会重排'
   }
-  if (originScope.value === 'trip') {
-    return '这一天还没有地点，距离按整个行程已加入地点的中心算（直线距离）'
-  }
-  return '先加入一个地点，才能按距离排'
+  return '行程里还没有地点可当基准：先加入一个地点，或把它丢进想去清单'
 })
 
 /* ---------- 列表高度与排序：按行程记住 ---------- */
@@ -105,18 +140,57 @@ function loadPrefs() {
     return // 脏数据与无痕模式一样：回到默认，不连带面板一起坏
   }
   if (!raw || typeof raw !== 'object') return
-  const { h, sort: saved } = raw as { h?: unknown; sort?: unknown }
+  const { h, sort: saved, origin: savedOrigin, originAt: savedAt } = raw as {
+    h?: unknown
+    sort?: unknown
+    origin?: unknown
+    originAt?: unknown
+  }
   if (typeof h === 'number' && Number.isFinite(h)) listH.value = clampH(h)
   if (saved === 'composite' || saved === 'hot' || saved === 'distance') sort.value = saved
+  if (typeof savedOrigin === 'string') originId.value = savedOrigin
+  if (
+    Array.isArray(savedAt) &&
+    savedAt.length === 2 &&
+    savedAt.every((v) => typeof v === 'number' && Number.isFinite(v))
+  ) {
+    originAt.value = [savedAt[0] as number, savedAt[1] as number]
+  }
 }
 
 function persistPrefs() {
+  // 坐标快照在这里顺手刷新：它是行 id 失效时唯一的线索，必须跟着基准点走。
+  if (originPlace.value) originAt.value = [originPlace.value.lng, originPlace.value.lat]
   try {
-    localStorage.setItem(prefsKey.value, JSON.stringify({ h: listH.value, sort: sort.value }))
+    localStorage.setItem(
+      prefsKey.value,
+      JSON.stringify({
+        h: listH.value,
+        sort: sort.value,
+        origin: originId.value,
+        originAt: originAt.value,
+      }),
+    )
   } catch {
     // 无痕模式：丢掉偏好不影响功能
   }
 }
+
+// 切档和换基准都得记住：只有拖拽写 storage 的话，「刷新后排序没回来」会被当成没保存的 bug。
+watch([sort, originId], persistPrefs)
+
+/** 上次选的基准点可能早就被删了。等行程确实加载完再判失效——挂载那一刻 places 还是空的，
+    抢着清会把「快照先到、偏好在后」的正常路径误杀成没选过。 */
+watch(
+  () => [originId.value, store.loading, originPlace.value === null] as const,
+  ([id, isLoading]) => {
+    if (isLoading || !id || originPlace.value) return
+    // id 没了不等于地点没了：「放进第 1 天」就是删旧行建新行，坐标一分没动。
+    originId.value = originAt.value ? (rowAt(originAt.value) ?? '') : ''
+    persistPrefs()
+  },
+  { immediate: true },
+)
 
 /* ---------- 无把手拖拽改高度 ---------- */
 
@@ -149,40 +223,83 @@ function nudge(delta: number) {
   persistPrefs()
 }
 
-// 基准点只当缓存键用，取三位小数（≈100m）：加一个地点值得重排，挪动 20 米不值得。
+/** 键用发给服务端的那串坐标：基准点是用户明确挑的，只有真把它挪走才该重排。掺行 id 的话，
+    「放进某一天」换个 id、坐标一分不动，也会白重排一次。 */
 const originKey = computed(() =>
-  origin.value ? `${origin.value[0].toFixed(3)},${origin.value[1].toFixed(3)}` : 'none',
+  origin.value ? `${origin.value[0].toFixed(6)},${origin.value[1].toFixed(6)}` : 'none',
 )
 
+/** 基准点只跟距离档有关：无条件掺进缓存键的话，综合和热度会每换一个基准点就多存一份，
+    切回去还得白打一次接口（实测过）。 */
+const basisKey = computed(() => (sort.value === 'distance' ? originKey.value : 'none'))
+
+// 后发先至：下拉里连点两个基准点时，先发的请求可能后回来，把顺序退回上一条基准点的结果。
+// 只让最新那一次落地，旧响应直接丢。
+let reqSeq = 0
+
 watch(
-  () => [props.city, open.value, category.value, sort.value, originKey.value] as const,
+  () => [props.city, open.value, category.value, sort.value, basisKey.value] as const,
   async ([city, isOpen]) => {
     if (!city || !isOpen) return
-    const key = `${city}:${category.value}:${sort.value}:${originKey.value}`
-    if (loaded.value.has(key) || inFlight.has(key)) return
+    // 没有基准点就不发这一枪：服务端只会把综合那批原样退回，顶着「距离」标签的假顺序
+    // 比一条空列表更坏。界面上此时显示的是「挑一个基准点」的提示。
+    if (sort.value === 'distance' && !origin.value) return
+    const key = `${city}:${category.value}:${sort.value}:${basisKey.value}`
+    if (inFlight.has(key)) return
+    const hit = cache.get(key)
+    if (hit) {
+      // 早退不等于数据对：pois 里可能还留着上一个 key 的结果，必须拿这份缓存盖回去。
+      pois.value = hit.pois
+      amapUrl.value = hit.amapUrl
+      error.value = null
+      return
+    }
     inFlight.add(key)
+    const seq = ++reqSeq
     loading.value = true
     error.value = null
+    // origin 回显是服务端唯一的「我采纳了这个基准点」信号：读不懂或境外坐标会被当作没给。
+    const asked = sort.value === 'distance' && origin.value !== null
     try {
       const params = new URLSearchParams({ city, category: category.value, sort: sort.value })
       if (sort.value === 'distance' && origin.value) {
         const [lng, lat] = origin.value
         params.set('origin', `${lng.toFixed(6)},${lat.toFixed(6)}`)
       }
-      const data = await apiFetch<{ pois: Poi[]; amap_url: string }>(
-        `/api/city/recommendations?${params}`,
-      )
+      const data = await apiFetch<{
+        pois: Poi[]
+        amap_url: string
+        origin?: [number, number] | null
+      }>(`/api/city/recommendations?${params}`)
+      if (asked && data.origin == null) {
+        // 服务端把读不懂或境外的 origin 当作没给，退回的就是综合顺序——假顺序不配进缓存。
+        throw new Error('这个基准点高德认不出来（境外坐标？）')
+      }
+      // 结果属于它自己那个 key，缓存照写；被更新的请求取代时只丢界面，不丢这一份。
+      cache.set(key, { pois: data.pois, amapUrl: data.amap_url })
+      if (seq !== reqSeq) return
       pois.value = data.pois
       amapUrl.value = data.amap_url
-      loaded.value.add(key)
     } catch (err) {
-      error.value = { message: (err as Error).message || '推荐加载失败' }
+      if (seq !== reqSeq) return
+      const e = err as Error
+      error.value = {
+        message: e.message || '推荐加载失败',
+        hint: asked ? '在上方换一个地点当基准' : '稍后再试',
+      }
     } finally {
-      loading.value = false
       inFlight.delete(key)
+      // 只有最新那次才有权收spinner——旧请求先回来时新请求还在路上。
+      if (seq === reqSeq) loading.value = false
     }
   },
 )
+
+/** 基准点自己也可能在这批候选里（同一个 POI）——那一行不许写「距此 10 m」，它就是把 0 米
+    向上取整到最小粒度的产物。 */
+function isBasis(poi: Poi): boolean {
+  return origin.value !== null && sameCoord([poi.lng, poi.lat], origin.value)
+}
 
 function fmtDistance(meters: number | null | undefined): string | null {
   if (meters == null) return null
@@ -249,13 +366,28 @@ defineExpose({ show: () => (open.value = true) })
       </div>
 
       <SegmentedControl v-model="sort" :options="SORT_OPTIONS" label="发现结果的排序方式" />
-      <p v-if="sort === 'distance'" class="reco__note tiny muted">{{ originNote }}</p>
+      <div v-if="sort === 'distance'" class="reco__origin">
+        <label class="tiny muted" for="reco-origin">距离基准点</label>
+        <select id="reco-origin" v-model="originId" class="input reco__select">
+          <option value="">不选（这一档不重排）</option>
+          <optgroup v-for="g in originGroups" :key="g.label" :label="g.label">
+            <option v-for="o in g.items" :key="o.id" :value="o.id">{{ o.label }}</option>
+          </optgroup>
+          <optgroup v-if="originStash.length" label="想去清单">
+            <option v-for="o in originStash" :key="o.id" :value="o.id">{{ o.label }}</option>
+          </optgroup>
+        </select>
+        <p class="reco__note tiny">{{ originNote }}</p>
+      </div>
 
       <p v-if="!city" class="reco__empty tiny muted">
         点行程名右侧的城市标签设一个目的地，这里就会推荐景点、小吃和夜市。
       </p>
       <p v-else-if="loading" class="reco__empty tiny muted">正在找 {{ city }} 的好去处…</p>
-      <p v-else-if="error" class="reco__empty tiny muted">{{ error.message }}（稍后再试）</p>
+      <p v-else-if="error" class="reco__empty tiny muted">{{ error.message }}（{{ error.hint }}）</p>
+      <p v-else-if="sort === 'distance' && !originPlace" class="reco__empty tiny muted">
+        选一个基准点，这里就按离它有多近重排；不选就先看综合。
+      </p>
 
       <ul v-else-if="pois.length" class="reco__list">
         <li v-for="poi in pois" :key="poi.id || poi.name" class="reco__item">
@@ -271,7 +403,8 @@ defineExpose({ show: () => (open.value = true) })
             <div class="reco__name">{{ poi.name }}</div>
             <div class="tiny muted reco__addr">
               {{ poi.address || poi.district }}<template v-if="poi.distance_m != null">
-                · 距此 {{ fmtDistance(poi.distance_m) }}</template
+                · <template v-if="isBasis(poi)">就是这里</template
+                ><template v-else>距此 {{ fmtDistance(poi.distance_m) }}</template></template
               >
             </div>
           </div>
@@ -401,8 +534,23 @@ defineExpose({ show: () => (open.value = true) })
   border-color: var(--accent);
 }
 
+/* 基准点候选数量不定、还要按天分组，自绘下拉得自己接管键盘与焦点，性价比为负，这里破例用原生
+   select，只把它拉回 token 体系的字号与颜色（Windows 上原生 select 默认 13.33px + 系统灰字）。 */
+.reco__origin {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reco__select {
+  width: 100%;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .reco__note {
-  margin: -4px 0 0;
+  margin: 0;
 }
 
 .reco__list {

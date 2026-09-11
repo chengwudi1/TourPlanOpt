@@ -17,7 +17,9 @@ Sorts (发现面板的三档，默认综合):
 - hot:       sortrule=2。实测只有 2 会换序，所以热度必须真打一次上游，占自己那条缓存。
 - distance:  **不打上游**。/v3/place/text 没有中心点，sortrule=1 与不传返回同一份顺序
              （实测），距离只能拿到坐标自己算：复用 composite 那份缓存，按到 origin 的
-             直线距离重排并回填 distance_m。所以这一档零配额、零新缓存。
+             直线距离重排并回填 distance_m。所以这一档零配额、零新缓存。origin 读不懂或落在
+             境内 bbox 之外时当作没给：响应里 origin 回显 null、顺序仍是综合，前端凭这个回显
+             判断基准点有没有被采纳，不会把综合顺序顶着「距离」标签画出去。
 """
 
 from __future__ import annotations

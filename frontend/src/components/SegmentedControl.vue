@@ -10,8 +10,6 @@ export interface SegOption {
   value: string
   label: string
   hint?: string
-  /** 灰掉但留着：让人看见这一档存在，只是现在还不能选。 */
-  disabled?: boolean
 }
 
 defineProps<{
@@ -32,7 +30,6 @@ const emit = defineEmits<{ 'update:modelValue': [string] }>()
       :class="{ 'seg__opt--on': opt.value === modelValue }"
       type="button"
       role="radio"
-      :disabled="opt.disabled"
       :aria-checked="opt.value === modelValue"
       @click="emit('update:modelValue', opt.value)"
     >
@@ -86,16 +83,6 @@ const emit = defineEmits<{ 'update:modelValue': [string] }>()
 .seg__label {
   font-size: 13px;
   font-weight: 600;
-}
-
-/* 写在 --on 之后：同一元素可能既选中又禁用（上次选的距离档，这次没基准点）。 */
-.seg__opt:disabled {
-  color: var(--text-3);
-  cursor: not-allowed;
-}
-
-.seg__opt:disabled:hover {
-  background: transparent;
 }
 
 .seg__hint {
