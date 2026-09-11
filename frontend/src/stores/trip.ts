@@ -2,8 +2,10 @@ import { acceptHMRUpdate, defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 import type {
+  ChecklistItem,
   Day,
   DayTimeline,
+  Expense,
   Participant,
   Place,
   PlaceCreateInput,
@@ -18,10 +20,11 @@ import { colorForClient, getClientId, useClientIdentity } from '@/composables/us
 import { apiFetch, postJson } from '@/utils/api'
 import { useSocketStore } from '@/stores/socket'
 
-interface PlaceAddPending {
-  kind: 'place_add'
-  tempId: string
-}
+type PendingOp =
+  | { kind: 'place_add'; tempId: string }
+  /** 一批清单条目共用一条 op：整批的临时行要在回广播时一起清掉。 */
+  | { kind: 'checklist_add'; tempIds: string[] }
+  | { kind: 'expense_add'; tempId: string }
 
 export interface OptimizeSummary {
   before_min: number
@@ -62,6 +65,8 @@ export const useTripStore = defineStore('trip', () => {
   const participants = ref<Participant[]>([])
   const presence = ref<Presence[]>([])
   const stash = ref<StashItem[]>([])
+  const checklist = ref<ChecklistItem[]>([])
+  const expenses = ref<Expense[]>([])
   const currentDayId = ref<string | null>(null)
   const selectedPlaceId = ref<string | null>(null)
   const loading = ref(false)
@@ -78,8 +83,8 @@ export const useTripStore = defineStore('trip', () => {
    */
   const timelines = ref<Record<string, DayTimeline>>({})
 
-  /** op_id -> optimistic bookkeeping (e.g. which temp row a place_add created). */
-  const pendingOps = new Map<string, PlaceAddPending>()
+  /** op_id -> optimistic bookkeeping (which temp rows a write created). */
+  const pendingOps = new Map<string, PendingOp>()
 
   const currentDay = computed(
     () => days.value.find((d) => d.id === currentDayId.value) ?? null,
@@ -105,6 +110,21 @@ export const useTripStore = defineStore('trip', () => {
   /** 排程提醒（「23:30 才结束」「固定时间早于预计到达」）。不点优化也看得到。 */
   const currentWarnings = computed(() => currentTimeline.value?.warnings ?? [])
 
+  // -- M22 派生：出行清单与账本 ---------------------------------------------------------
+
+  const checklistSorted = computed(() =>
+    checklist.value
+      .slice()
+      .sort((a, b) => a.sort_index - b.sort_index),
+  )
+  const checklistDoneCount = computed(() => checklist.value.filter((i) => i.done).length)
+
+  /** 服务端按 created_at 正序给出，面板要「最新在上」。
+   * 这里只做反转，不按时间重排：乐观临时行的时间串与服务端格式不同，排序会把它塞错位置，
+   * 而它 push 在末尾、反转后天然是最新一条——回广播来了再换成权威行，位置不变。 */
+  const expensesNewestFirst = computed(() => expenses.value.slice().reverse())
+  const spentCents = computed(() => expenses.value.reduce((sum, e) => sum + e.amount_cents, 0))
+
   function selectPlace(placeId: string | null) {
     selectedPlaceId.value = placeId
     if (trip.value) {
@@ -119,6 +139,8 @@ export const useTripStore = defineStore('trip', () => {
     participants.value = snap.participants
     presence.value = snap.presence ?? []
     stash.value = snap.stash ?? []
+    checklist.value = snap.checklist ?? []
+    expenses.value = snap.expenses ?? []
     const alive = new Set(snap.days.map((d) => d.id))
     timelines.value = Object.fromEntries(
       Object.entries(timelines.value).filter(([dayId]) => alive.has(dayId)),
@@ -339,6 +361,117 @@ export const useTripStore = defineStore('trip', () => {
     useSocketStore().sendOp(Ops.PLACE_MOVE, { place_id: placeId, day_id: toDayId })
   }
 
+  // -- checklist（出行清单）--------------------------------------------------------------
+
+  /**
+   * 一次加一条或一批。整批走一条 op：一条一条发会把 seq 打成一串，别人端上看着像
+   * 有人连点了十几次「添加」。去重由服务端负责，被它丢掉的临时行在回广播时一起清掉。
+   */
+  function checklistAdd(texts: string[]) {
+    if (!trip.value) return
+    const tripId = trip.value.id
+    const clean = texts.map((t) => t.trim().slice(0, 120)).filter(Boolean)
+    if (!clean.length) return
+    const me = useClientIdentity()
+    const maxIndex = checklist.value.reduce((max, i) => Math.max(max, i.sort_index), -1)
+    const now = new Date().toISOString()
+    const tempIds: string[] = []
+    for (const [offset, text] of clean.entries()) {
+      const tempId = `tmp-${crypto.randomUUID()}`
+      tempIds.push(tempId)
+      checklist.value.push({
+        id: tempId,
+        trip_id: tripId,
+        sort_index: maxIndex + 1 + offset,
+        text,
+        done: false,
+        added_by: me.name,
+        rev: 1,
+        created_at: now,
+        updated_at: now,
+      })
+    }
+    const opId = useSocketStore().sendOp(Ops.CHECKLIST_ADD, { texts: clean, added_by: me.name })
+    pendingOps.set(opId, { kind: 'checklist_add', tempIds })
+  }
+
+  /** 改名 / 打勾共用一条 patch 通道（服务端白名单只认 text 与 done）。 */
+  function updateChecklist(id: string, patch: Partial<Pick<ChecklistItem, 'text' | 'done'>>) {
+    const item = checklist.value.find((i) => i.id === id)
+    if (!item || !Object.keys(patch).length) return
+    Object.assign(item, patch)
+    // 本地不动 rev：与服务端撞号会被 echo 的 rev 守卫丢掉（同 updatePlace）。
+    useSocketStore().sendOp(Ops.CHECKLIST_UPDATE, { id, patch })
+  }
+
+  function removeChecklist(id: string) {
+    checklist.value = checklist.value.filter((i) => i.id !== id)
+    useSocketStore().sendOp(Ops.CHECKLIST_DELETE, { id })
+  }
+
+  /** 拖动结果：发整条有序 id 数组，与 day_reorder 同一套规矩（不发送增量）。 */
+  function reorderChecklist(orderedIds: string[]) {
+    applyChecklistOrder(orderedIds)
+    useSocketStore().sendOp(Ops.CHECKLIST_REORDER, { item_ids: orderedIds })
+  }
+
+  // -- expenses（费用与 AA）--------------------------------------------------------------
+
+  interface ExpenseAddInput {
+    title: string
+    amount_cents: number
+    category?: string
+    /** 分摊名单（client_id）。留空 = 只有付款人自己，服务端同样这么兜。 */
+    split_ids?: string[]
+  }
+
+  function addExpense(input: ExpenseAddInput) {
+    if (!trip.value) return
+    const title = input.title.trim().slice(0, 80)
+    if (!title || input.amount_cents <= 0) return
+    const me = useClientIdentity()
+    const splits = input.split_ids?.length ? input.split_ids : [me.client_id]
+    const now = new Date().toISOString()
+    const tempId = `tmp-${crypto.randomUUID()}`
+    expenses.value.push({
+      id: tempId,
+      trip_id: trip.value.id,
+      title,
+      amount_cents: input.amount_cents,
+      category: input.category ?? 'other',
+      paid_by: me.client_id,
+      paid_by_name: me.name,
+      split_ids: splits,
+      created_at: now,
+      updated_at: now,
+      rev: 1,
+    })
+    const opId = useSocketStore().sendOp(Ops.EXPENSE_ADD, {
+      title,
+      amount_cents: input.amount_cents,
+      category: input.category ?? 'other',
+      paid_by: me.client_id,
+      paid_by_name: me.name,
+      split_ids: splits,
+    })
+    pendingOps.set(opId, { kind: 'expense_add', tempId })
+  }
+
+  function updateExpense(
+    id: string,
+    patch: Partial<Pick<Expense, 'title' | 'amount_cents' | 'category' | 'split_ids'>>,
+  ) {
+    const expense = expenses.value.find((e) => e.id === id)
+    if (!expense || !Object.keys(patch).length) return
+    Object.assign(expense, patch)
+    useSocketStore().sendOp(Ops.EXPENSE_UPDATE, { id, patch })
+  }
+
+  function removeExpense(id: string) {
+    expenses.value = expenses.value.filter((e) => e.id !== id)
+    useSocketStore().sendOp(Ops.EXPENSE_DELETE, { id })
+  }
+
 
   // -- optimization --------------------------------------------------------------------
 
@@ -482,6 +615,48 @@ export const useTripStore = defineStore('trip', () => {
         pendingOps.delete(frame.op_id)
         break
       }
+      case 'checklist_added': {
+        const pending = pendingOps.get(frame.op_id)
+        pendingOps.delete(frame.op_id)
+        if (pending?.kind === 'checklist_add') {
+          dropChecklist(pending.tempIds)
+        }
+        for (const item of (data.items ?? []) as ChecklistItem[]) upsertChecklistIfNewer(item)
+        applyChecklistOrder((data.item_ids ?? []) as string[])
+        break
+      }
+      case 'checklist_updated': {
+        pendingOps.delete(frame.op_id)
+        upsertChecklistIfNewer(data.item as ChecklistItem)
+        break
+      }
+      case 'checklist_deleted': {
+        pendingOps.delete(frame.op_id)
+        dropChecklist([String(data.id)])
+        break
+      }
+      case 'checklist_reordered': {
+        pendingOps.delete(frame.op_id)
+        applyChecklistOrder((data.item_ids ?? []) as string[])
+        break
+      }
+      case 'expense_added': {
+        const pending = pendingOps.get(frame.op_id)
+        pendingOps.delete(frame.op_id)
+        if (pending?.kind === 'expense_add') dropExpense(pending.tempId)
+        upsertExpenseIfNewer(data.expense as Expense)
+        break
+      }
+      case 'expense_updated': {
+        pendingOps.delete(frame.op_id)
+        upsertExpenseIfNewer(data.expense as Expense)
+        break
+      }
+      case 'expense_deleted': {
+        pendingOps.delete(frame.op_id)
+        dropExpense(String(data.id))
+        break
+      }
       case 'timeline_updated': {
         // Follows every schedule-affecting op (and greets a joining client). Rows ride
         // the normal rev guard -- a dry-run join frame carries equal revs and only
@@ -511,8 +686,19 @@ export const useTripStore = defineStore('trip', () => {
       opError.value = { message: '顺序已被别人改动，已同步到最新', hint: '' }
       return
     }
+    if (reason === 'checklist_stale') {
+      applyChecklistOrder((data.item_ids ?? []) as string[])
+      opError.value = { message: '清单顺序已被别人改动，已同步到最新', hint: '' }
+      return
+    }
     if (pending?.kind === 'place_add') {
       removeLocalRow(pending.tempId)
+    }
+    if (pending?.kind === 'checklist_add') {
+      dropChecklist(pending.tempIds)
+    }
+    if (pending?.kind === 'expense_add') {
+      dropExpense(pending.tempId)
     }
     const messages: Record<string, string> = {
       place_not_found: '该地点已被删除',
@@ -520,6 +706,9 @@ export const useTripStore = defineStore('trip', () => {
       bad_patch: '修改内容无效',
       bad_payload: '提交的内容无效',
       stash_not_found: '这条想去清单已被删除',
+      checklist_not_found: '这条清单已被删除',
+      expense_not_found: '这笔开销已被删除',
+      bad_expense: '这笔没记上：标题或金额不对',
     }
     opError.value = {
       message: messages[reason] ?? `操作被拒绝（${reason}）`,
@@ -530,6 +719,8 @@ export const useTripStore = defineStore('trip', () => {
   function clearPendingOps() {
     // A fresh snapshot supersedes every optimistic guess; temp rows would linger.
     places.value = places.value.filter((p) => !p.id.startsWith('tmp-'))
+    checklist.value = checklist.value.filter((i) => !i.id.startsWith('tmp-'))
+    expenses.value = expenses.value.filter((e) => !e.id.startsWith('tmp-'))
     pendingOps.clear()
   }
 
@@ -598,6 +789,39 @@ export const useTripStore = defineStore('trip', () => {
     }
   }
 
+  function upsertChecklistIfNewer(item: ChecklistItem) {
+    if (!item?.id) return
+    const index = checklist.value.findIndex((i) => i.id === item.id)
+    if (index === -1) checklist.value.push(item)
+    else if (item.rev > checklist.value[index].rev) checklist.value[index] = item
+  }
+
+  function applyChecklistOrder(orderedIds: string[]) {
+    if (!Array.isArray(orderedIds)) return
+    const rank = new Map(orderedIds.map((id, i) => [id, i]))
+    for (const item of checklist.value) {
+      const next = rank.get(item.id)
+      if (next !== undefined) item.sort_index = next
+    }
+  }
+
+  function dropChecklist(ids: string[]) {
+    if (!ids.length) return
+    const dead = new Set(ids)
+    checklist.value = checklist.value.filter((i) => !dead.has(i.id))
+  }
+
+  function upsertExpenseIfNewer(expense: Expense) {
+    if (!expense?.id) return
+    const index = expenses.value.findIndex((e) => e.id === expense.id)
+    if (index === -1) expenses.value.push(expense)
+    else if (expense.rev > expenses.value[index].rev) expenses.value[index] = expense
+  }
+
+  function dropExpense(id: string) {
+    expenses.value = expenses.value.filter((e) => e.id !== id)
+  }
+
   function describe(err: unknown): { message: string; hint: string } {
     const e = err as { message?: string; hint?: string }
     return { message: e?.message ?? '加载失败', hint: e?.hint ?? '' }
@@ -610,6 +834,8 @@ export const useTripStore = defineStore('trip', () => {
     participants,
     presence,
     stash,
+    checklist,
+    expenses,
     currentDayId,
     selectedPlaceId,
     loading,
@@ -623,6 +849,10 @@ export const useTripStore = defineStore('trip', () => {
     selectedPlace,
     currentTimeline,
     currentWarnings,
+    checklistSorted,
+    checklistDoneCount,
+    expensesNewestFirst,
+    spentCents,
     selectPlace,
     applySnapshot,
     load,
@@ -642,6 +872,13 @@ export const useTripStore = defineStore('trip', () => {
     stashRemove,
     promoteFromStash,
     movePlaceToDay,
+    checklistAdd,
+    updateChecklist,
+    removeChecklist,
+    reorderChecklist,
+    addExpense,
+    updateExpense,
+    removeExpense,
     optimize,
     undoOptimize,
     dismissOptimizeResult,

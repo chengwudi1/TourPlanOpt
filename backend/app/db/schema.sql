@@ -30,6 +30,13 @@ CREATE TABLE IF NOT EXISTS trips (
     seq           INTEGER NOT NULL DEFAULT 0,     -- monotonic broadcast counter; persisted
                                                   -- so it survives a restart and clients can
                                                   -- detect gaps across reconnects
+    -- M22 行程状态。只存人手工改得动的三档；「X 天后出发」「已结束」由 days.date 现算，
+    -- 存下来就是一份会过期的假事实（没有 cron 会去翻旧行程）。
+    status        TEXT NOT NULL DEFAULT 'planning'
+                  CHECK (status IN ('planning', 'finished', 'archived')),
+    -- 钱一律以「分」为整数存：浮点累加几十笔之后会出现 1999.9999999999998，而预算条
+    -- 正是靠逐笔相加得出的。0 = 还没设预算（不是「预算为零」，UI 要能分清这两件事）。
+    budget_cents  INTEGER NOT NULL DEFAULT 0,
     created_at    TEXT NOT NULL
 );
 
@@ -166,3 +173,38 @@ CREATE TABLE IF NOT EXISTS stash (
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_stash_trip ON stash(trip_id, created_at);
+
+-- -- M22: 旅行清单、费用分摊 ------------------------------------------------------------
+
+-- 出行清单：打包要带什么、出发前要办什么。与 places/stash 无关（那些是有坐标的点子，
+-- 这一张只是待办），也不参与优化与排程，所以单独一张表、单独一份 sort_index。
+CREATE TABLE IF NOT EXISTS checklist_items (
+    id         TEXT PRIMARY KEY,
+    trip_id    TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    sort_index INTEGER NOT NULL,                  -- 稠密 0..N-1，按行程整体排序
+    text       TEXT NOT NULL,
+    done       INTEGER NOT NULL DEFAULT 0,
+    added_by   TEXT NOT NULL DEFAULT '',
+    rev        INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_checklist_trip ON checklist_items(trip_id, sort_index);
+
+-- 费用：一笔一笔记，AA 靠 split_ids 算。分摊人存**创建当下解析好的 client_id 列表**，
+-- 不存「全体」这种引用——名册是活的，今天 AA 给 3 个人，明天有人退出行程，回头再看
+-- 那笔账不该自动变成 2 个人摊。名单写在行上，账就定格在记下的那一刻。
+CREATE TABLE IF NOT EXISTS expenses (
+    id           TEXT PRIMARY KEY,
+    trip_id      TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    title        TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    category     TEXT NOT NULL DEFAULT 'other',   -- transport|lodging|food|ticket|shopping|other
+    paid_by      TEXT NOT NULL DEFAULT '',        -- client_id
+    paid_by_name TEXT NOT NULL DEFAULT '',        -- 名字快照：成员改名/退出不影响历史账
+    split_ids    TEXT NOT NULL DEFAULT '[]',      -- JSON 数组，至少 1 人
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    rev          INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_expenses_trip ON expenses(trip_id, created_at);

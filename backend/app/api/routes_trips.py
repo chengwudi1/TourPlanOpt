@@ -19,6 +19,8 @@ from app.db.repositories import (
     delete_place,
     get_snapshot,
     get_trip_summaries,
+    next_seq,
+    update_trip,
     upsert_participant,
 )
 from app.models.domain import (
@@ -29,6 +31,8 @@ from app.models.domain import (
     Snapshot,
     TripCreate,
     TripCreateResult,
+    TripOut,
+    TripPatch,
     TripSummaryList,
 )
 
@@ -116,6 +120,44 @@ async def read_trip(trip_id: str, request: Request) -> Snapshot:
 
         await accounts.record_visit(get_db(), trip_id, user["id"])
     return snapshot
+
+
+@router.patch("/{trip_id}", response_model=TripOut)
+async def patch_trip(trip_id: str, body: TripPatch) -> TripOut:
+    """HTTP 侧改行程：首页没有 WebSocket，「标记完成 / 归档 / 设预算」只能走这条路。
+
+    写完必须朝房间广播一条 `trip_updated`，否则同时开着的行程页会停在旧状态，而且它下次
+    自己发 `trip_update` 时按 LWW 会把首页刚写下的值盖回去——那边根本不知道有人改过。
+
+    `exclude_unset` 是必要的：``{"city": null}`` 是一次真实的清空意图，而字段缺席意味着
+    「这一项别碰」，两者不能都读成「改成空」。
+    """
+    patch = body.model_dump(exclude_unset=True)
+    if not patch:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "没有要修改的字段")
+    db = get_db()
+    if await db.fetch_one("SELECT id FROM trips WHERE id = ?", (trip_id,)) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"行程 {trip_id} 不存在")
+    updated = await update_trip(db, trip_id, patch)
+    if updated is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "提交的内容无效")
+
+    from app.models.protocol import broadcast_op_frame
+    from app.ws.hub import get_hub
+
+    hub = get_hub().peek(trip_id)
+    if hub is not None:
+        seq = await next_seq(db, trip_id)
+        hub.broadcast(
+            broadcast_op_frame(
+                seq,
+                "trip_updated",
+                origin="server",
+                op_id=f"patch-{trip_id}-{seq}",
+                data={"trip": updated.model_dump(mode="json")},
+            )
+        )
+    return updated
 
 
 @router.post("/{trip_id}/participants", response_model=ParticipantOut)

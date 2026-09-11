@@ -7,6 +7,7 @@ knows about HTTP or sockets.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -14,7 +15,11 @@ from datetime import date, timedelta
 
 from app.db.database import Database
 from app.models.domain import (
+    EXPENSE_CATEGORIES,
+    ChecklistItemOut,
     DayOut,
+    ExpenseCreate,
+    ExpenseOut,
     ParticipantOut,
     PlaceCreate,
     PlaceOut,
@@ -22,6 +27,7 @@ from app.models.domain import (
     StashItemOut,
     TravelMode,
     TripOut,
+    TripStatus,
     TripSummary,
 )
 from app.util.ids import new_id
@@ -141,12 +147,20 @@ async def get_snapshot(db: Database, trip_id: str) -> Snapshot | None:
         stash_rows = conn.execute(
             "SELECT * FROM stash WHERE trip_id = ? ORDER BY created_at", (trip_id,)
         ).fetchall()
+        checklist_rows = conn.execute(
+            "SELECT * FROM checklist_items WHERE trip_id = ? ORDER BY sort_index", (trip_id,)
+        ).fetchall()
+        expense_rows = conn.execute(
+            "SELECT * FROM expenses WHERE trip_id = ? ORDER BY created_at", (trip_id,)
+        ).fetchall()
         return Snapshot(
             trip=TripOut.model_validate(dict(trip_row)),
             days=[DayOut.model_validate(dict(r)) for r in day_rows],
             places=[PlaceOut.model_validate(dict(r)) for r in place_rows],
             participants=[ParticipantOut.model_validate(dict(r)) for r in participant_rows],
             stash=[StashItemOut.model_validate(dict(r)) for r in stash_rows],
+            checklist=[ChecklistItemOut.model_validate(dict(r)) for r in checklist_rows],
+            expenses=[ExpenseOut.model_validate(dict(r)) for r in expense_rows],
         )
 
     return await db.run(_load)
@@ -162,6 +176,9 @@ async def get_trip_summaries(db: Database, trip_ids: Sequence[str]) -> list[Trip
     Performs no writes at all: no `record_visit`, no `trips.seq` bump. That is the whole
     point of this function existing next to `get_snapshot` rather than being replaced by
     it. Unknown ids simply produce no row.
+
+    M22 给卡片添的那些字段（清单进度、已花、预算、日期区间、状态）都是并排塞进同一条语句
+    的相关子查询——查询条数不因卡片多画两行而增长。
     """
     if not trip_ids:
         return []
@@ -170,11 +187,22 @@ async def get_trip_summaries(db: Database, trip_ids: Sequence[str]) -> list[Trip
 
     def _load(conn: sqlite3.Connection) -> list[TripSummary]:
         rows = conn.execute(
-            f"""SELECT t.id, t.title, t.city, t.travel_mode, t.created_at,
+            f"""SELECT t.id, t.title, t.city, t.travel_mode, t.status, t.budget_cents,
+                       t.created_at,
                        (SELECT COUNT(*) FROM days d WHERE d.trip_id = t.id) AS day_count,
                        (SELECT COUNT(*) FROM places p WHERE p.trip_id = t.id) AS place_count,
                        (SELECT COUNT(DISTINCT pc.client_id) FROM participants pc
                           WHERE pc.trip_id = t.id) AS companion_count,
+                       (SELECT MIN(d2.date) FROM days d2
+                          WHERE d2.trip_id = t.id AND d2.date IS NOT NULL) AS start_date,
+                       (SELECT MAX(d3.date) FROM days d3
+                          WHERE d3.trip_id = t.id AND d3.date IS NOT NULL) AS end_date,
+                       (SELECT COUNT(*) FROM checklist_items c WHERE c.trip_id = t.id)
+                           AS checklist_total,
+                       (SELECT COUNT(*) FROM checklist_items c
+                          WHERE c.trip_id = t.id AND c.done = 1) AS checklist_done,
+                       (SELECT COALESCE(SUM(e.amount_cents), 0) FROM expenses e
+                          WHERE e.trip_id = t.id) AS spent_cents,
                        COALESCE(
                            (SELECT MAX(p2.updated_at) FROM places p2
                               WHERE p2.trip_id = t.id),
@@ -451,13 +479,34 @@ DAY_PATCH_FIELDS: dict[str, Callable[[object], object]] = {
     "end_place_id": lambda v: str(v) if v is not None else None,
 }
 
+MAX_BUDGET_CENTS = 1_000_000_000  # ¥10,000,000：够一段真实的团队旅行，又挡得住手滑多打几个 0
+
+
+def _coerce_budget_cents(value: object) -> int:
+    """预算只许是非负整数。负数与 None 都当作「清空」= 0，超大值夹住而不是报错。"""
+    if value is None:
+        return 0
+    return max(0, min(int(value), MAX_BUDGET_CENTS))  # type: ignore[arg-type]
+
+
 TRIP_PATCH_FIELDS: dict[str, Callable[[object], object]] = {
     "title": str,
     "city": str,
     "travel_mode": str,
     "cost_model": str,
     "day_start_min": _coerce_int,
+    "status": str,
+    "budget_cents": _coerce_budget_cents,
 }
+
+
+def _validate_patched_trip(patch: dict[str, object]) -> str | None:
+    """状态是一枚写死的枚举，不是自由文本：认不出的值拒绝整个 patch，
+    而不是悄悄收下再让首页画出一个不属于任何一档的行程。"""
+    status = patch.get("status")
+    if status is not None and str(status) not in {s.value for s in TripStatus}:
+        return "bad_status"
+    return None
 
 
 def _patch_assignments(
@@ -569,6 +618,9 @@ async def update_day(db: Database, day_id: str, patch: dict[str, object]) -> Day
 
 
 async def update_trip(db: Database, trip_id: str, patch: dict[str, object]) -> TripOut | None:
+    if _validate_patched_trip(patch) is not None:
+        return None
+
     def _update(conn: sqlite3.Connection) -> dict | None:
         row = conn.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
         if row is None:
@@ -648,3 +700,268 @@ async def stash_remove(db: Database, trip_id: str, item_id: str) -> bool:
         return cur.rowcount > 0
 
     return await db.run(_remove)
+
+
+# -- checklist（出行清单）----------------------------------------------------------------
+
+
+CHECKLIST_TEXT_MAX = 120
+
+
+def _clean_texts(texts: Sequence[object]) -> list[str]:
+    """Trim, drop empties, cap length, dedupe **within the batch**.
+
+    Dedupe against the rows already in the trip happens in SQL, where the current state
+    is actually visible; doing it here would let a second 「一键补全」 re-add everything
+    the first one typed.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in texts:
+        text = str(raw).strip()[:CHECKLIST_TEXT_MAX]
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
+async def checklist_add(
+    db: Database, trip_id: str, texts: Sequence[object], added_by: str = ""
+) -> list[ChecklistItemOut]:
+    """Append a batch of items, skipping texts this trip already carries.
+
+    Returns the rows actually inserted -- possibly none, which is a legitimate result
+    (「一键补全」 pressed twice must not produce a second screen of duplicates) and must
+    not be reported as an error.
+    """
+    batch = _clean_texts(texts)
+
+    def _insert(conn: sqlite3.Connection) -> list[dict]:
+        if not batch:
+            return []
+        existing = {
+            str(row["text"])
+            for row in conn.execute(
+                "SELECT text FROM checklist_items WHERE trip_id = ?", (trip_id,)
+            ).fetchall()
+        }
+        todo = [text for text in batch if text not in existing]
+        if not todo:
+            return []
+        base_row = conn.execute(
+            "SELECT COALESCE(MAX(sort_index), -1) AS m FROM checklist_items WHERE trip_id = ?",
+            (trip_id,),
+        ).fetchone()
+        base = int(base_row["m"]) + 1
+        now = now_iso()
+        ids = [new_id() for _ in todo]
+        conn.executemany(
+            """INSERT INTO checklist_items
+                   (id, trip_id, sort_index, text, done, added_by, rev, created_at, updated_at)
+               VALUES (?, ?, ?, ?, 0, ?, 1, ?, ?)""",
+            [(ids[i], trip_id, base + i, todo[i], added_by, now, now) for i in range(len(todo))],
+        )
+        rows = conn.execute(
+            f"SELECT * FROM checklist_items WHERE id IN ({', '.join('?' for _ in ids)})",
+            tuple(ids),
+        ).fetchall()
+        order = {text: i for i, text in enumerate(todo)}
+        return sorted((dict(r) for r in rows), key=lambda r: order.get(r["text"], 0))
+
+    inserted = await db.run(_insert)
+    return [ChecklistItemOut.model_validate(row) for row in inserted]
+
+
+async def checklist_ids(db: Database, trip_id: str) -> list[str]:
+    """The authoritative order, same shape as `place_ids_for_day`: a reorder op carries
+    the full array so two clients dragging at once converge instead of diverging."""
+    rows = await db.fetch_all(
+        "SELECT id FROM checklist_items WHERE trip_id = ? ORDER BY sort_index", (trip_id,)
+    )
+    return [str(row["id"]) for row in rows]
+
+
+CHECKLIST_PATCH_FIELDS: dict[str, Callable[[object], object]] = {
+    "text": lambda v: str(v).strip()[:CHECKLIST_TEXT_MAX],
+    "done": lambda v: 1 if v else 0,
+}
+
+
+async def update_checklist(
+    db: Database, item_id: str, patch: dict[str, object]
+) -> ChecklistItemOut | None:
+    def _update(conn: sqlite3.Connection) -> dict | None:
+        row = conn.execute("SELECT id FROM checklist_items WHERE id = ?", (item_id,)).fetchone()
+        if row is None:
+            return None
+        assignments = _patch_assignments(patch, CHECKLIST_PATCH_FIELDS)
+        if assignments is None:
+            return None
+        columns, values = assignments
+        if "text" in columns and not str(values[columns.index("text")]):
+            return None  # 清空文本不是改名，是要把这条删掉——那走 delete
+        sets = ", ".join(f"{col} = ?" for col in columns)
+        conn.execute(
+            f"UPDATE checklist_items SET {sets}, rev = rev + 1, updated_at = ? WHERE id = ?",
+            [*values, now_iso(), item_id],
+        )
+        fresh = conn.execute("SELECT * FROM checklist_items WHERE id = ?", (item_id,)).fetchone()
+        return dict(fresh)
+
+    row = await db.run(_update)
+    return ChecklistItemOut.model_validate(row) if row is not None else None
+
+
+async def delete_checklist(db: Database, trip_id: str, item_id: str) -> bool:
+    def _delete(conn: sqlite3.Connection) -> bool:
+        cur = conn.execute(
+            "DELETE FROM checklist_items WHERE id = ? AND trip_id = ?", (item_id, trip_id)
+        )
+        return cur.rowcount > 0
+
+    return await db.run(_delete)
+
+
+async def reorder_checklist(
+    db: Database, trip_id: str, item_ids: Sequence[str]
+) -> ReorderResult:
+    """Permutation guard identical to `reorder_day`: the array must be exactly the current
+    id set. Index deltas under two people dragging at once diverge forever.
+
+    `ReorderResult.place_ids` here carries checklist item ids -- the field is the
+    authoritative order, whatever kind of row is being ordered.
+    """
+    current = await checklist_ids(db, trip_id)
+    wanted = [str(i) for i in item_ids]
+    if sorted(wanted) != sorted(current) or len(set(wanted)) != len(wanted):
+        return ReorderResult(ok=False, place_ids=current)
+
+    def _apply(conn: sqlite3.Connection) -> None:
+        conn.executemany(
+            "UPDATE checklist_items SET sort_index = ? WHERE id = ? AND trip_id = ?",
+            [(index, item_id, trip_id) for index, item_id in enumerate(wanted)],
+        )
+
+    await db.run(_apply)
+    return ReorderResult(ok=True, place_ids=wanted)
+
+
+# -- expenses（费用与 AA）-----------------------------------------------------------------
+
+
+def _clean_split_ids(value: object) -> list[str]:
+    """Dedupe, keep the caller's order, drop blanks. Accepts a JSON string (what the
+    column holds) or a list (what an op payload carries)."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return []
+    if not isinstance(value, (list, tuple)):
+        return []
+    out: list[str] = []
+    for raw in value:
+        client_id = str(raw).strip()
+        if client_id and client_id not in out:
+            out.append(client_id)
+        if len(out) >= 40:
+            break
+    return out
+
+
+def _clean_category(value: object) -> str:
+    label = str(value).strip().lower()
+    return label if label in EXPENSE_CATEGORIES else "other"
+
+
+async def expense_add(db: Database, trip_id: str, payload: ExpenseCreate) -> ExpenseOut:
+    expense_id = new_id()
+    splits = _clean_split_ids(payload.split_ids)
+    payer = payload.paid_by.strip()
+    # 没人分摊 = 付款人自己全担。留一份空名单会让「AA」这个词说谎，也会让结算少算一笔。
+    if not splits and payer:
+        splits = [payer]
+    now = now_iso()
+
+    def _insert(conn: sqlite3.Connection) -> dict:
+        conn.execute(
+            """INSERT INTO expenses
+                   (id, trip_id, title, amount_cents, category, paid_by, paid_by_name,
+                    split_ids, created_at, updated_at, rev)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+            (
+                expense_id,
+                trip_id,
+                payload.title.strip()[:80],
+                payload.amount_cents,
+                _clean_category(payload.category),
+                payer,
+                payload.paid_by_name.strip()[:40],
+                json.dumps(splits, ensure_ascii=False),
+                now,
+                now,
+            ),
+        )
+        return dict(conn.execute("SELECT * FROM expenses WHERE id = ?", (expense_id,)).fetchone())
+
+    return ExpenseOut.model_validate(await db.run(_insert))
+
+
+EXPENSE_PATCH_FIELDS: dict[str, Callable[[object], object]] = {
+    "title": lambda v: str(v).strip()[:80],
+    "amount_cents": lambda v: int(v),
+    "category": _clean_category,
+    "split_ids": lambda v: json.dumps(_clean_split_ids(v), ensure_ascii=False),
+    "paid_by": lambda v: str(v).strip()[:40],
+    "paid_by_name": lambda v: str(v).strip()[:40],
+}
+
+
+def _validate_patched_expense(patch: dict[str, object]) -> str | None:
+    amount = patch.get("amount_cents")
+    if amount is not None:
+        try:
+            cents = int(amount)
+        except (TypeError, ValueError):
+            return "bad_amount"
+        if not 1 <= cents <= 1_000_000_000:
+            return "bad_amount"
+    return None
+
+
+async def update_expense(
+    db: Database, expense_id: str, patch: dict[str, object]
+) -> ExpenseOut | None:
+    if _validate_patched_expense(patch) is not None:
+        return None
+
+    def _update(conn: sqlite3.Connection) -> dict | None:
+        row = conn.execute("SELECT id FROM expenses WHERE id = ?", (expense_id,)).fetchone()
+        if row is None:
+            return None
+        assignments = _patch_assignments(patch, EXPENSE_PATCH_FIELDS)
+        if assignments is None:
+            return None
+        columns, values = assignments
+        if "title" in columns and not str(values[columns.index("title")]):
+            return None
+        sets = ", ".join(f"{col} = ?" for col in columns)
+        conn.execute(
+            f"UPDATE expenses SET {sets}, rev = rev + 1, updated_at = ? WHERE id = ?",
+            [*values, now_iso(), expense_id],
+        )
+        return dict(conn.execute("SELECT * FROM expenses WHERE id = ?", (expense_id,)).fetchone())
+
+    row = await db.run(_update)
+    return ExpenseOut.model_validate(row) if row is not None else None
+
+
+async def delete_expense(db: Database, trip_id: str, expense_id: str) -> bool:
+    def _delete(conn: sqlite3.Connection) -> bool:
+        cur = conn.execute(
+            "DELETE FROM expenses WHERE id = ? AND trip_id = ?", (expense_id, trip_id)
+        )
+        return cur.rowcount > 0
+
+    return await db.run(_delete)

@@ -47,6 +47,14 @@ class Ops:
     DAY_UPDATE = "day_update"
     TRIP_UPDATE = "trip_update"
 
+    CHECKLIST_ADD = "checklist_add"
+    CHECKLIST_UPDATE = "checklist_update"
+    CHECKLIST_DELETE = "checklist_delete"
+    CHECKLIST_REORDER = "checklist_reorder"
+    EXPENSE_ADD = "expense_add"
+    EXPENSE_UPDATE = "expense_update"
+    EXPENSE_DELETE = "expense_delete"
+
 
 # -- server -> client --------------------------------------------------------------
 

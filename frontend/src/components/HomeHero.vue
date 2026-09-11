@@ -1,17 +1,37 @@
 <script setup lang="ts">
-import { CalendarDays, ChevronRight, Clock, MapPin, Users } from '@/components/icons'
+import { computed } from 'vue'
+
+import { CalendarDays, CheckCheck, ChevronRight, ListChecks, MapPin, Sparkles, Users, Wallet } from '@/components/icons'
 import type { TripSummary } from '@/types/domain'
+import { formatMoney } from '@/utils/money'
+import { formatDateRange, countdownOf, needsWrapUp, phaseOf, readinessHints } from '@/utils/tripstatus'
 import { formatAgo } from '@/utils/time'
 
 /**
  * 最近一段旅行的封面卡。版式学 TREK：大图 + 压在图上的大字 + 一条票券式数据带。
  *
- * 数据带里刻意没有「距出发 X 天」：我们的行程模型只有 created_at 和 places 的
- * updated_at，days.date 字段存在但没有任何 UI 会填它。造一个假的日期卡比不做更糟。
+ * 数据带回答的是「这趟还差什么」：几天后出发、清单打勾到几件、预算花掉多少。这些字段
+ * M18c 之后才真的有人填（新建抽屉一次建 N 天并写 days.date），所以倒计时不是装饰——
+ * 没填日期的行程 countdownOf 直接给空串，宁可不显示也不摆一个「?? 天后」。
  */
-defineProps<{ trip: TripSummary }>()
+const props = defineProps<{ trip: TripSummary }>()
 
-const emit = defineEmits<{ open: [] }>()
+const emit = defineEmits<{ open: []; finish: [] }>()
+
+const countdown = computed(() => countdownOf(props.trip.start_date, props.trip.end_date))
+const range = computed(() => formatDateRange(props.trip.start_date, props.trip.end_date))
+const hints = computed(() => readinessHints(props.trip))
+const wrapUp = computed(() => needsWrapUp(props.trip.status, phaseOf(props.trip.start_date, props.trip.end_date)))
+const money = computed(() => {
+  const t = props.trip
+  if (!t.budget_cents) return t.spent_cents ? `已花 ${formatMoney(t.spent_cents)}` : '未设预算'
+  return `${formatMoney(t.spent_cents)} / ${formatMoney(t.budget_cents)}`
+})
+const checklistText = computed(() => (props.trip.checklist_total ? `${props.trip.checklist_done}/${props.trip.checklist_total}` : '—'))
+const ago = computed(() => {
+  const built = formatAgo(props.trip.created_at)
+  return built ? `建于 ${built}，最近编辑 ${formatAgo(props.trip.updated_at)}` : `最近编辑 ${formatAgo(props.trip.updated_at)}`
+})
 </script>
 
 <template>
@@ -37,10 +57,25 @@ const emit = defineEmits<{ open: [] }>()
     <div class="hero__inner">
       <div class="hero__top">
         <span class="hero__badge">{{ trip.city || '还没定城市' }}</span>
-        <span class="hero__status tiny">{{ trip.place_count ? '继续编辑' : '先丢一个地点' }}</span>
+        <span
+          v-if="countdown.label"
+          class="hero__status tiny"
+          :class="`hero__status--${countdown.tone}`"
+          >{{ countdown.label }}</span
+        >
+        <span v-else class="hero__status tiny">{{ trip.place_count ? '继续编辑' : '先丢一个地点' }}</span>
       </div>
 
       <h2 class="hero__title">{{ trip.title || '未命名行程' }}</h2>
+
+      <p class="hero__sub tiny">
+        <CalendarDays class="ic" :size="12" />
+        <span>{{ range || '还没定日期' }}</span>
+        <span class="hero__sub-dot">·</span>
+        <span>{{ ago }}</span>
+      </p>
+
+      <p v-if="hints.length" class="hero__hints tiny"><Sparkles class="ic" :size="12" /> {{ hints.join(' · ') }}</p>
 
       <div class="hero__stats card">
         <div class="hero__stat">
@@ -59,14 +94,24 @@ const emit = defineEmits<{ open: [] }>()
           <span class="hero__stat-unit tiny">个</span>
         </div>
         <div class="hero__stat">
-          <span class="hero__stat-key tiny"><Clock class="ic" :size="12" /> 最近编辑</span>
-          <strong class="hero__stat-label">{{ formatAgo(trip.updated_at) }}</strong>
-          <span class="hero__stat-unit tiny">{{ formatAgo(trip.created_at) ? `建于 ${formatAgo(trip.created_at)}` : '' }}</span>
+          <span class="hero__stat-key tiny"><ListChecks class="ic" :size="12" /> 出行清单</span>
+          <strong class="hero__stat-num">{{ checklistText }}</strong>
+          <span class="hero__stat-unit tiny">{{ trip.checklist_total ? '已备好' : '还空着' }}</span>
+        </div>
+        <div class="hero__stat">
+          <span class="hero__stat-key tiny"><Wallet class="ic" :size="12" /> 费用</span>
+          <strong class="hero__stat-label">{{ money }}</strong>
+          <span class="hero__stat-unit tiny">{{ trip.budget_cents ? '已花 / 预算' : '点开行程可设' }}</span>
         </div>
 
-        <button class="btn btn--primary hero__open" type="button" @click="emit('open')">
-          打开行程 <ChevronRight class="ic" :size="14" />
-        </button>
+        <div class="hero__acts">
+          <button v-if="wrapUp" class="btn btn--sm hero__wrap" type="button" @click="emit('finish')">
+            <CheckCheck class="ic" :size="13" /> 标记完成
+          </button>
+          <button class="btn btn--primary hero__open" type="button" @click="emit('open')">
+            打开行程 <ChevronRight class="ic" :size="14" />
+          </button>
+        </div>
       </div>
     </div>
   </section>
@@ -207,6 +252,17 @@ const emit = defineEmits<{ open: [] }>()
   background: rgba(24, 16, 9, 0.72);
   border-radius: 999px;
 }
+/* 三档实心色全部写死深色，不用 --ember / --ok：那两个令牌在深色主题是浅橙和亮绿，
+   白字压上去只有 2.2–2.6:1。这颗胶囊压在照片上，必须和主题反着走。 */
+.hero__status--soon {
+  background: #8a4520;
+}
+.hero__status--live {
+  background: #136f3c;
+}
+.hero__status--past {
+  background: rgba(24, 16, 9, 0.52);
+}
 
 .hero__title {
   /* 大字是这张卡的主角：clamp 到 42px。遮罩是比例渐变，照片裁切后暗部落在哪没法保证，
@@ -220,9 +276,41 @@ const emit = defineEmits<{ open: [] }>()
   text-wrap: balance;
 }
 
+.hero__sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.86);
+  text-shadow: 0 1px 2px rgba(30, 20, 10, 0.4);
+}
+.hero__sub .ic {
+  color: #f0b98a;
+}
+.hero__sub-dot {
+  opacity: 0.6;
+}
+
+/* 「还差 2 项清单 · 没设预算」——首页该说的不是「你做得多好」，是「还差什么」。 */
+.hero__hints {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  align-self: flex-start;
+  padding: 3px 9px;
+  margin: 0;
+  color: #fff;
+  background: rgba(138, 69, 32, 0.62);
+  border-radius: 999px;
+}
+.hero__hints .ic {
+  color: #f6c79c;
+}
+
 .hero__stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
   gap: 0;
   align-items: center;
   padding: 12px 6px;
@@ -238,7 +326,7 @@ const emit = defineEmits<{ open: [] }>()
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 0 14px;
+  padding: 0 10px;
 }
 
 /* 票券式虚线分隔：TREK 用它替代硬边框，压在奶油底上不会显脏。 */
@@ -259,18 +347,34 @@ const emit = defineEmits<{ open: [] }>()
   line-height: 1.1;
 }
 
+/* 金额是这一格里唯一会长的字符串，宁可省略号也不许它把票券挤歪。 */
 .hero__stat-label {
+  overflow: hidden;
   font-size: 15px;
   font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .hero__stat-unit {
+  overflow: hidden;
   color: var(--text-3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
-.hero__open {
+.hero__acts {
+  display: flex;
+  gap: 6px;
+  align-items: center;
   margin-right: 8px;
   margin-left: 8px;
+}
+
+/* 「回来了但没整理」是旅行产品里最常见的沉默流失，所以这一档给一键而不是让人点进再说。
+   实心留给「打开行程」：一条数据带里出现两个大色块，就等于没有主次。 */
+.hero__wrap .ic {
+  color: var(--ember-deep);
 }
 
 @media (max-width: 860px) {
@@ -281,7 +385,7 @@ const emit = defineEmits<{ open: [] }>()
   .hero__stat:nth-child(2n + 1) {
     border-left: 0;
   }
-  .hero__open {
+  .hero__acts {
     grid-column: 1 / -1;
     margin: 4px 8px 0;
   }

@@ -2,7 +2,9 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import AmapKeyCheck from '@/components/AmapKeyCheck.vue'
+import ChecklistPanel from '@/components/ChecklistPanel.vue'
 import DaySection from '@/components/DaySection.vue'
+import ExpensePanel from '@/components/ExpensePanel.vue'
 import JoinGate from '@/components/JoinGate.vue'
 import MapPanel from '@/components/MapPanel.vue'
 import PlaceSearch from '@/components/PlaceSearch.vue'
@@ -491,6 +493,10 @@ if (import.meta.env.DEV) {
                 </g>
               </svg>
             </div>
+
+            <ChecklistPanel />
+
+            <ExpensePanel />
           </template>
         </div>
       </div>

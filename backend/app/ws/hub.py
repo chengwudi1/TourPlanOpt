@@ -130,6 +130,15 @@ class Hub:
             self._trips[trip_id] = hub
         return hub
 
+    def peek(self, trip_id: str) -> TripHub | None:
+        """Look without creating.
+
+        `get()` on a trip nobody has open would leave an empty TripHub in the map forever
+        -- only a disconnect calls `release_if_empty`. A REST handler that wants to "shout
+        into the room if there is one" must not have to own that room.
+        """
+        return self._trips.get(trip_id)
+
     def release_if_empty(self, trip_id: str) -> None:
         hub = self._trips.get(trip_id)
         if hub is not None and hub.is_empty():

@@ -38,6 +38,13 @@ export const Ops = {
   STASH_ADD: 'stash_add',
   STASH_REMOVE: 'stash_remove',
   TRIP_UPDATE: 'trip_update',
+  CHECKLIST_ADD: 'checklist_add',
+  CHECKLIST_UPDATE: 'checklist_update',
+  CHECKLIST_DELETE: 'checklist_delete',
+  CHECKLIST_REORDER: 'checklist_reorder',
+  EXPENSE_ADD: 'expense_add',
+  EXPENSE_UPDATE: 'expense_update',
+  EXPENSE_DELETE: 'expense_delete',
 } as const
 
 export interface HelloFrame {

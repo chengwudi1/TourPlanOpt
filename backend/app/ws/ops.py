@@ -14,11 +14,13 @@ from __future__ import annotations
 import logging
 import typing
 
+from pydantic import ValidationError
+
 from app.amap.client import fetch_photo_best_effort
 from app.db import repositories
 from app.db.database import get_db
 from app.models import protocol
-from app.models.domain import PlaceCreate, StashCreate
+from app.models.domain import ChecklistAdd, ExpenseCreate, PlaceCreate, StashCreate
 from app.routing.timeline import reschedule_days
 from app.ws.hub import TripHub
 
@@ -59,6 +61,13 @@ async def apply_op(conn: ClientConnection, hub: TripHub, frame: dict) -> None:
         Ops.DAY_ADD: _day_add,
         Ops.DAY_UPDATE: _day_update,
         Ops.TRIP_UPDATE: _trip_update,
+        Ops.CHECKLIST_ADD: _checklist_add,
+        Ops.CHECKLIST_UPDATE: _checklist_update,
+        Ops.CHECKLIST_DELETE: _checklist_delete,
+        Ops.CHECKLIST_REORDER: _checklist_reorder,
+        Ops.EXPENSE_ADD: _expense_add,
+        Ops.EXPENSE_UPDATE: _expense_update,
+        Ops.EXPENSE_DELETE: _expense_delete,
     }
     handler = handlers.get(op)
     if handler is None:
@@ -430,3 +439,168 @@ async def _stash_remove(
         await _reject(conn, op_id, "stash_not_found", {"id": item_id})
         return
     await _broadcast(hub, db, trip_id, "stash_removed", op_id, client_id, {"id": item_id})
+
+
+# -- checklist（出行清单）----------------------------------------------------------------
+
+
+async def _checklist_add(
+    conn: ClientConnection, hub: TripHub, db, client_id: str, op_id: str, data: dict
+) -> None:
+    trip_id = conn.trip_id
+    texts = data.get("texts")
+    if not isinstance(texts, list):
+        await _reject(conn, op_id, "bad_payload")
+        return
+    try:
+        payload = ChecklistAdd(
+            texts=[str(t) for t in texts],
+            added_by=str(data.get("added_by") or client_id),
+        )
+    except ValidationError:
+        await _reject(conn, op_id, "bad_payload")
+        return
+
+    # 整批一条 op：一条一条发会把 seq 打成一串，别人端上看着像有人连点了十几次添加。
+    items = await repositories.checklist_add(db, trip_id, payload.texts, payload.added_by)
+    order = await repositories.checklist_ids(db, trip_id)
+    await _broadcast(
+        hub,
+        db,
+        trip_id,
+        "checklist_added",
+        op_id,
+        client_id,
+        {"items": [i.model_dump() for i in items], "item_ids": order},
+    )
+
+
+async def _checklist_update(
+    conn: ClientConnection, hub: TripHub, db, client_id: str, op_id: str, data: dict
+) -> None:
+    trip_id = conn.trip_id
+    item_id = str(data.get("id") or "")
+    row = (
+        await db.fetch_one("SELECT trip_id FROM checklist_items WHERE id = ?", (item_id,))
+        if item_id
+        else None
+    )
+    if row is None or row["trip_id"] != trip_id:
+        await _reject(conn, op_id, "checklist_not_found", {"id": item_id})
+        return
+    patch = data.get("patch")
+    updated = (
+        await repositories.update_checklist(db, item_id, patch)
+        if isinstance(patch, dict)
+        else None
+    )
+    if updated is None:
+        await _reject(conn, op_id, "bad_patch")
+        return
+    await _broadcast(
+        hub, db, trip_id, "checklist_updated", op_id, client_id, {"item": updated.model_dump()}
+    )
+
+
+async def _checklist_delete(
+    conn: ClientConnection, hub: TripHub, db, client_id: str, op_id: str, data: dict
+) -> None:
+    trip_id = conn.trip_id
+    item_id = str(data.get("id") or "")
+    removed = await repositories.delete_checklist(db, trip_id, item_id) if item_id else False
+    if not removed:
+        await _reject(conn, op_id, "checklist_not_found", {"id": item_id})
+        return
+    await _broadcast(hub, db, trip_id, "checklist_deleted", op_id, client_id, {"id": item_id})
+
+
+async def _checklist_reorder(
+    conn: ClientConnection, hub: TripHub, db, client_id: str, op_id: str, data: dict
+) -> None:
+    trip_id = conn.trip_id
+    item_ids = data.get("item_ids")
+    if not isinstance(item_ids, list):
+        await _reject(conn, op_id, "bad_payload")
+        return
+    result = await repositories.reorder_checklist(db, trip_id, [str(i) for i in item_ids])
+    if not result.ok:
+        # 与 day_reorder 同一套收敛：拒绝时附上权威顺序，客户端照它重画，不去猜谁对。
+        await _reject(conn, op_id, "checklist_stale", {"item_ids": result.place_ids})
+        return
+    await _broadcast(
+        hub,
+        db,
+        trip_id,
+        "checklist_reordered",
+        op_id,
+        client_id,
+        {"item_ids": result.place_ids},
+    )
+
+
+# -- expenses（费用与 AA）-----------------------------------------------------------------
+
+
+async def _expense_add(
+    conn: ClientConnection, hub: TripHub, db, client_id: str, op_id: str, data: dict
+) -> None:
+    trip_id = conn.trip_id
+    splits = data.get("split_ids")
+    try:
+        payload = ExpenseCreate(
+            title=str(data.get("title") or "").strip(),
+            amount_cents=data.get("amount_cents"),
+            category=str(data.get("category") or "other"),
+            paid_by=str(data.get("paid_by") or client_id),
+            paid_by_name=str(data.get("paid_by_name") or ""),
+            split_ids=[str(s) for s in splits] if isinstance(splits, list) else [],
+        )
+    except ValidationError:
+        await _reject(conn, op_id, "bad_expense")
+        return
+    if not payload.title:
+        await _reject(conn, op_id, "bad_expense")
+        return
+    expense = await repositories.expense_add(db, trip_id, payload)
+    await _broadcast(
+        hub, db, trip_id, "expense_added", op_id, client_id, {"expense": expense.model_dump()}
+    )
+
+
+async def _expense_update(
+    conn: ClientConnection, hub: TripHub, db, client_id: str, op_id: str, data: dict
+) -> None:
+    trip_id = conn.trip_id
+    expense_id = str(data.get("id") or "")
+    row = (
+        await db.fetch_one("SELECT trip_id FROM expenses WHERE id = ?", (expense_id,))
+        if expense_id
+        else None
+    )
+    if row is None or row["trip_id"] != trip_id:
+        await _reject(conn, op_id, "expense_not_found", {"id": expense_id})
+        return
+    patch = data.get("patch")
+    updated = (
+        await repositories.update_expense(db, expense_id, patch)
+        if isinstance(patch, dict)
+        else None
+    )
+    if updated is None:
+        await _reject(conn, op_id, "bad_patch")
+        return
+    await _broadcast(
+        hub, db, trip_id, "expense_updated", op_id, client_id, {"expense": updated.model_dump()}
+    )
+
+
+async def _expense_delete(
+    conn: ClientConnection, hub: TripHub, db, client_id: str, op_id: str, data: dict
+) -> None:
+    trip_id = conn.trip_id
+    expense_id = str(data.get("id") or "")
+    removed = await repositories.delete_expense(db, trip_id, expense_id) if expense_id else False
+    if not removed:
+        await _reject(conn, op_id, "expense_not_found", {"id": expense_id})
+        return
+    await _broadcast(hub, db, trip_id, "expense_deleted", op_id, client_id, {"id": expense_id})

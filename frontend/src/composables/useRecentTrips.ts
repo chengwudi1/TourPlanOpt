@@ -10,6 +10,9 @@
  * 人」，新开一个标签页当然还看得到自己刚建的行程。
  *
  * 只存 id 和时间戳，不存标题/城市——那些是服务端的事实，缓存下来迟早和真实数据打架。
+ *
+ * 同文件还管一份「已从首页移除」黑名单（`hideTrip`）：列表有两个来源，服务端那份删不动，
+ * 所以「移除」只能是这台设备上的过滤规则，而不是删除动作。
  */
 
 const RECENT_KEY = 'tourplanopt.recent_trips'
@@ -52,6 +55,8 @@ export function recordRecentTrip(id: string): void {
   } catch {
     // 隐私模式下 localStorage 会抛：首页少一块历史，不该连带行程页都打不开。
   }
+  // 再打开一次就是「我还要用它」，之前的移除自动作废——不然登录用户的行程列表会永久缺一条。
+  unhideTrip(id)
 }
 
 /** Drops ids the server no longer knows about, so a deleted trip stops haunting the home page. */
@@ -63,4 +68,56 @@ export function pruneRecentTrips(aliveIds: Set<string>): RecentTrip[] {
     /* 同上 */
   }
   return kept
+}
+
+/* ---------- 「从首页移除」的本地名单 ---------- */
+
+const HIDDEN_KEY = 'tourplanopt.hidden_trips'
+const MAX_HIDDEN = 60
+
+export function readHiddenTrips(): string[] {
+  let raw: string | null = null
+  try {
+    raw = localStorage.getItem(HIDDEN_KEY)
+  } catch {
+    return []
+  }
+  if (!raw) return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((x): x is string => typeof x === 'string' && x.length > 0).slice(0, MAX_HIDDEN)
+  } catch {
+    return []
+  }
+}
+
+function writeHidden(ids: string[]): void {
+  try {
+    localStorage.setItem(HIDDEN_KEY, JSON.stringify(ids.slice(0, MAX_HIDDEN)))
+  } catch {
+    /* 存不下就等于没有这个功能，首页照常渲染 */
+  }
+}
+
+/**
+ * 只把行程从这台设备的首页摘掉，不删数据、不撤别人的访问权。
+ *
+ * 光删本地「最近打开」不够：登录用户的列表还多来自服务端的 `GET /api/auth/trips`，
+ * 那份删不掉。所以另存一份黑名单，渲染时两个来源一起过滤。
+ */
+export function hideTrip(id: string): string[] {
+  const next = [id, ...readHiddenTrips().filter((x) => x !== id)]
+  writeHidden(next)
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(readRecentTrips().filter((t) => t.id !== id)))
+  } catch {
+    /* 同上 */
+  }
+  return next
+}
+
+export function unhideTrip(id: string): void {
+  if (!readHiddenTrips().includes(id)) return
+  writeHidden(readHiddenTrips().filter((x) => x !== id))
 }

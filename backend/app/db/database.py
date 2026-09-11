@@ -111,6 +111,15 @@ class Database:
                 ALTER TABLE city_poi_cache_new RENAME TO city_poi_cache;
                 """
             )
+        # M22 首页看板：trips 补状态与预算两列。SQLite 的 ALTER 只能加裸默认值的列，加不了
+        # CHECK，所以老库这一列没有约束兜底——值一律在写入侧校验（TRIP_PATCH_FIELDS 认不下
+        # 的 status 直接拒绝整个 patch），新库的 CHECK 只当一道额外的保险。
+        if "status" not in columns:
+            conn.execute("ALTER TABLE trips ADD COLUMN status TEXT NOT NULL DEFAULT 'planning'")
+        if "budget_cents" not in columns:
+            conn.execute(
+                "ALTER TABLE trips ADD COLUMN budget_cents INTEGER NOT NULL DEFAULT 0"
+            )
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=5.0)

@@ -154,6 +154,20 @@ async def test_existing_photo_url_survives_repeated_boots(tmp_path: Path) -> Non
     assert row["photo_url"] == "https://a/1.jpg"
 
 
+async def test_m22_status_and_budget_land_on_an_old_database(tmp_path: Path) -> None:
+    """老库的 trips 没有这两列：ALTER 只能带裸默认值，所以 'planning' 与 0 必须真的出现，
+    否则首页读每一张卡都会踩在缺列上。两张新表由 schema.sql 建，同一趟启动就位。"""
+    path = tmp_path / "old.db"
+    build_old_db(path)
+    db = Database(path)
+    await db.init()
+
+    trip = await db.fetch_one("SELECT status, budget_cents, title FROM trips WHERE id = 'T0'")
+    assert (trip["status"], trip["budget_cents"], trip["title"]) == ("planning", 0, "上海三日游")
+    assert await db.fetch_all("SELECT * FROM checklist_items WHERE trip_id = 'T0'") == []
+    assert await db.fetch_all("SELECT * FROM expenses WHERE trip_id = 'T0'") == []
+
+
 # Written by the pre-_prefer_https code, so the app already has rows like these on disk.
 LEGACY_URLS = [
     ("http://store.is.autonavi.com/showpic/abc?type=pic", "https://store.is.autonavi.com/showpic/abc?type=pic"),

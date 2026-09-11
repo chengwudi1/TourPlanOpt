@@ -14,15 +14,32 @@ import { onBeforeUnmount, watch } from 'vue'
  * The container is watched, not read once: the list is `v-if`-rendered and first
  * appears only after the snapshot arrives, long after the parent mounted.
  */
+export interface DragSortSelectors {
+  /** sortablejs 的 draggable 选择器。 */
+  item?: string
+  /** 只有摸到它才能拖。 */
+  handle?: string
+  /** 行元素上存 id 的 data 属性名（camelCase 会自动转成 kebab-case 的 dataset 键）。 */
+  idAttr?: string
+}
+
+const DEFAULTS = {
+  item: '.place',
+  handle: '.place__drag',
+  idAttr: 'data-place-id',
+}
+
 export function useDragSort(
   container: Ref<HTMLElement | null>,
   onReorder: (orderedIds: string[]) => void,
   onDragging?: (dragging: boolean) => void,
+  selectors: DragSortSelectors = {},
 ) {
+  const { item, handle, idAttr } = { ...DEFAULTS, ...selectors }
   let sortable: Sortable | null = null
 
   function idOf(el: Element): string | null {
-    return el instanceof HTMLElement ? (el.dataset.placeId ?? null) : null
+    return el instanceof HTMLElement ? el.getAttribute(idAttr) : null
   }
 
   function destroy() {
@@ -37,8 +54,8 @@ export function useDragSort(
       if (!el) return
       sortable = Sortable.create(el, {
         animation: 150,
-        handle: '.place__drag',
-        draggable: '.place',
+        handle,
+        draggable: item,
         ghostClass: 'place--ghost',
         onStart() {
           onDragging?.(true)

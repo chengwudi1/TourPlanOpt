@@ -131,3 +131,19 @@ async def my_trips(db: Database, user_id: str) -> list[dict]:
         return [dict(r) for r in rows]
 
     return await db.run(_load)
+
+
+async def unfollow(db: Database, trip_id: str, user_id: str) -> bool:
+    """删掉「我打开过这趟」的那一行足迹。
+
+    边界要说清：这只抹掉 visit。自己创建的行程照样会因为 ``created_by`` 出现在
+    ``my_trips`` 里——那是所有权，不是浏览史，一个「从首页移除」的按钮无权收回。
+    """
+
+    def _delete(conn: sqlite3.Connection) -> bool:
+        cur = conn.execute(
+            "DELETE FROM trip_visits WHERE trip_id = ? AND user_id = ?", (trip_id, user_id)
+        )
+        return cur.rowcount > 0
+
+    return await db.run(_delete)

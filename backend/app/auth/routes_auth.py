@@ -90,3 +90,15 @@ async def my_trips(request: Request) -> dict:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "先登录")
     trips = await accounts.my_trips(get_db(), user["id"])
     return {"trips": trips}
+
+
+@router.delete("/trips/{trip_id}")
+async def unfollow_trip(trip_id: str, request: Request) -> dict:
+    """把一段行程从「我的活动」里移走：只删我自己的那条足迹，行程照旧存在，别人手里的
+    链接照样能开。匿名用户没有服务端足迹可删（本机那份「移出首页」是本地清单），所以这里
+    直接 401，而不是假装成功。"""
+    user = await current_user(request)
+    if user is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "先登录")
+    removed = await accounts.unfollow(get_db(), trip_id, user["id"])
+    return {"trip_id": trip_id, "removed": removed}

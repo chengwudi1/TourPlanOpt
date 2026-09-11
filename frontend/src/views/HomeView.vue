@@ -5,21 +5,49 @@ import { useRoute, useRouter } from 'vue-router'
 import AppModal from '@/components/AppModal.vue'
 import CreateTripDialog from '@/components/CreateTripDialog.vue'
 import HomeHero from '@/components/HomeHero.vue'
+import SegmentedControl from '@/components/SegmentedControl.vue'
 import TripCard from '@/components/TripCard.vue'
-import { Compass, Link2, LogIn, Plus, Route, Search, X, Zap } from '@/components/icons'
-import { pruneRecentTrips, readRecentTrips, recordRecentTrip, type RecentTrip } from '@/composables/useRecentTrips'
+import {
+  ArrowRight,
+  CalendarClock,
+  CheckCheck,
+  Compass,
+  Link2,
+  LogIn,
+  Plus,
+  Route,
+  Search,
+  X,
+  Zap,
+} from '@/components/icons'
+import {
+  hideTrip,
+  pruneRecentTrips,
+  readHiddenTrips,
+  readRecentTrips,
+  recordRecentTrip,
+  type RecentTrip,
+} from '@/composables/useRecentTrips'
 import { useAuthStore, type MyTrip } from '@/stores/auth'
-import type { TripSummary } from '@/types/domain'
+import type { TripStatus, TripSummary } from '@/types/domain'
 import { apiFetch } from '@/utils/api'
+import { formatMoney } from '@/utils/money'
 import { formatAgo } from '@/utils/time'
+import { HOME_TABS, type Countdown, countdownOf, formatDateRange, needsWrapUp, phaseOf } from '@/utils/tripstatus'
 
 /**
- * 首页＝仪表盘：最近一段旅行的封面卡 + 我的行程网格。
+ * 首页＝仪表盘：状态分档 + 出发看板 + 最近一段旅行的封面卡 + 行程网格。
  *
  * 数据来源是两份的：本地「最近打开」索引（匿名用户唯一有的东西，见 [[useRecentTrips]]）
  * 与服务端 `GET /api/auth/trips`（登录后才有）。两者按 id 合并，取更近的 openedAt，
  * 内容一律走只读的 `GET /api/trips/summary` 一次批量拿——不能用 `GET /api/trips/{id}`，
  * 那个接口在登录态下会顺手记一次「打开过」，把刚排好的顺序刷掉。
+ *
+ * 第三份是本地「已从首页移除」黑名单：列表有两个来源，服务端那份删不动，所以「移除」
+ * 只能是一台设备上的过滤规则（见 [[hideTrip]]）。
+ *
+ * 首页没有 WebSocket，改状态/归档只能走 `PATCH /api/trips/{id}`；服务端会顺手朝房间
+ * 广播 `trip_updated`，所以开着另一扇行程页也不会看到旧状态。
  */
 const router = useRouter()
 const route = useRoute()
@@ -32,10 +60,13 @@ interface HomeTrip {
 }
 
 const recent = ref<RecentTrip[]>([])
+const hidden = ref<string[]>([])
 const serverTrips = ref<MyTrip[]>([])
 const summaries = ref<Record<string, TripSummary>>({})
 const summaryError = ref('')
 const loading = ref(true)
+const notice = ref('')
+const tab = ref<TripStatus>('planning')
 
 const showCreate = ref(false)
 const showAuth = ref(false)
@@ -58,24 +89,114 @@ const merged = computed<HomeTrip[]>(() => {
     const prev = openedAt.get(t.id)
     if (!prev || t.last_seen > prev) openedAt.set(t.id, t.last_seen)
   }
+  const drop = new Set(hidden.value)
   return Array.from(openedAt.entries())
+    .filter(([id]) => !drop.has(id))
     .map(([id, at]) => ({ id, openedAt: at, summary: summaries.value[id] ?? null }))
     .sort((a, b) => (a.openedAt < b.openedAt ? 1 : -1))
 })
 
 const trips = computed(() => merged.value)
+
+/** 摘要还没回来的行程按 planning 算：那是服务端的默认值，也让首屏不至于空白。 */
+function statusOf(t: HomeTrip): TripStatus {
+  return t.summary?.status ?? 'planning'
+}
+
+const counts = computed(() => {
+  const c: Record<TripStatus, number> = { planning: 0, finished: 0, archived: 0 }
+  for (const t of merged.value) c[statusOf(t)] += 1
+  return c
+})
+
+const inTab = computed(() => merged.value.filter((t) => statusOf(t) === tab.value))
+
+/** SegmentedControl 的 modelValue 是 string，这里负责收窄回 TripStatus。 */
+const tabModel = computed({
+  get: () => tab.value as string,
+  set: (value: string) => {
+    if (HOME_TABS.some((t) => t.key === value)) tab.value = value as TripStatus
+  },
+})
+const tabOptions = computed(() =>
+  HOME_TABS.map((t) => ({ value: t.key as string, label: t.label, hint: `${counts.value[t.key]} 段` })),
+)
+
+function daysOut(trip: TripSummary): number | null {
+  return countdownOf(trip.start_date, trip.end_date).days
+}
+
 /**
- * 门面优先给「有内容」的行程：一条 0 地点的未命名行程刚建就排最新，若直接当 hero，
- * 首页第一眼看去是一张空卡。全是空行程时才退回最新那条，新手至少还有个 CTA 可点。
+ * 门面只给「规划中」这一档——已完成和已归档是归档架，那里摆大卡会把列表里的一条吸走，
+ * 看着像少了一段。门面内容优先给「最近要出发的」：14 天内出发且还没走的那条最该占第一屏，
+ * 其次是最近编辑过且有内容的，最后退回最新一条。全是空行程时新手至少还有个 CTA 可点。
  */
 const hero = computed<TripSummary | null>(() => {
-  const ready = merged.value.flatMap((t) => (t.summary ? [t.summary] : []))
-  return ready.find((s) => s.place_count > 0) ?? ready[0] ?? null
+  if (tab.value !== 'planning') return null
+  const ready = inTab.value.flatMap((t) => (t.summary ? [t.summary] : []))
+  const soon = ready
+    .filter((s) => phaseOf(s.start_date, s.end_date) === 'upcoming' && (daysOut(s) ?? 99) <= 14)
+    .sort((a, b) => ((a.start_date as string) < (b.start_date as string) ? -1 : 1))
+  return soon[0] ?? ready.find((s) => s.place_count > 0) ?? ready[0] ?? null
 })
-const grid = computed(() => merged.value.filter((t) => t.summary?.id !== hero.value?.id))
+const grid = computed(() => inTab.value.filter((t) => t.summary?.id !== hero.value?.id))
+
+/** 看板的一行：模板只摆数据，不重复算倒计时和金额。 */
+interface BoardRow {
+  trip: TripSummary
+  cd: Countdown
+  range: string
+  money: string
+  readiness: string
+}
+
+function toRow(trip: TripSummary): BoardRow {
+  const checklist = trip.checklist_total ? `清单 ${trip.checklist_done}/${trip.checklist_total}` : '清单还空着'
+  return {
+    trip,
+    cd: countdownOf(trip.start_date, trip.end_date),
+    range: formatDateRange(trip.start_date, trip.end_date) || '还没定日期',
+    money: trip.budget_cents
+      ? `${formatMoney(trip.spent_cents)} / ${formatMoney(trip.budget_cents)}`
+      : trip.spent_cents
+        ? `已花 ${formatMoney(trip.spent_cents)}`
+        : '未设预算',
+    readiness: checklist,
+  }
+}
+
+/** 出发看板：还没走的那几段按日子排队，hero 已经代表了一条，这里列其余的。 */
+const upcoming = computed<BoardRow[]>(() => {
+  if (tab.value !== 'planning') return []
+  return inTab.value
+    .map((t) => t.summary)
+    .filter((s): s is TripSummary => !!s && s.id !== hero.value?.id && phaseOf(s.start_date, s.end_date) === 'upcoming')
+    .sort((a, b) => ((a.start_date as string) < (b.start_date as string) ? -1 : 1))
+    .slice(0, 3)
+    .map(toRow)
+})
+
+/** 回来了却没归档的行程：日期已经走完，status 还停在 planning。跟门面一样只属于规划中档。 */
+const wrapUps = computed<BoardRow[]>(() =>
+  tab.value !== 'planning'
+    ? []
+    : merged.value
+        .map((t) => t.summary)
+        .filter((s): s is TripSummary => !!s && needsWrapUp(s.status, phaseOf(s.start_date, s.end_date)))
+        .slice(0, 4)
+        .map(toRow),
+)
+
+/** 侧栏的「最近编辑」走服务端那份，同样要过一遍本地黑名单。 */
+const sideTrips = computed(() => {
+  const drop = new Set(hidden.value)
+  return serverTrips.value.filter((t) => !drop.has(t.id)).slice(0, 4)
+})
 
 async function hydrate() {
-  const ids = [...new Set([...recent.value.map((r) => r.id), ...serverTrips.value.map((t) => t.id)])]
+  const ids = [...new Set([...recent.value.map((r) => r.id), ...serverTrips.value.map((t) => t.id)])].filter(
+    (id) => !hidden.value.includes(id),
+  )
   if (!ids.length) return
   summaryError.value = ''
   try {
@@ -95,10 +216,18 @@ async function hydrate() {
 
 async function refresh() {
   recent.value = readRecentTrips()
+  hidden.value = readHiddenTrips()
   await auth.load()
   serverTrips.value = auth.user ? await auth.myTrips().catch(() => [] as MyTrip[]) : []
   await hydrate()
   loading.value = false
+}
+
+function say(message: string) {
+  notice.value = message
+  window.setTimeout(() => {
+    if (notice.value === message) notice.value = ''
+  }, 2600)
 }
 
 function go(tripId: string) {
@@ -117,6 +246,75 @@ function onTripCreated(tripId: string) {
   recordRecentTrip(tripId)
   // 光记账不够，还得把它读回来——否则首页停在旧列表上，像没建成。
   void refresh()
+}
+
+/* ---------- 卡片菜单：状态、分享链接、从首页移除 ---------- */
+
+const busy = ref<Record<string, boolean>>({})
+
+// 回执直接写全句：HOME_TABS 的 label 自带「已」字，拼 `已${label}` 会念成「已已归档」。
+const STATUS_RECEIPT: Record<TripStatus, string> = {
+  planning: '已放回规划中',
+  finished: '已标记为已完成',
+  archived: '已归档',
+}
+
+/** receipt 传 null 表示这步是批量操作的一环，播报交给调用方，免得一人喊一句。 */
+function setStatus(tripId: string, next: TripStatus, receipt: string | null = STATUS_RECEIPT[next]) {
+  const card = summaries.value[tripId]
+  if (!card || card.status === next || busy.value[tripId]) return
+  busy.value[tripId] = true
+  // 先落本地再发请求：这一步几乎不会失败，而「点了没反应」比转圈更让人以为没生效。
+  summaries.value = { ...summaries.value, [tripId]: { ...card, status: next } }
+  apiFetch(`/api/trips/${encodeURIComponent(tripId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: next }),
+  })
+    .then(() => {
+      if (receipt) say(receipt)
+    })
+    .catch((err: Error) => {
+      summaries.value = { ...summaries.value, [tripId]: card }
+      summaryError.value = err.message
+    })
+    .finally(() => {
+      busy.value[tripId] = false
+    })
+}
+
+async function copyLink(tripId: string) {
+  const url = `${window.location.origin}/trip/${tripId}`
+  try {
+    await navigator.clipboard.writeText(url)
+    say('分享链接已复制，发给朋友就能一起编辑')
+  } catch {
+    window.prompt('复制下面的链接分享给朋友：', url)
+  }
+}
+
+function removeFromHome(tripId: string) {
+  if (
+    !window.confirm(
+      '从首页移除这段行程？\n\n只影响这台设备的首页，行程本身和分享链接都还在——别人照样打得开，你自己再打开一次就会重新出现在这里。',
+    )
+  )
+    return
+  hidden.value = hideTrip(tripId)
+  // 登录用户还有一份服务端足迹，能撤就撤；撤不掉也达到了「首页看不到」的目的。
+  if (auth.user) {
+    apiFetch(`/api/auth/trips/${encodeURIComponent(tripId)}`, { method: 'DELETE' }).catch(() => {
+      /* 匿名或网络不巧：本地黑名单已经生效，不必为此报错 */
+    })
+  }
+  say('已从首页移除')
+}
+
+function finishAllWrapUps() {
+  // 先快照：setStatus 会乐观改状态，而 wrapUps 是 computed，边循环边重算会漏掉后半部分。
+  const rows = wrapUps.value
+  for (const row of rows) setStatus(row.trip.id, 'finished', null)
+  if (rows.length) say(`已把 ${rows.length} 段标记为完成`)
 }
 
 /* ---------- 账号（可选）：顶栏一个入口，表单只在这里出现一次 ---------- */
@@ -176,15 +374,54 @@ onMounted(() => {
 
     <div class="home__wrap">
       <main class="home__main">
+        <div v-if="trips.length" class="tabs reveal reveal--fade" :style="{ '--base': '40ms' }">
+          <SegmentedControl v-model="tabModel" :options="tabOptions" label="行程状态" />
+        </div>
+
+        <!-- 待收尾排在最上面：这是唯一一个「再不做就忘了」的动作，别的都能等。 -->
+        <section v-if="wrapUps.length" class="board board--warn card reveal" :style="{ '--base': '120ms' }">
+          <div class="board__head">
+            <h2 class="board__title"><CheckCheck class="ic" :size="14" /> 回来了，还没收尾</h2>
+            <button v-if="wrapUps.length > 1" class="btn btn--sm" type="button" @click="finishAllWrapUps">全部标记完成</button>
+          </div>
+          <ul class="board__list">
+            <li v-for="row in wrapUps" :key="row.trip.id" class="board__item">
+              <button class="board__row" type="button" @click="go(row.trip.id)">
+                <span class="board__name">{{ row.trip.title || '未命名行程' }}</span>
+                <span class="tiny muted board__meta">{{ row.range }} · {{ row.trip.place_count }} 个地点</span>
+              </button>
+              <button class="btn btn--sm btn--ghost" type="button" @click="setStatus(row.trip.id, 'finished')">标记完成</button>
+            </li>
+          </ul>
+        </section>
+
+        <section v-if="upcoming.length" class="board card reveal" :style="{ '--base': '170ms' }">
+          <div class="board__head">
+            <h2 class="board__title"><CalendarClock class="ic" :size="14" /> 接下来要走</h2>
+            <span class="tiny muted">{{ upcoming.length }} 段在排队</span>
+          </div>
+          <ul class="board__list">
+            <li v-for="row in upcoming" :key="row.trip.id" class="board__item">
+              <button class="board__row" type="button" @click="go(row.trip.id)">
+                <span class="board__count" :class="`board__count--${row.cd.tone}`">{{ row.cd.label }}</span>
+                <span class="board__name">{{ row.trip.title || '未命名行程' }}</span>
+                <span class="tiny muted board__meta">{{ row.range }} · {{ row.readiness }} · {{ row.money }}</span>
+              </button>
+              <ArrowRight class="ic board__go" :size="14" />
+            </li>
+          </ul>
+        </section>
+
         <HomeHero
           v-if="hero"
           :trip="hero"
           class="reveal reveal--lg"
           :style="{ '--base': '60ms' }"
           @open="go(hero.id)"
+          @finish="setStatus(hero.id, 'finished')"
         />
 
-        <section v-else-if="!loading" class="welcome card reveal reveal--lg" :style="{ '--base': '60ms' }">
+        <section v-else-if="!loading && !trips.length" class="welcome card reveal reveal--lg" :style="{ '--base': '60ms' }">
           <div class="welcome__text">
             <h1>把想去的地方，<br />变成走得完的行程</h1>
             <p class="muted">建一个行程，把链接发给朋友。大家同时往里丢地点，路线我们算。</p>
@@ -210,9 +447,9 @@ onMounted(() => {
         <section v-if="trips.length" class="sec">
           <div class="sec__head reveal reveal--fade" :style="{ '--base': '220ms' }">
             <h2>我的行程</h2>
-            <span class="tiny muted">{{ trips.length }} 段</span>
+            <span class="tiny muted">{{ inTab.length }} 段</span>
           </div>
-          <div class="sec__grid">
+          <div v-if="grid.length" class="sec__grid">
             <TripCard
               v-for="(t, i) in grid"
               :key="t.id"
@@ -220,6 +457,9 @@ onMounted(() => {
               :trip-id="t.id"
               class="reveal"
               :style="{ '--i': i > 6 ? 6 : i, '--base': '260ms' }"
+              @status="setStatus(t.id, $event)"
+              @hide="removeFromHome(t.id)"
+              @copy="copyLink(t.id)"
             />
             <button
               class="newcard reveal"
@@ -231,6 +471,9 @@ onMounted(() => {
               <span>再建一段行程</span>
             </button>
           </div>
+          <p v-else-if="!loading" class="tiny sec__empty">
+            {{ tab === 'archived' ? '归档区是空的。行程收回来了就标个已完成，用不到了再归档，首页会清爽很多。' : '这一档还没有行程。' }}
+          </p>
         </section>
 
         <p v-if="summaryError" class="tiny home__note">{{ summaryError }}——行程内容没取到，稍后重试。</p>
@@ -246,10 +489,10 @@ onMounted(() => {
           </ol>
         </section>
 
-        <section v-if="auth.user && serverTrips.length" class="card side reveal" :style="{ '--base': '360ms' }">
+        <section v-if="sideTrips.length" class="card side reveal" :style="{ '--base': '360ms' }">
           <h2 class="side__title">最近编辑</h2>
           <ul class="side__list">
-            <li v-for="t in serverTrips.slice(0, 4)" :key="t.id">
+            <li v-for="t in sideTrips" :key="t.id">
               <button class="side__row" type="button" @click="go(t.id)">
                 <span class="side__row-title">{{ t.title || '未命名行程' }}</span>
                 <span class="tiny muted">{{ formatAgo(t.last_seen) }}</span>
@@ -272,6 +515,9 @@ onMounted(() => {
     <button class="fab reveal reveal--pop" type="button" :style="{ '--base': '520ms' }" @click="showCreate = true">
       <Plus class="ic" :size="16" /> 新建行程
     </button>
+
+    <!-- 卡片菜单那几个动作的回执：就地一句话，2.6s 自己走，不弹任何东西。 -->
+    <p v-if="notice" class="tiny home__say">{{ notice }}</p>
 
     <CreateTripDialog v-if="showCreate" @created="onTripCreated" @done="onCreated" @cancel="showCreate = false" />
 
@@ -416,6 +662,112 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(212px, 1fr));
   gap: 12px;
+}
+
+.sec__empty {
+  padding: 22px 16px;
+  margin: 0;
+  color: var(--text-3);
+  text-align: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+}
+
+/* ---------- 状态分档 + 出发看板 ---------- */
+.tabs {
+  max-width: 460px;
+}
+
+.board {
+  padding: 12px 14px 6px;
+}
+.board__head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.board__title {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.board__head .muted {
+  margin-left: auto;
+}
+.board--warn {
+  background: linear-gradient(140deg, var(--warn-soft), var(--surface) 62%);
+  border-color: var(--warn-border);
+}
+.board--warn .board__title .ic {
+  color: var(--warn);
+}
+
+.board__list {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  margin: 8px 0 0;
+  list-style: none;
+}
+.board__item {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px dashed var(--border);
+}
+.board__row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+  background: none;
+  border: 0;
+}
+.board__name {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.board__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.board__count {
+  align-self: flex-start;
+  padding: 1px 8px;
+  margin-bottom: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border-radius: 999px;
+}
+/* --ember-deep 而不是 --ember：白字压 #b85c2c 只有 4.1:1，压 #98481f 才到 6.3:1，
+   深色主题下 ink 会翻成近黑，压在浅橙上同样是 6:1 以上。 */
+.board__count--soon {
+  color: var(--ember-ink);
+  background: var(--ember-deep);
+}
+.board__go {
+  flex: 0 0 auto;
+  color: var(--text-3);
+  opacity: 0;
+  transition:
+    opacity var(--dur) var(--ease-out),
+    transform var(--dur) var(--ease-out);
+}
+.board__item:hover .board__go {
+  opacity: 1;
+  transform: translateX(3px);
 }
 
 /* ---------- 首次来的欢迎卡 ---------- */
@@ -590,6 +942,22 @@ onMounted(() => {
 }
 .fab:active {
   transform: scale(0.97);
+}
+
+/* 动作回执：贴在 FAB 左边，不抢焦点也不挡内容。 */
+.home__say {
+  position: fixed;
+  bottom: 28px;
+  left: 22px;
+  z-index: var(--z-toast);
+  max-width: 46ch;
+  padding: 7px 12px;
+  color: var(--text);
+  background: var(--ok-soft);
+  border: 1px solid var(--ok-border);
+  border-radius: 999px;
+  box-shadow: var(--shadow-md);
+  animation: rise-in var(--dur-slow) var(--ease-out) backwards;
 }
 
 @media (max-width: 1000px) {
