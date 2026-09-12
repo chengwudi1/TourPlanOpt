@@ -251,6 +251,15 @@ export const useTripStore = defineStore('trip', () => {
     // collide with the server's rev for this very op, and the echo (which may carry
     // server-side side effects like the time->lock pin) would then be dropped by the
     // rev guard. Echo rev+1 > local rev applies cleanly.
+    //
+    // 「设置即锁定」必须在本地一起镜像：服务端收到 start_min 会连带写 user_start_min 与
+    // locked。少了这一步，一张卡会同时给出三个答案——轨道读 user_start_min、开关读
+    // locked、读数条读 start_min，于是「解锁之后轨道还停在旧时刻」这类自相矛盾。
+    if ('start_min' in patch) {
+      const pinned = patch.start_min ?? null
+      place.user_start_min = pinned
+      place.locked = pinned !== null
+    }
     useSocketStore().sendOp(Ops.PLACE_UPDATE, { place_id: placeId, patch })
   }
 
@@ -259,6 +268,9 @@ export const useTripStore = defineStore('trip', () => {
     const place = places.value.find((p) => p.id === placeId)
     if (!place) return
     place.locked = locked
+    // 解锁的同一笔里服务端会清掉 user_start_min（钉住可以只钉位置，放开则时刻一并交回
+    // 排程），所以这里必须跟着清，否则轨道会留着一个已经不存在的钉法。
+    if (!locked) place.user_start_min = null
     useSocketStore().sendOp(Ops.PLACE_LOCK, { place_id: placeId, locked })
   }
 

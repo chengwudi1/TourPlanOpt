@@ -551,11 +551,16 @@ if (import.meta.env.DEV) {
       <button
         class="cardmenu__item"
         type="button"
+        :title="
+          cardMenu.place.locked
+            ? '放开后这一站重新参与优化排程'
+            : '钉住后，优化排程不会挪动这一站的次序和时刻'
+        "
         @click="store.setPlaceLocked(cardMenu.place.id, !cardMenu.place.locked); closeCardMenu()"
       >
         <LockOpen v-if="cardMenu.place.locked" class="ic" :size="13" />
         <Lock v-else class="ic" :size="13" />
-        {{ cardMenu.place.locked ? '取消锁定' : '锁定位置' }}
+        {{ cardMenu.place.locked ? '放开这一站' : '钉住这一站' }}
       </button>
       <button
         v-if="menuDay && menuDay.id && menuDay.start_place_id !== cardMenu.place.id"

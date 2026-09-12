@@ -62,8 +62,11 @@ function pressCancel() {
  *  所以每次展开都从 props 重新取种，之后一律以草稿为准（ ack 回来再对齐 props ）。 */
 const duration = ref(props.place.duration_min)
 const note = ref(props.place.note)
-/** 手填时刻。null = 从没定过，交给排程——轨道会把滑块画成空心、停在自动位置上。 */
-const start = ref<number | null>(props.place.user_start_min)
+const noteTyping = ref(false)
+/** 手填时刻**不**留本地草稿：一律读行数据。轨道、开关、读数条必须看同一个源，
+ *  否则解锁之后轨道会停在一个服务端已经不存在的时刻上（连「白等几分钟」都会跟着算错）。
+ *  乐观写由 stores/trip.ts 镜像服务端的「设置即锁定」，所以一落地这里就跟着动。 */
+const start = computed(() => props.place.user_start_min)
 /** 轨道拖动期间的瞬时值：只喂读数，不落库（松手才 emit 一次）。 */
 const preview = ref<number | null>(null)
 
@@ -73,9 +76,23 @@ watch(
     if (active) {
       duration.value = props.place.duration_min
       note.value = props.place.note
-      start.value = props.place.user_start_min
       preview.value = null
     }
+  },
+)
+
+// 展开期间别人改了停留时长：步进器是拿本地值做加减的，不回同步就会用旧底数盖掉别人。
+watch(
+  () => props.place.duration_min,
+  (v) => {
+    duration.value = v
+  },
+)
+// 备注不能在半行字中间被拽走，所以只在焦点不在输入框里时回同步。
+watch(
+  () => props.place.note,
+  (v) => {
+    if (!noteTyping.value) note.value = v
   },
 )
 
@@ -101,19 +118,22 @@ const arriveText = computed(() =>
 )
 const startText = computed(() => (shownStart.value === null ? '—' : formatMin(shownStart.value)))
 const endText = computed(() => (shownEnd.value === null ? '—' : formatMin(shownEnd.value)))
-const autoBadge = computed(() => (start.value === null ? '自动' : '已定'))
+const autoBadge = computed(() => (start.value === null ? '自动排' : '你定的'))
 
 /** 定了时刻之后，它和路上算出的到达之间差多久——这一句才是拖轨道的意义。 */
 const timeHint = computed(() => {
   const picked = preview.value ?? start.value
-  if (picked === null) return '跟着排程走。拖到某个时刻上，这一刻就归你定。'
-  const arrive = props.place.arrive_min
-  if (arrive !== null) {
-    const diff = picked - arrive
-    if (diff >= 5) return `比预计到达晚 ${formatDuration(diff)}——这段是白等。`
-    if (diff <= -5) return `比预计到达早 ${formatDuration(-diff)}——路上的时间得自己挤出来。`
+  if (picked === null) {
+    return '到达 = 上一站玩到的时刻 + 路上时间，是算出来的，不用设；开始跟着到达走。把滑块拖到某个时刻，开始就归你定。'
   }
-  return '已定时刻，优化排程时会绕开它。'
+  const who =
+    preview.value !== null ? '这个时刻' : start.value === null ? '排程算出的开始' : '你定的开始'
+  const arrive = props.place.arrive_min
+  if (arrive === null) return `${who}已经钉住，但这一站还没排出到达：优化会照它排。`
+  const diff = picked - arrive
+  if (diff >= 5) return `${who}比预计到达晚 ${formatDuration(diff)}——这一段是白等。`
+  if (diff <= -5) return `${who}比预计到达早 ${formatDuration(-diff)}——路上的时间得自己挤出来。`
+  return `${who}与预计到达重合，中间不用等。`
 })
 
 // -- 提交 -------------------------------------------------------------------------------
@@ -135,9 +155,8 @@ const DUR_CHIPS = [
 ]
 
 /** start_min 是协议里唯一的「手填时刻」字段：服务端看到它就把 user_start_min 与
- *  locked 一起设上（清空则一起放开），所以这里只管发值。 */
+ *  locked 一起设上（清空则一起放开），前端这份镜像在 stores/trip.ts 的 updatePlace 里。 */
 function commitStart(min: number | null) {
-  start.value = min
   preview.value = null
   if ((min ?? null) !== (props.place.user_start_min ?? null)) {
     emit('patch', props.place, { start_min: min })
@@ -148,6 +167,12 @@ function commitNote() {
   if (note.value !== props.place.note) {
     emit('patch', props.place, { note: note.value })
   }
+}
+
+/** 失焦＝不在写字了：先放开别人回同步的权利，再把这行字发出去。 */
+function blurNote() {
+  noteTyping.value = false
+  commitNote()
 }
 </script>
 
@@ -189,7 +214,15 @@ function commitNote() {
     <div class="place__body">
       <div class="place__title">
         <span class="place__name">{{ place.name }}</span>
-        <span v-if="place.locked" class="place__pin tiny" title="已锁定，优化时不参与重排">
+        <span
+          v-if="place.locked"
+          class="place__pin tiny"
+          :title="
+            place.user_start_min === null
+              ? '已钉住：优化排程不会挪动这一站'
+              : '你定过开始时刻，这一站已被钉住'
+          "
+        >
           <Lock :size="11" />
         </span>
         <span v-if="place.status === 'confirmed'" class="place__confirmed tiny">已确认</span>
@@ -230,17 +263,27 @@ function commitNote() {
          盖掉别人对同一张卡另一个字段的修改。 -->
     <div v-if="active" class="place__edit" @click.stop>
       <div class="edit__flow" :style="{ '--i': 0 }">
-        <span class="flow__node">
+        <span class="flow__node" title="到达由上一站玩到的时刻加上路上时间算出，不能直接设；要挪它请改停留时长、换顺序，或者把开始时刻自己定下来">
           <b class="flow__v">{{ arriveText }}</b>
           <span class="flow__k tiny">到达</span>
         </span>
         <ArrowRight class="flow__arrow" :size="13" />
-        <span class="flow__node flow__node--on">
+        <span
+          class="flow__node flow__node--on"
+          :title="
+            start === null
+              ? '开始由优化排程给出。拖下面的轨道就能自己定这一分钟'
+              : '这个开始是你自己定的（已钉住），排程会绕开它；点「自动排」交回去'
+          "
+        >
           <b class="flow__v">{{ startText }}</b>
           <span class="flow__k tiny">开始 · {{ autoBadge }}</span>
         </span>
         <ArrowRight class="flow__arrow" :size="13" />
-        <span class="flow__node">
+        <span
+          class="flow__node"
+          title="玩到 = 开始 + 停留时长；下一站的到达就从这里加上路上时间算出来"
+        >
           <b class="flow__v">{{ endText }}</b>
           <span class="flow__k tiny">玩到</span>
         </span>
@@ -253,7 +296,7 @@ function commitNote() {
             v-if="start !== null"
             class="chip chip--action"
             type="button"
-            title="放开这一刻，交回给排程"
+            title="放开你定的时刻，交回给优化排程"
             @click="commitStart(null)"
           >
             <Sparkles class="ic" :size="11" /> 自动排
@@ -317,7 +360,8 @@ function commitNote() {
           class="input edit__note"
           rows="2"
           placeholder="例如：19:00 已订座、周末限流"
-          @blur="commitNote"
+          @focus="noteTyping = true"
+          @blur="blurNote"
         />
       </label>
 
@@ -327,7 +371,11 @@ function commitNote() {
           type="button"
           role="switch"
           :aria-checked="place.locked"
-          :title="place.locked ? '解锁后重新参与优化' : '锁定位置：优化时不重排、不移动'"
+          :title="
+            place.locked
+              ? '已钉住：优化排程不会挪动这一站。点这里放开，交回优化排程'
+              : '钉住后，优化排程不会挪动这一站的次序和时刻。定了开始时间会自动钉上'
+          "
           @click="emit('lock', place, !place.locked)"
         >
           <span class="switch__track">
@@ -336,7 +384,7 @@ function commitNote() {
               <LockOpen v-else :size="9" />
             </span>
           </span>
-          <span class="switch__text">{{ place.locked ? '已锁定' : '锁定位置' }}</span>
+          <span class="switch__text">钉住这一站</span>
         </button>
         <a
           v-if="navHref"
