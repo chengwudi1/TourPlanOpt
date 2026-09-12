@@ -55,7 +55,7 @@ function submit() {
 }
 
 function rename(item: ChecklistItem) {
-  const text = window.prompt('这条改成什么？', item.text)
+  const text = window.prompt('修改清单项名称：', item.text)
   if (text === null) return
   const trimmed = text.trim()
   if (!trimmed || trimmed === item.text) return
@@ -72,12 +72,12 @@ function remove(item: ChecklistItem) {
     <div class="check__head">
       <strong class="check__title"><ListChecks class="ic" :size="14" /> 出行清单</strong>
       <span v-if="total" class="tiny muted">{{ done }}/{{ total }} 已备好</span>
-      <span v-else class="tiny muted">出门前打勾，别再靠脑子记</span>
+      <span v-else class="tiny muted">出发前逐项确认，避免临行遗漏</span>
       <button
         v-if="total"
         class="btn btn--sm btn--ghost check__fill"
         type="button"
-        title="只补行程里还没有的，可反复点"
+        title="仅补充行程中缺失的条目，可重复点击"
         @click="store.checklistAdd(PACKING_TEMPLATE)"
       >
         <Package class="ic" :size="13" /> 补常用
@@ -101,7 +101,7 @@ function remove(item: ChecklistItem) {
           type="button"
           :aria-checked="item.done"
           role="checkbox"
-          :title="item.done ? '取消打勾' : '标记为已备好'"
+          :title="item.done ? '取消标记' : '标记为已备好'"
           @click="store.updateChecklist(item.id, { done: !item.done })"
         >
           <Check class="ic" :size="13" />
@@ -126,7 +126,7 @@ function remove(item: ChecklistItem) {
 
     <div v-else class="check__empty">
       <p class="tiny muted check__empty-text">
-        还没写过清单项。点一下灌进一份常用清单，或者在下面自己加。
+        尚未添加清单项。可载入一份常用清单，或在下方自行添加。
       </p>
       <button class="btn btn--sm" type="button" @click="store.checklistAdd(PACKING_TEMPLATE)">
         <Package class="ic" :size="13" /> 补常用清单
@@ -139,7 +139,7 @@ function remove(item: ChecklistItem) {
         class="input check__input"
         type="text"
         maxlength="120"
-        placeholder="加一条，回车确认（换行粘贴＝一次加多条）"
+        placeholder="添加一项，按回车确认；粘贴多行可一次添加多项"
         @keyup.enter="submit"
       />
       <button class="btn btn--sm" type="button" :disabled="!draft.trim()" @click="submit">

@@ -27,9 +27,9 @@ const emit = defineEmits<{
 }>()
 
 const MODES: readonly SegOption[] = [
-  { value: 'driving', label: '驾车 / 打车', hint: '按真实路况算' },
+  { value: 'driving', label: '驾车 / 打车', hint: '按真实路况计算' },
   { value: 'walking', label: '步行', hint: '适合城市漫步' },
-  { value: 'straight', label: '直线', hint: '不耗配额，秒出' },
+  { value: 'straight', label: '直线', hint: '不消耗配额，即时返回' },
 ]
 
 const MODE_TEXT: Record<string, string> = { driving: '驾车', walking: '步行', straight: '直线' }
@@ -125,7 +125,7 @@ async function copyLink() {
     copied.value = true
     setTimeout(() => (copied.value = false), 1600)
   } catch {
-    window.prompt('复制下面的链接分享给朋友：', url)
+    window.prompt('请复制以下分享链接：', url)
   }
 }
 
@@ -140,10 +140,10 @@ function openPasted() {
 
 <template>
   <AppModal
-    :title="created ? '行程建好了' : '开始一段旅行'"
+    :title="created ? '行程已创建' : '开始一段旅行'"
     :sub="created
-      ? '把链接发给朋友，他们打开就能一起往里丢地点'
-      : '先起个名字，其余的进去再补也来得及'"
+      ? '将链接分享给同行者，对方打开即可共同编辑'
+      : '仅需填写名称，其余信息可稍后补充'"
     variant="sheet"
     @close="emit('cancel')"
   >
@@ -174,7 +174,7 @@ function openPasted() {
             autocomplete="off"
             maxlength="40"
           />
-          <p class="tiny muted">不填也能建，进去再改名。</p>
+          <p class="tiny muted">可留空，创建后可重命名。</p>
         </div>
 
         <div class="opt">
@@ -190,7 +190,7 @@ function openPasted() {
               id="new-city"
               v-model="city"
               class="input opt__input"
-              placeholder="推荐与搜索定位按它来"
+              placeholder="推荐与搜索按该城市展开"
               autocomplete="off"
             />
           </div>
@@ -210,7 +210,7 @@ function openPasted() {
                 <button
                   class="stepper__btn"
                   type="button"
-                  title="少一天"
+                  title="减少一天"
                   :disabled="days <= 1"
                   @click="days = Math.max(1, days - 1)"
                 >
@@ -220,7 +220,7 @@ function openPasted() {
                 <button
                   class="stepper__btn"
                   type="button"
-                  title="多一天"
+                  title="增加一天"
                   :disabled="days >= 30"
                   @click="days = Math.min(30, days + 1)"
                 >
@@ -253,14 +253,14 @@ function openPasted() {
            嵌套 <form> 会被 HTML 解析器丢掉内层标签，而且粘贴框里按回车会顺手建出一段行程。 -->
       <div class="opener">
         <button class="opener__btn" type="button" :aria-expanded="showOpen" @click="showOpen = !showOpen">
-          朋友发过链接？打开已有行程
+          已有分享链接？打开现有行程
           <ChevronDown class="ic" :class="{ 'opener__btn--up': showOpen }" :size="14" />
         </button>
         <div v-if="showOpen" class="paste">
           <input
             v-model="rawId"
             class="input"
-            placeholder="把链接整条贴进来"
+            placeholder="粘贴完整的分享链接"
             autocomplete="off"
             spellcheck="false"
             @keyup.enter="openPasted"

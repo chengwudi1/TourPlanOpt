@@ -56,7 +56,7 @@ const ago = computed(() => {
 
     <div class="hero__inner">
       <div class="hero__top">
-        <span class="hero__badge">{{ trip.city || '还没定城市' }}</span>
+        <span class="hero__badge">{{ trip.city || '未设置城市' }}</span>
         <span
           v-if="countdown.label"
           class="hero__status tiny"
@@ -70,7 +70,7 @@ const ago = computed(() => {
 
       <p class="hero__sub tiny">
         <CalendarDays class="ic" :size="12" />
-        <span>{{ range || '还没定日期' }}</span>
+        <span>{{ range || '未设置日期' }}</span>
         <span class="hero__sub-dot">·</span>
         <span>{{ ago }}</span>
       </p>
@@ -96,7 +96,7 @@ const ago = computed(() => {
         <div class="hero__stat">
           <span class="hero__stat-key tiny"><ListChecks class="ic" :size="12" /> 出行清单</span>
           <strong class="hero__stat-num">{{ checklistText }}</strong>
-          <span class="hero__stat-unit tiny">{{ trip.checklist_total ? '已备好' : '还空着' }}</span>
+          <span class="hero__stat-unit tiny">{{ trip.checklist_total ? '已备好' : '未填写' }}</span>
         </div>
         <div class="hero__stat">
           <span class="hero__stat-key tiny"><Wallet class="ic" :size="12" /> 费用</span>

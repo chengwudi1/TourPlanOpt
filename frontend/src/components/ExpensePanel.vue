@@ -54,8 +54,8 @@ const copied = ref(false)
 /** 还没记上的那笔为什么记不上：就地说明，不弹横幅。 */
 const complaint = computed(() => {
   if (!title.value.trim() && !amount.value.trim()) return ''
-  if (!title.value.trim()) return '给这笔起个名'
-  if (parseMoneyToCents(amount.value) === null) return '金额要写正数，最多到分'
+  if (!title.value.trim()) return '请填写费用名称'
+  if (parseMoneyToCents(amount.value) === null) return '金额需为大于 0 的数值，精确到分'
   return ''
 })
 
@@ -110,7 +110,7 @@ function submit() {
 }
 
 function editAmount(expense: Expense) {
-  const text = window.prompt('这笔改成多少（元）？', (expense.amount_cents / 100).toString())
+  const text = window.prompt('修改金额（元）：', (expense.amount_cents / 100).toString())
   if (text === null) return
   const cents = parseMoneyToCents(text)
   if (cents === null || cents === expense.amount_cents) return
@@ -118,7 +118,7 @@ function editAmount(expense: Expense) {
 }
 
 function editTitle(expense: Expense) {
-  const text = window.prompt('这笔的名字：', expense.title)
+  const text = window.prompt('修改费用名称：', expense.title)
   if (text === null) return
   const trimmed = text.trim()
   if (!trimmed || trimmed === expense.title) return
@@ -127,7 +127,7 @@ function editTitle(expense: Expense) {
 
 function setBudget() {
   const current = budget.value ? (budget.value / 100).toString() : ''
-  const text = window.prompt('这趟的预算是多少（元）？留空表示不设预算。', current)
+  const text = window.prompt('请输入预算金额（元），留空表示不设置预算：', current)
   if (text === null) return
   const cents = text.trim() ? parseMoneyToCents(text) : 0
   if (cents === null || cents === budget.value) return
@@ -169,7 +169,7 @@ async function copySettlement() {
       <strong class="exp__title"><Wallet class="ic" :size="14" /> 费用</strong>
       <span class="exp__total mono">{{ formatMoney(spent) }}</span>
       <span v-if="budget" class="tiny muted">/ 预算 {{ formatMoney(budget) }}</span>
-      <span v-else class="tiny muted">还没设预算</span>
+      <span v-else class="tiny muted">未设置预算</span>
       <button class="btn btn--sm btn--ghost exp__budget" type="button" @click="setBudget">
         <Banknote class="ic" :size="13" /> 预算
       </button>
@@ -181,7 +181,7 @@ async function copySettlement() {
         :style="{ width: `${Math.min(100, Math.round(ratio * 100))}%` }"
       />
     </div>
-    <p v-if="overCents" class="tiny exp__over">已经超支 {{ formatMoney(overCents) }}</p>
+    <p v-if="overCents" class="tiny exp__over">已超出预算 {{ formatMoney(overCents) }}</p>
 
     <div v-if="totals.length" class="exp__cats">
       <span v-for="t in totals" :key="t.category" class="exp__cat">
@@ -208,11 +208,11 @@ async function copySettlement() {
         class="input exp__title-input"
         type="text"
         maxlength="80"
-        placeholder="这笔是什么钱（高铁票 / 午饭…）"
+        placeholder="费用名称，例如高铁票、午餐"
         @keyup.enter="submit"
       />
       <button class="btn btn--sm btn--primary" type="button" :disabled="Boolean(complaint)" @click="submit">
-        记下
+        添加
       </button>
     </div>
     <p v-if="complaint" class="tiny exp__complain">{{ complaint }}</p>
@@ -238,7 +238,7 @@ async function copySettlement() {
           class="chip chip--person"
           :class="{ 'chip--on': activeSplits.includes(p.client_id) }"
           type="button"
-          :title="activeSplits.length === roster.length ? '默认全员均摊，点一下改成只摊给几个人' : ''"
+          :title="activeSplits.length === roster.length ? '默认由全员均摊，可改为仅分摊给指定成员' : ''"
           @click="toggleSplit(p.client_id)"
         >
           {{ p.client_id === selfId ? '我' : p.name }}
@@ -266,12 +266,12 @@ async function copySettlement() {
         <button class="entry__sum mono" type="button" title="点击改金额" @click="editAmount(e)">
           {{ formatMoney(e.amount_cents) }}
         </button>
-        <button class="iconbtn entry__drop" type="button" title="删掉这笔" @click="store.removeExpense(e.id)">
+        <button class="iconbtn entry__drop" type="button" title="删除这笔记录" @click="store.removeExpense(e.id)">
           <Trash2 class="ic" :size="14" />
         </button>
       </li>
     </ul>
-    <p v-else class="tiny muted exp__empty">还没记账。第一笔通常是车票，记下来 AA 才不用重算。</p>
+    <p v-else class="tiny muted exp__empty">暂无记录。首笔通常为交通费用，记账后 AA 分摊将自动结算。</p>
 
     <div v-if="shares.length > 1" class="exp__aa">
       <div class="exp__aa-head">
@@ -285,7 +285,7 @@ async function copySettlement() {
       <div v-for="s in shares" :key="s.client_id" class="aa">
         <span class="aa__name">{{ s.client_id === selfId ? '我' : s.name || '同伴' }}</span>
         <span class="tiny muted aa__detail">
-          垫 {{ formatMoney(s.paid_cents) }} · 摊 {{ formatMoney(s.share_cents) }}
+          实付 {{ formatMoney(s.paid_cents) }} · 应摊 {{ formatMoney(s.share_cents) }}
         </span>
         <span
           class="mono aa__net"

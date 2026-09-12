@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import AmapKeyCheck from '@/components/AmapKeyCheck.vue'
 import ChecklistPanel from '@/components/ChecklistPanel.vue'
@@ -22,7 +23,9 @@ import {
   Lock,
   LockOpen,
   Map as MapIcon,
+  Package,
   Plus,
+  Receipt,
   Search,
 } from '@/components/icons'
 import { getClientId, setClientName } from '@/composables/useClientIdentity'
@@ -32,6 +35,7 @@ import { useSocketStore } from '@/stores/socket'
 import { useTripStore } from '@/stores/trip'
 import type { Place, Poi } from '@/types/domain'
 import { apiFetch } from '@/utils/api'
+import { formatMoney } from '@/utils/money'
 import { formatMin } from '@/utils/time'
 
 const props = defineProps<{ tripId: string }>()
@@ -48,6 +52,40 @@ const selfId = getClientId()
 
 /** Mobile: the two panes become full-screen contexts; this picks which one shows. */
 const mobileView = ref<'list' | 'map'>('list')
+
+// -- 分栏（M24b）-----------------------------------------------------------------------
+// 行程 / 出行清单 / 费用是三块各自完整的界面，不再从上到下堆在同一条侧栏里。
+// pane 写进 ?pane=：刷新留在当前页，前进后退也能跟上；「行程」不占参数，保持短链。
+
+type Pane = 'trip' | 'checklist' | 'cost'
+const PANES: Pane[] = ['trip', 'checklist', 'cost']
+
+function readPane(value: unknown): Pane {
+  return PANES.includes(value as Pane) ? (value as Pane) : 'trip'
+}
+
+const route = useRoute()
+const router = useRouter()
+const pane = ref<Pane>(readPane(route.query.pane))
+
+watch(
+  pane,
+  (p) => {
+    void router.replace({ query: { ...route.query, pane: p === 'trip' ? undefined : p } })
+  },
+  // immediate：认不出来的 ?pane=xxx 也要把地址栏改回界面真正显示的那一档。
+  { immediate: true },
+)
+// 后退键改的是路由，这里把它读回来；值没变时赋值不会触发上面那个 watch，不会来回打架。
+watch(
+  () => route.query.pane,
+  (v) => {
+    pane.value = readPane(v)
+  },
+)
+
+/** 清单与费用是整屏文档：宽屏下地图让位，窄屏下靠底部 dock 回地图。 */
+const docOpen = computed(() => pane.value !== 'trip')
 
 // -- 展开态（M15b）---------------------------------------------------------------------
 // 选中与展开是两件事：点天头选中这一天（并展开它），点箭头只折叠/展开。折叠是本地
@@ -103,13 +141,13 @@ function initExpand() {
 }
 
 function removeDay(dayId: string) {
-  if (window.confirm('删除这个（空的）天？')) store.deleteDay(dayId)
+  if (window.confirm('确认删除该空白天？')) store.deleteDay(dayId)
 }
 
 function renameDay(dayId: string) {
   const day = store.days.find((d) => d.id === dayId)
   if (!day) return
-  const name = window.prompt('这一天的名称（留空恢复默认）：', day.title)
+  const name = window.prompt('请输入当天名称，留空恢复默认：', day.title)
   if (name === null) return
   store.updateDay(dayId, { title: name.trim() })
 }
@@ -126,7 +164,7 @@ function startFromDiscover() {
 }
 
 function setTripCity() {
-  const city = window.prompt('目的地城市（推荐与搜索定位都靠它）：', store.trip?.city ?? '')
+  const city = window.prompt('请输入目的地城市（推荐与搜索范围依据该城市）：', store.trip?.city ?? '')
   if (city === null) return
   store.updateTripFields({ city: city.trim() })
 }
@@ -147,7 +185,7 @@ async function copyShareLink() {
     copied.value = true
     setTimeout(() => (copied.value = false), 1500)
   } catch {
-    window.prompt('复制下面的链接分享给朋友：', url)
+    window.prompt('请复制以下分享链接：', url)
   }
 }
 
@@ -265,7 +303,7 @@ function onStash(poi: Poi) {
   })
 }
 
-/** 地图选点：右键/长按地图某处 → regeo 预填名称 → 排进选中的天或存入想去清单。 */
+/** 地图选点：右键/长按地图某处 → regeo 预填名称 → 加入所选日期或暂存至想去清单。 */
 const mapPick = ref<{
   lng: number
   lat: number
@@ -400,8 +438,53 @@ if (import.meta.env.DEV) {
       </div>
     </div>
 
-    <div v-else class="shell__body" :class="{ 'map-open': mobileView === 'map' }">
+    <div
+      v-else
+      class="shell__body"
+      :class="{ 'map-open': mobileView === 'map', 'doc-open': docOpen }"
+    >
       <div class="panel">
+        <nav class="panebar" role="tablist" aria-label="行程内的页面">
+          <button
+            class="panebar__btn"
+            :class="{ 'panebar__btn--on': pane === 'trip' }"
+            type="button"
+            role="tab"
+            :aria-selected="pane === 'trip'"
+            @click="pane = 'trip'"
+          >
+            <List class="ic" :size="14" /> 行程
+            <span v-if="store.places.length" class="panebar__n tiny">
+              {{ store.places.length }}
+            </span>
+          </button>
+          <button
+            class="panebar__btn"
+            :class="{ 'panebar__btn--on': pane === 'checklist' }"
+            type="button"
+            role="tab"
+            :aria-selected="pane === 'checklist'"
+            @click="pane = 'checklist'"
+          >
+            <Package class="ic" :size="14" /> 出行清单
+            <span v-if="store.checklist.length" class="panebar__n tiny">
+              {{ store.checklistDoneCount }}/{{ store.checklist.length }}
+            </span>
+          </button>
+          <button
+            class="panebar__btn"
+            :class="{ 'panebar__btn--on': pane === 'cost' }"
+            type="button"
+            role="tab"
+            :aria-selected="pane === 'cost'"
+            @click="pane = 'cost'"
+          >
+            <Receipt class="ic" :size="14" /> 费用
+            <span v-if="store.expenses.length" class="panebar__n tiny">
+              {{ formatMoney(store.spentCents) }}
+            </span>
+          </button>
+        </nav>
         <div class="panel__scroll panel__content">
           <div v-if="store.loading" class="skeletongroup" aria-label="正在加载行程">
             <div class="skeleton" style="height: 30px" />
@@ -419,18 +502,25 @@ if (import.meta.env.DEV) {
               </div>
             </div>
 
+            <!-- v-show 不用 v-if：发现面板的缓存按 key 存在组件里，卸载一次就白烧一次配额。 -->
             <PlaceSearch
+              v-show="pane === 'trip'"
               ref="searchEl"
               :city="store.trip.city"
               @select="onPoiPicked"
               @stash="onStash"
             />
 
-            <RecommendPanel ref="recoEl" :city="store.trip.city" :trip-id="tripId" />
+            <RecommendPanel
+              v-show="pane === 'trip'"
+              ref="recoEl"
+              :city="store.trip.city"
+              :trip-id="tripId"
+            />
 
-            <StashPanel />
+            <StashPanel v-show="pane === 'trip'" />
 
-            <div class="daylist">
+            <div v-show="pane === 'trip'" class="daylist">
               <DaySection
                 v-for="(day, i) in store.days"
                 :key="day.id"
@@ -446,7 +536,7 @@ if (import.meta.env.DEV) {
               />
               <div class="daylist__foot">
                 <button class="btn btn--sm btn--ghost" type="button" @click="store.addDay()">
-                  <Plus class="ic" :size="13" /> 加一天
+                  <Plus class="ic" :size="13" /> 添加一天
                 </button>
                 <button class="btn btn--sm btn--ghost" type="button" @click="copyTextItinerary">
                   <Check v-if="copied" class="ic" :size="12" />
@@ -456,10 +546,10 @@ if (import.meta.env.DEV) {
             </div>
 
             <!-- 天块自己会说「这一天还没有安排」，所以这里只回答「那我从哪儿开始」。 -->
-            <div v-if="!store.places.length" class="start card">
+            <div v-if="!store.places.length" v-show="pane === 'trip'" class="start card">
               <div class="start__head">
-                <strong>从哪儿开始？</strong>
-                <span class="tiny muted">加进第一个地点，时间线就自动排好，不用点优化</span>
+                <strong>如何开始</strong>
+                <span class="tiny muted">添加首个地点后，时间线将自动排定</span>
               </div>
 
               <div class="start__actions">
@@ -470,7 +560,7 @@ if (import.meta.env.DEV) {
                   <Compass class="ic" :size="13" /> 打开发现
                 </button>
                 <span class="tiny muted start__hint">
-                  地图空白处右键／长按，也能把那个位置直接加进来
+                  在地图空白处右键或长按，可直接添加该位置
                 </span>
               </div>
 
@@ -494,9 +584,15 @@ if (import.meta.env.DEV) {
               </svg>
             </div>
 
-            <ChecklistPanel />
+            <section v-if="pane === 'checklist'" class="page">
+              <p class="page__lead tiny muted">清单由同行人共同维护，打勾状态实时同步。</p>
+              <ChecklistPanel />
+            </section>
 
-            <ExpensePanel />
+            <section v-else-if="pane === 'cost'" class="page">
+              <p class="page__lead tiny muted">记录每笔开销，按人分摊并给出结算建议。</p>
+              <ExpensePanel />
+            </section>
           </template>
         </div>
       </div>
@@ -553,14 +649,14 @@ if (import.meta.env.DEV) {
         type="button"
         :title="
           cardMenu.place.locked
-            ? '放开后这一站重新参与优化排程'
-            : '钉住后，优化排程不会挪动这一站的次序和时刻'
+            ? '取消后本站重新参与优化排程'
+            : '固定后，优化排程不会调整本站的顺序与开始时间'
         "
         @click="store.setPlaceLocked(cardMenu.place.id, !cardMenu.place.locked); closeCardMenu()"
       >
         <LockOpen v-if="cardMenu.place.locked" class="ic" :size="13" />
         <Lock v-else class="ic" :size="13" />
-        {{ cardMenu.place.locked ? '放开这一站' : '钉住这一站' }}
+        {{ cardMenu.place.locked ? '取消固定' : '固定本站' }}
       </button>
       <button
         v-if="menuDay && menuDay.id && menuDay.start_place_id !== cardMenu.place.id"
@@ -589,8 +685,8 @@ if (import.meta.env.DEV) {
       </button>
     </div>
 
-    <div v-if="mapPick" class="mappick card" role="dialog" aria-label="把地图上选的位置加进行程">
-      <strong>{{ mapPick.loading ? '正在识别这个位置…' : '把这个位置加进行程？' }}</strong>
+    <div v-if="mapPick" class="mappick card" role="dialog" aria-label="将地图所选位置加入行程">
+      <strong>{{ mapPick.loading ? '正在解析该位置…' : '添加该位置到行程？' }}</strong>
       <input
         v-model="mapPick.name"
         class="mappick__name"
@@ -606,7 +702,7 @@ if (import.meta.env.DEV) {
           :disabled="!mapPick.name.trim()"
           @click="confirmMapPick"
         >
-          <ArrowRight class="ic" :size="13" /> 排进选中的天
+          <ArrowRight class="ic" :size="13" /> 加入所选日期
         </button>
         <button
           class="btn btn--sm btn--ghost"
@@ -614,7 +710,7 @@ if (import.meta.env.DEV) {
           :disabled="!mapPick.name.trim()"
           @click="stashMapPick"
         >
-          存入想去
+          暂存至想去清单
         </button>
         <button class="btn btn--sm btn--ghost" type="button" @click="mapPick = null">取消</button>
       </div>
@@ -706,6 +802,96 @@ if (import.meta.env.DEV) {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/* ---------- 分栏（M24b）：行程 / 出行清单 / 费用 ---------- */
+
+.panebar {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 3px;
+  justify-content: center;
+  padding: 6px 8px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.panebar__btn {
+  display: inline-flex;
+  flex: 1 1 auto;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  max-width: 220px;
+  padding: 7px 8px;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.panebar__btn:hover:not(.panebar__btn--on) {
+  color: var(--text);
+  background: var(--surface-3);
+}
+
+/* 选中态沿用分段控件那套（白底 + 强调描边 + accent-strong 文字）：实心强调底会把一条
+   导航栏变成一个大按钮，而 accent-strong 的对比度在别处已经验过。 */
+.panebar__btn--on {
+  color: var(--accent-strong);
+  background: var(--surface);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-sm);
+}
+
+.panebar__n {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  color: var(--text-2);
+  background: var(--surface-3);
+  border-radius: 999px;
+}
+
+.panebar__btn--on .panebar__n {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 14px 12px 24px;
+}
+
+/* 文档页铺页面底色：面板卡靠底色差浮出来，而不是贴边铺满。 */
+.shell__body.doc-open .panel {
+  background: var(--bg);
+}
+
+.page__lead {
+  margin: 0;
+}
+
+/* 文档页要的是行宽不是地图：宽屏下让地图退场、内容区放宽。窄屏本来就是单栏，
+   切换交给底部 dock。 */
+@media (min-width: 861px) {
+  .shell__body.doc-open .panel {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .shell__body.doc-open .map-host {
+    display: none;
+  }
 }
 
 .daylist {

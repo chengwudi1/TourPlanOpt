@@ -695,12 +695,12 @@ export const useTripStore = defineStore('trip', () => {
     if (reason === 'order_stale') {
       // Converge to the authoritative array the server attached to the rejection.
       applyOrder(String(data.day_id), data.place_ids as string[])
-      opError.value = { message: '顺序已被别人改动，已同步到最新', hint: '' }
+      opError.value = { message: '顺序已被其他成员调整，已同步至最新', hint: '' }
       return
     }
     if (reason === 'checklist_stale') {
       applyChecklistOrder((data.item_ids ?? []) as string[])
-      opError.value = { message: '清单顺序已被别人改动，已同步到最新', hint: '' }
+      opError.value = { message: '清单顺序已被其他成员调整，已同步至最新', hint: '' }
       return
     }
     if (pending?.kind === 'place_add') {
@@ -717,10 +717,10 @@ export const useTripStore = defineStore('trip', () => {
       day_not_found: '目标天不存在',
       bad_patch: '修改内容无效',
       bad_payload: '提交的内容无效',
-      stash_not_found: '这条想去清单已被删除',
-      checklist_not_found: '这条清单已被删除',
-      expense_not_found: '这笔开销已被删除',
-      bad_expense: '这笔没记上：标题或金额不对',
+      stash_not_found: '该想去地点已被删除',
+      checklist_not_found: '该清单项已被删除',
+      expense_not_found: '该笔开销已被删除',
+      bad_expense: '记录添加失败：标题或金额无效',
       op_failed: '服务端处理这一步时出了错，请重试',
     }
     opError.value = {

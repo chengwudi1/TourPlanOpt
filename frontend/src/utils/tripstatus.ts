@@ -142,11 +142,11 @@ export function readinessHints(card: {
   spent_cents: number
 }): string[] {
   const hints: string[] = []
-  if (card.day_count && !card.place_count) hints.push('还没安排地点')
-  if (card.checklist_total === 0) hints.push('出行清单还空着')
+  if (card.day_count && !card.place_count) hints.push('尚未安排地点')
+  if (card.checklist_total === 0) hints.push('出行清单未填写')
   else if (card.checklist_done < card.checklist_total) {
-    hints.push(`清单还差 ${card.checklist_total - card.checklist_done} 项`)
+    hints.push(`清单尚有 ${card.checklist_total - card.checklist_done} 项待确认`)
   }
-  if (!card.budget_cents) hints.push('没设预算')
+  if (!card.budget_cents) hints.push('未设置预算')
   return hints
 }

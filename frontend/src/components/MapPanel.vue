@@ -409,7 +409,7 @@ defineExpose({
         class="map-panel__locate"
         type="button"
         :disabled="locating"
-        :title="locating ? '定位中…' : '把地图移到我所在的位置'"
+        :title="locating ? '定位中…' : '将地图移动至当前位置'"
         @click="locateMe"
       >
         <LocateFixed class="ic" :size="13" />
@@ -423,7 +423,7 @@ defineExpose({
         <strong>地图未加载</strong>
         <p class="muted tiny">
           {{ initError || '正在初始化高德地图…' }}<br />
-          如果长时间停在这里，请看上方的 Key 自检提示。
+          若长时间未加载，请查看上方的 Key 自检提示。
         </p>
       </div>
     </div>

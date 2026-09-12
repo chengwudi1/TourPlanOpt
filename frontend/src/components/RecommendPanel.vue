@@ -111,11 +111,11 @@ const originGroups = computed(() =>
 const originStash = computed(() => store.stash.map((s) => ({ id: s.id, label: s.name })))
 
 const originNote = computed(() => {
-  if (originPlace.value) return `距离按「${originPlace.value.name}」算直线距离，不是路况时间`
+  if (originPlace.value) return `距离按「${originPlace.value.name}」的直线距离计算，非路况耗时`
   if (originGroups.value.length || originStash.value.length) {
-    return '还没有基准点：在上方挑一个地点，这一档才会重排'
+    return '未选择基准点：请选择一个地点后按距离重排'
   }
-  return '行程里还没有地点可当基准：先加入一个地点，或把它丢进想去清单'
+  return '行程中暂无可作为基准的地点：请先添加地点，或将其加入想去清单'
 })
 
 /* ---------- 列表高度与排序：按行程记住 ---------- */
@@ -344,7 +344,7 @@ defineExpose({ show: () => (open.value = true) })
     <button class="reco__head" type="button" @click="open = !open">
       <strong class="reco__label"><Compass class="ic" :size="14" /> 发现</strong>
       <span class="tiny muted">
-        {{ city ? `${city}的景点、小吃和夜市，点一下就加入行程` : '点天头的城市 chip 先定目的地，这里才有景点和夜市' }}
+        {{ city ? `${city}的景点、美食与夜市，点击即可加入行程` : '请先设置目的地城市，此处才会展示推荐结果' }}
       </span>
       <span class="reco__chevron" :class="{ 'reco__chevron--open': open }">
         <ChevronDown :size="15" />
@@ -369,7 +369,7 @@ defineExpose({ show: () => (open.value = true) })
       <div v-if="sort === 'distance'" class="reco__origin">
         <label class="tiny muted" for="reco-origin">距离基准点</label>
         <select id="reco-origin" v-model="originId" class="input reco__select">
-          <option value="">不选（这一档不重排）</option>
+          <option value="">不设置（该档位不按距离重排）</option>
           <optgroup v-for="g in originGroups" :key="g.label" :label="g.label">
             <option v-for="o in g.items" :key="o.id" :value="o.id">{{ o.label }}</option>
           </optgroup>
@@ -381,12 +381,12 @@ defineExpose({ show: () => (open.value = true) })
       </div>
 
       <p v-if="!city" class="reco__empty tiny muted">
-        点行程名右侧的城市标签设一个目的地，这里就会推荐景点、小吃和夜市。
+        请先设置目的地城市，此处将展示景点、美食与夜市推荐。
       </p>
-      <p v-else-if="loading" class="reco__empty tiny muted">正在找 {{ city }} 的好去处…</p>
+      <p v-else-if="loading" class="reco__empty tiny muted">正在加载 {{ city }} 的推荐结果…</p>
       <p v-else-if="error" class="reco__empty tiny muted">{{ error.message }}（{{ error.hint }}）</p>
       <p v-else-if="sort === 'distance' && !originPlace" class="reco__empty tiny muted">
-        选一个基准点，这里就按离它有多近重排；不选就先看综合。
+        选择基准点后按直线距离重排；未选择时按综合排序展示。
       </p>
 
       <ul v-else-if="pois.length" class="reco__list">
@@ -403,15 +403,15 @@ defineExpose({ show: () => (open.value = true) })
             <div class="reco__name">{{ poi.name }}</div>
             <div class="tiny muted reco__addr">
               {{ poi.address || poi.district }}<template v-if="poi.distance_m != null">
-                · <template v-if="isBasis(poi)">就是这里</template
-                ><template v-else>距此 {{ fmtDistance(poi.distance_m) }}</template></template
+                · <template v-if="isBasis(poi)">即为基准点</template
+                ><template v-else>距离 {{ fmtDistance(poi.distance_m) }}</template></template
               >
             </div>
           </div>
           <button
             class="btn btn--sm"
             type="button"
-            title="先存进想去清单"
+            title="暂存至想去清单"
             @click="stash(poi)"
           >
             <ShoppingBasket class="ic" :size="13" />
@@ -427,7 +427,7 @@ defineExpose({ show: () => (open.value = true) })
           </button>
         </li>
       </ul>
-      <p v-else class="reco__empty tiny muted">这一类暂时没有推荐，换个类目或排序试试。</p>
+      <p v-else class="reco__empty tiny muted">当前类目暂无推荐结果，可更换类目或排序方式。</p>
 
       <a
         v-if="amapUrl"

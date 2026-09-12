@@ -127,7 +127,7 @@ onBeforeUnmount(() => {
         <button
           class="search__stash"
           type="button"
-          title="先存进想去清单，不排进今天"
+          title="暂存至想去清单，不加入当前日期"
           @mousedown.stop.prevent="emit('stash', poi)"
         >
           <ShoppingBasket :size="14" />

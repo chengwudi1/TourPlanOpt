@@ -89,7 +89,7 @@ const statusLabel = computed(() => {
       <button
         class="triphead__city tiny"
         type="button"
-        :title="city ? '点击修改目的地城市' : '点击设置目的地城市：推荐与搜索定位都靠它'"
+        :title="city ? '点击修改目的地城市' : '点击设置目的地城市：推荐与搜索范围依据该城市'"
         @click.stop="emit('setCity')"
       >
         {{ city || '设城市' }}

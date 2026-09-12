@@ -336,7 +336,7 @@ const bubble = computed(() => dragging.value || hovered.value || focused.value)
         v-if="arriveTick !== null"
         class="rail__arrive"
         :style="{ left: `${arriveTick}%` }"
-        :title="`路上算出的到达 ${formatMin(arriveMin ?? 0)}`"
+        :title="`路途推算的到达时间 ${formatMin(arriveMin ?? 0)}`"
       />
       <span
         v-for="m in marks"

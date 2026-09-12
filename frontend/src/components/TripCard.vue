@@ -55,7 +55,7 @@ const tags = computed(() => {
 function meta(trip: TripSummary): string {
   const bits = [trip.city]
   if (trip.day_count) bits.push(`${trip.day_count} 天`)
-  bits.push(trip.place_count ? `${trip.place_count} 个地点` : '还没有地点')
+  bits.push(trip.place_count ? `${trip.place_count} 个地点` : '暂无地点')
   return bits.filter(Boolean).join(' · ')
 }
 
@@ -75,7 +75,7 @@ const items = computed(() => {
   if (status === 'planning') {
     list.push({ key: 'finish', label: '标记为已完成', icon: CheckCheck, onClick: () => emit('status', 'finished') })
   } else {
-    list.push({ key: 'reopen', label: '放回规划中', icon: RotateCcw, onClick: () => emit('status', 'planning') })
+    list.push({ key: 'reopen', label: '恢复为规划中', icon: RotateCcw, onClick: () => emit('status', 'planning') })
   }
   // 归档态只有一条出路：回到规划中。再补一个「取消归档」就是把同一个动作念两遍。
   if (status !== 'archived') {

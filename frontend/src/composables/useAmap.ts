@@ -92,7 +92,7 @@ function warnAboutHostname() {
   if (host === 'localhost' || host === '127.0.0.1') return
   push(
     'warn',
-    `你正在通过 ${host} 访问`,
+    `当前通过 ${host} 访问`,
     '如果高德控制台里给这个 JS Key 设了域名白名单且不包含该地址，地图会显示为灰色。开发期建议把白名单留空。'
   )
 }

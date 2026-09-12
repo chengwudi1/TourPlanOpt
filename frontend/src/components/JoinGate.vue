@@ -23,8 +23,8 @@ function join() {
     <div class="gate__box card">
       <h2 class="gate__title">加入行程</h2>
       <p class="muted tiny">
-        同一个行程里的每个人都能实时看到彼此添加的地点和安排。<br />
-        用一个大家认得出的名字，你改的东西会带上它。
+        同一行程的成员可实时查看彼此添加的地点与安排。<br />
+        该名称会标注在您的改动上，请使用可识别的称呼。
       </p>
 
       <form class="gate__form" @submit.prevent="join">
@@ -33,7 +33,7 @@ function join() {
           class="input"
           type="text"
           maxlength="40"
-          placeholder="你的名字，例如：小明"
+          placeholder="请输入昵称，例如：小明"
           autocomplete="off"
           autofocus
         />

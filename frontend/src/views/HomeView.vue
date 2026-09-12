@@ -164,11 +164,11 @@ interface BoardRow {
 }
 
 function toRow(trip: TripSummary): BoardRow {
-  const checklist = trip.checklist_total ? `清单 ${trip.checklist_done}/${trip.checklist_total}` : '清单还空着'
+  const checklist = trip.checklist_total ? `清单 ${trip.checklist_done}/${trip.checklist_total}` : '清单未填写'
   return {
     trip,
     cd: countdownOf(trip.start_date, trip.end_date),
-    range: formatDateRange(trip.start_date, trip.end_date) || '还没定日期',
+    range: formatDateRange(trip.start_date, trip.end_date) || '未设置日期',
     money: trip.budget_cents
       ? `${formatMoney(trip.spent_cents)} / ${formatMoney(trip.budget_cents)}`
       : trip.spent_cents
@@ -300,16 +300,16 @@ async function copyLink(tripId: string) {
   const url = `${window.location.origin}/trip/${tripId}`
   try {
     await navigator.clipboard.writeText(url)
-    say('分享链接已复制，发给朋友就能一起编辑')
+    say('分享链接已复制，同行者打开即可共同编辑')
   } catch {
-    window.prompt('复制下面的链接分享给朋友：', url)
+    window.prompt('请复制以下分享链接：', url)
   }
 }
 
 function removeFromHome(tripId: string) {
   if (
     !window.confirm(
-      '从首页移除这段行程？\n\n只影响这台设备的首页，行程本身和分享链接都还在——别人照样打得开，你自己再打开一次就会重新出现在这里。',
+      '从首页移除这段行程？\n\n仅影响当前设备的首页，行程本身与分享链接保持不变；再次打开该行程会重新出现在首页。',
     )
   )
     return
@@ -327,7 +327,7 @@ function finishAllWrapUps() {
   // 先快照：setStatus 会乐观改状态，而 wrapUps 是 computed，边循环边重算会漏掉后半部分。
   const rows = wrapUps.value
   for (const row of rows) setStatus(row.trip.id, 'finished', null)
-  if (rows.length) say(`已把 ${rows.length} 段标记为完成`)
+  if (rows.length) say(`已将 ${rows.length} 段行程标记为完成`)
 }
 
 /* ---------- 账号（可选）：顶栏一个入口，表单只在这里出现一次 ---------- */
@@ -394,7 +394,7 @@ onMounted(() => {
         <!-- 待收尾排在最上面：这是唯一一个「再不做就忘了」的动作，别的都能等。 -->
         <section v-if="wrapUps.length" class="board board--warn card reveal" :style="{ '--base': '120ms' }">
           <div class="board__head">
-            <h2 class="board__title"><CheckCheck class="ic" :size="14" /> 回来了，还没收尾</h2>
+            <h2 class="board__title"><CheckCheck class="ic" :size="14" /> 已结束，待收尾</h2>
             <button v-if="wrapUps.length > 1" class="btn btn--sm" type="button" @click="finishAllWrapUps">全部标记完成</button>
           </div>
           <ul class="board__list">
@@ -485,19 +485,19 @@ onMounted(() => {
             </button>
           </div>
           <p v-else-if="!loading" class="tiny sec__empty">
-            {{ tab === 'archived' ? '归档区是空的。行程收回来了就标个已完成，用不到了再归档，首页会清爽很多。' : '这一档还没有行程。' }}
+            {{ tab === 'archived' ? '归档区暂无行程。行程结束后可先标记完成，再归档以保持首页简洁。' : '当前分类暂无行程。' }}
           </p>
         </section>
 
-        <p v-if="summaryError" class="tiny home__note">{{ summaryError }}——行程内容没取到，稍后重试。</p>
+        <p v-if="summaryError" class="tiny home__note">{{ summaryError }}，行程内容加载失败，请稍后重试。</p>
       </main>
 
       <aside class="home__side">
         <section class="card side reveal" :style="{ '--base': '300ms' }">
           <h2 class="side__title"><Route class="ic" :size="14" /> 怎么用</h2>
           <ol class="side__steps">
-            <li><Search class="ic" :size="13" /> 搜地点，或从「发现」里挑，地图右键也能直接加</li>
-            <li><Zap class="ic" :size="13" /> 丢进来就自动排时间线，点优化换最短路线</li>
+            <li><Search class="ic" :size="13" /> 搜索地点，或从「发现」中添加；在地图上右键也可直接加入</li>
+            <li><Zap class="ic" :size="13" /> 添加地点后自动生成时间线，点击优化可获得最短路线</li>
             <li><Link2 class="ic" :size="13" /> 同一条链接多人同时编辑，改动实时同步</li>
           </ol>
         </section>
@@ -534,7 +534,7 @@ onMounted(() => {
 
     <CreateTripDialog v-if="showCreate" @created="onTripCreated" @done="onCreated" @cancel="showCreate = false" />
 
-    <AppModal v-if="showAuth" title="登录或注册" sub="不登录也能建行程；登录是为了留下「我的行程」" @close="showAuth = false">
+    <AppModal v-if="showAuth" title="登录或注册" sub="不登录也可创建行程；登录用于保存「我的行程」" @close="showAuth = false">
       <form class="authdlg" @submit.prevent="submitAuth">
         <div class="authdlg__tabs">
           <button

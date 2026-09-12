@@ -191,7 +191,7 @@ function runOptimize() {
         v-else-if="!places.length && store.days.length > 1"
         class="daysec__del"
         type="button"
-        title="删除这个空的天"
+        title="删除该空白天"
         @click.stop="emit('remove')"
       >
         <X :size="12" />
@@ -236,7 +236,7 @@ function runOptimize() {
             </template>
           </ul>
 
-          <p v-else class="daysec__empty tiny muted">这一天还没有安排。选中后从上面搜索或「发现」里挑。</p>
+          <p v-else class="daysec__empty tiny muted">这一天暂无安排。选中后可通过搜索或「发现」添加地点。</p>
 
           <div v-if="endPlace" class="bookend bookend--end tiny">
             <BedDouble class="ic" :size="12" />
@@ -271,7 +271,7 @@ function runOptimize() {
               >
                 <Zap class="ic" :size="13" /> {{ store.optimizing ? '优化中…' : '一键优化顺序' }}
               </button>
-              <label class="daysec__precise tiny muted" title="用高德真实路况建距离矩阵（消耗配额）；默认用直线距离，瞬间完成且不耗配额">
+              <label class="daysec__precise tiny muted" title="使用高德真实路况构建距离矩阵，会消耗配额；默认使用直线距离，即时完成且不消耗配额">
                 <input v-model="precise" type="checkbox" :disabled="store.optimizing" />
                 精确优化
               </label>
@@ -281,14 +281,14 @@ function runOptimize() {
                 :href="dayNavUrl()!"
                 target="_blank"
                 rel="noopener"
-                title="把这条路线发到高德地图"
+                title="在高德地图中打开该路线"
               >
                 <Navigation class="ic" :size="13" /> 全天导航
               </a>
             </template>
           </div>
           <p v-if="places.length >= 2 && places.length < 3 && !result" class="tiny muted daysec__hint">
-            至少 3 个地点才可优化
+            需至少 3 个地点方可优化
           </p>
         </div>
       </div>

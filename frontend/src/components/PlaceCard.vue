@@ -118,22 +118,22 @@ const arriveText = computed(() =>
 )
 const startText = computed(() => (shownStart.value === null ? '—' : formatMin(shownStart.value)))
 const endText = computed(() => (shownEnd.value === null ? '—' : formatMin(shownEnd.value)))
-const autoBadge = computed(() => (start.value === null ? '自动排' : '你定的'))
+const autoBadge = computed(() => (start.value === null ? '自动' : '已固定'))
 
 /** 定了时刻之后，它和路上算出的到达之间差多久——这一句才是拖轨道的意义。 */
 const timeHint = computed(() => {
   const picked = preview.value ?? start.value
   if (picked === null) {
-    return '到达 = 上一站玩到的时刻 + 路上时间，是算出来的，不用设；开始跟着到达走。把滑块拖到某个时刻，开始就归你定。'
+    return '到达时间由上一站的结束时间与路途时长推算，无需设置；开始时间默认跟随到达。拖动滑块可固定本站开始时间。'
   }
   const who =
-    preview.value !== null ? '这个时刻' : start.value === null ? '排程算出的开始' : '你定的开始'
+    preview.value !== null ? '所选时刻' : start.value === null ? '排程计算的时刻' : '已固定的时刻'
   const arrive = props.place.arrive_min
-  if (arrive === null) return `${who}已经钉住，但这一站还没排出到达：优化会照它排。`
+  if (arrive === null) return `${who}已固定，本站尚未计算到达时间，优化排程将按该时刻安排。`
   const diff = picked - arrive
-  if (diff >= 5) return `${who}比预计到达晚 ${formatDuration(diff)}——这一段是白等。`
-  if (diff <= -5) return `${who}比预计到达早 ${formatDuration(-diff)}——路上的时间得自己挤出来。`
-  return `${who}与预计到达重合，中间不用等。`
+  if (diff >= 5) return `${who}晚于预计到达 ${formatDuration(diff)}，中间为空等时间。`
+  if (diff <= -5) return `${who}早于预计到达 ${formatDuration(-diff)}，路途时间不足。`
+  return `${who}与预计到达一致。`
 })
 
 // -- 提交 -------------------------------------------------------------------------------
@@ -219,8 +219,8 @@ function blurNote() {
           class="place__pin tiny"
           :title="
             place.user_start_min === null
-              ? '已钉住：优化排程不会挪动这一站'
-              : '你定过开始时刻，这一站已被钉住'
+              ? '本站已固定，优化排程不会调整'
+              : '开始时间已固定，本站随之固定'
           "
         >
           <Lock :size="11" />
@@ -263,7 +263,7 @@ function blurNote() {
          盖掉别人对同一张卡另一个字段的修改。 -->
     <div v-if="active" class="place__edit" @click.stop>
       <div class="edit__flow" :style="{ '--i': 0 }">
-        <span class="flow__node" title="到达由上一站玩到的时刻加上路上时间算出，不能直接设；要挪它请改停留时长、换顺序，或者把开始时刻自己定下来">
+        <span class="flow__node" title="到达时间 = 上一站结束时间 + 路途时长，由系统推算，不可直接设置。如需调整，请修改停留时长、变更顺序，或固定本站开始时间。">
           <b class="flow__v">{{ arriveText }}</b>
           <span class="flow__k tiny">到达</span>
         </span>
@@ -272,8 +272,8 @@ function blurNote() {
           class="flow__node flow__node--on"
           :title="
             start === null
-              ? '开始由优化排程给出。拖下面的轨道就能自己定这一分钟'
-              : '这个开始是你自己定的（已钉住），排程会绕开它；点「自动排」交回去'
+              ? '开始时间由优化排程计算，拖动下方滑块可固定'
+              : '开始时间已固定，优化排程会保留该时刻；点「交回排程」可取消'
           "
         >
           <b class="flow__v">{{ startText }}</b>
@@ -282,10 +282,10 @@ function blurNote() {
         <ArrowRight class="flow__arrow" :size="13" />
         <span
           class="flow__node"
-          title="玩到 = 开始 + 停留时长；下一站的到达就从这里加上路上时间算出来"
+          title="结束时间 = 开始时间 + 停留时长，下一站的到达时间由此推算"
         >
           <b class="flow__v">{{ endText }}</b>
-          <span class="flow__k tiny">玩到</span>
+          <span class="flow__k tiny">结束</span>
         </span>
       </div>
 
@@ -296,10 +296,10 @@ function blurNote() {
             v-if="start !== null"
             class="chip chip--action"
             type="button"
-            title="放开你定的时刻，交回给优化排程"
+            title="取消固定，交回优化排程"
             @click="commitStart(null)"
           >
-            <Sparkles class="ic" :size="11" /> 自动排
+            <Sparkles class="ic" :size="11" /> 交回排程
           </button>
         </div>
         <TimeRail
@@ -321,7 +321,7 @@ function blurNote() {
             <button
               class="stepper__btn"
               type="button"
-              title="少 15 分钟"
+              title="减少 15 分钟"
               :disabled="duration <= 0"
               @click="commitDuration(duration - 15)"
             >
@@ -331,7 +331,7 @@ function blurNote() {
             <button
               class="stepper__btn"
               type="button"
-              title="多 15 分钟"
+              title="增加 15 分钟"
               :disabled="duration >= 1440"
               @click="commitDuration(duration + 15)"
             >
@@ -373,8 +373,8 @@ function blurNote() {
           :aria-checked="place.locked"
           :title="
             place.locked
-              ? '已钉住：优化排程不会挪动这一站。点这里放开，交回优化排程'
-              : '钉住后，优化排程不会挪动这一站的次序和时刻。定了开始时间会自动钉上'
+              ? '本站已固定，优化排程不会调整；点击可取消固定'
+              : '固定后，优化排程不会调整本站的顺序与开始时间；设置开始时间会自动固定'
           "
           @click="emit('lock', place, !place.locked)"
         >
@@ -384,7 +384,7 @@ function blurNote() {
               <LockOpen v-else :size="9" />
             </span>
           </span>
-          <span class="switch__text">钉住这一站</span>
+          <span class="switch__text">固定本站</span>
         </button>
         <a
           v-if="navHref"
