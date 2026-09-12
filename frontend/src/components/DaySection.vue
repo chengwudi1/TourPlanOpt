@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 
 import PlaceCard from '@/components/PlaceCard.vue'
+import type { RailMark } from '@/components/TimeRail.vue'
 import { BedDouble, Car, ChevronDown, Flag, Footprints, Navigation, Ruler, X, Zap } from '@/components/icons'
 import { useDragSort } from '@/composables/useDragSort'
 import { useFlipList } from '@/composables/useFlipList'
@@ -107,6 +108,14 @@ function navHref(place: Place, index: number): string | null {
   const prev = places.value[index - 1]
   const from = `${prev.lng},${prev.lat},${encodeURIComponent(prev.name)}`
   return `https://uri.amap.com/navigation?from=${from}&to=${to}&${common}`
+}
+
+/** 时刻轨道上的参照点：同一天里已经排定时刻的其它站。挑时刻要能指着别的站说
+ * 「在它后面一小时」，所以基准只能是看得见的站，不能是一个算出来的抽象位置。 */
+function railMarks(exceptId: string): RailMark[] {
+  return places.value
+    .filter((p) => p.id !== exceptId && p.start_min !== null)
+    .map((p) => ({ name: p.name, min: p.start_min as number }))
 }
 
 // -- 拖拽：只在本区块内排序；拖动状态作为 presence 广播给同房间。 --------------------
@@ -217,6 +226,7 @@ function runOptimize() {
                 :editing-by="editorsByPlace.get(place.id) ?? null"
                 :nav-href="navHref(place, index)"
                 :creator-color="store.creatorColorOf(place.added_by)"
+                :marks="railMarks(place.id)"
                 @select="store.selectPlace(place.id)"
                 @remove="store.deletePlace(place.id)"
                 @lock="(p, locked) => store.setPlaceLocked(p.id, locked)"
