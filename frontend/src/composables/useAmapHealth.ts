@@ -46,12 +46,11 @@ function writeStored(storage: 'local' | 'session', key: string, value: string) {
   }
 }
 
-/** 上一趟导航探到的结果。只存「探过了」会造出一个凭标记亮起的绿点，
- * 所以缓存的是结论本身，开局直接回放。 */
+/** 上一趟导航探到的结论。只存「探过了」的标记会造出一个凭标记亮起的绿点，
+ * 所以缓存的是结论本身，开局直接回放；探不到的那一趟不缓存。 */
 interface CachedProbe {
   web: KeyCheck | null
   js: KeyCheck | null
-  error: string
 }
 
 function readCachedProbe(): CachedProbe | null {
@@ -59,7 +58,10 @@ function readCachedProbe(): CachedProbe | null {
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw) as CachedProbe
-    return { web: parsed.web ?? null, js: parsed.js ?? null, error: parsed.error ?? '' }
+    // 一次成活的探活必然同时带回两条结论；缺任何一条就说明这份缓存里没有结论
+    // （旧格式那种「只记了 error」的 blob 就是），当没探过，重新探。
+    if (!parsed?.web || !parsed?.js) return null
+    return { web: parsed.web, js: parsed.js }
   } catch {
     return null
   }
@@ -69,7 +71,7 @@ const { status, diagnostics } = useAmap()
 
 const cached = readCachedProbe()
 const loading = ref(false)
-const backendError = ref(cached?.error ?? '')
+const backendError = ref('')
 const webKey = ref<KeyCheck | null>(cached?.web ?? null)
 const jsKey = ref<KeyCheck | null>(cached?.js ?? null)
 const probed = ref(cached !== null)
@@ -139,15 +141,17 @@ async function probe(force = false): Promise<void> {
   } finally {
     loading.value = false
     probed.value = true
-    writeStored(
-      'session',
-      RESULT_KEY,
-      JSON.stringify({
-        web: webKey.value,
-        js: jsKey.value,
-        error: backendError.value,
-      } satisfies CachedProbe),
-    )
+    // 只缓存「问到了答案」。读不到后端（后端在重启、瞬断）是「没问到」而不是「坏了」，
+    // 连这个一起缓存会让红点一路挂到用户手动重查为止。
+    if (backendError.value) {
+      writeStored('session', RESULT_KEY, '')
+    } else {
+      writeStored(
+        'session',
+        RESULT_KEY,
+        JSON.stringify({ web: webKey.value, js: jsKey.value } satisfies CachedProbe),
+      )
+    }
   }
   await ensureAmap().catch(() => undefined)
 }
