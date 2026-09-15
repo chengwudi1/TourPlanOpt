@@ -3,10 +3,12 @@ import { computed, ref } from 'vue'
 
 import { Check, GripVertical, ListChecks, Package, Trash2 } from '@/components/icons'
 import { useDragSort } from '@/composables/useDragSort'
+import { useDialogStore } from '@/stores/dialog'
 import { useTripStore } from '@/stores/trip'
 import type { ChecklistItem } from '@/types/domain'
 
 const store = useTripStore()
+const dialog = useDialogStore()
 
 const draft = ref('')
 
@@ -41,6 +43,7 @@ useDragSort(listEl, (ids) => store.reorderChecklist(ids), undefined, {
   item: '.chk',
   handle: '.chk__drag',
   idAttr: 'data-item-id',
+  ghostClass: 'chk--ghost',
 })
 
 /** 一行一条地粘贴进来，就当成一次批量添加：省得从备忘录里复制十行要点十次。 */
@@ -54,16 +57,31 @@ function submit() {
   draft.value = ''
 }
 
-function rename(item: ChecklistItem) {
-  const text = window.prompt('修改清单项名称：', item.text)
+async function rename(item: ChecklistItem) {
+  const text = await dialog.prompt({
+    title: '修改清单项',
+    value: item.text,
+    confirmLabel: '保存',
+    emptyMessage: '清单项不能为空',
+  })
   if (text === null) return
   const trimmed = text.trim()
-  if (!trimmed || trimmed === item.text) return
+  if (trimmed === item.text) return
   store.updateChecklist(item.id, { text: trimmed })
 }
 
-function remove(item: ChecklistItem) {
-  if (item.done || window.confirm(`删除「${item.text}」？`)) store.removeChecklist(item.id)
+async function remove(item: ChecklistItem) {
+  // 已勾掉的项随时能再加回来，不必拦；未完成的才是真丢了东西。
+  if (!item.done) {
+    const ok = await dialog.confirm({
+      title: '删除这一项？',
+      message: `「${item.text}」将从出行清单移除，同伴的清单同步变化。`,
+      confirmLabel: '删除',
+      danger: true,
+    })
+    if (!ok) return
+  }
+  store.removeChecklist(item.id)
 }
 </script>
 
@@ -71,6 +89,24 @@ function remove(item: ChecklistItem) {
   <section class="check card">
     <div class="check__head">
       <strong class="check__title"><ListChecks class="ic" :size="14" /> 出行清单</strong>
+      <svg
+        v-if="total"
+        class="check__ring"
+        viewBox="0 0 24 24"
+        role="img"
+        :aria-label="`已备好 ${done} / ${total}`"
+      >
+        <circle class="check__ring-bg" pathLength="100" cx="12" cy="12" r="9" />
+        <circle
+          class="check__ring-fg"
+          :class="{ 'check__ring-fg--full': allDone }"
+          pathLength="100"
+          cx="12"
+          cy="12"
+          r="9"
+          :style="{ strokeDashoffset: 100 - pct }"
+        />
+      </svg>
       <span v-if="total" class="tiny muted">{{ done }}/{{ total }} 已备好</span>
       <span v-else class="tiny muted">出发前逐项确认，避免临行遗漏</span>
       <button
@@ -84,17 +120,14 @@ function remove(item: ChecklistItem) {
       </button>
     </div>
 
-    <div v-if="total" class="check__bar" role="img" :aria-label="`已备好 ${done} / ${total}`">
-      <i :class="{ 'check__bar--full': allDone }" :style="{ width: `${pct}%` }" />
-    </div>
-
     <ul v-if="total" ref="listEl" class="check__list">
       <li
-        v-for="item in store.checklistSorted"
+        v-for="(item, i) in store.checklistSorted"
         :key="item.id"
         :data-item-id="item.id"
-        class="chk"
+        class="chk reveal reveal--pop"
         :class="{ 'chk--done': item.done }"
+        :style="{ '--i': i > 6 ? 6 : i }"
       >
         <button
           class="chk__box"
@@ -110,7 +143,7 @@ function remove(item: ChecklistItem) {
           class="chk__text"
           type="button"
           title="点击改名"
-          @click="rename(item)"
+          @click="void rename(item)"
         >
           {{ item.text }}
         </button>
@@ -118,7 +151,7 @@ function remove(item: ChecklistItem) {
         <button class="iconbtn chk__drag" type="button" title="拖动排序">
           <GripVertical class="ic" :size="14" />
         </button>
-        <button class="iconbtn chk__drop" type="button" title="删除" @click="remove(item)">
+        <button class="iconbtn chk__drop" type="button" title="删除" @click="void remove(item)">
           <Trash2 class="ic" :size="14" />
         </button>
       </li>
@@ -174,23 +207,38 @@ function remove(item: ChecklistItem) {
   margin-left: auto;
 }
 
-.check__bar {
-  height: 4px;
-  overflow: hidden;
-  background: var(--surface-3);
-  border-radius: 999px;
+/* 环读数在标题行里，所以它得跟字一起站住：baseline 对齐会让替换元素拿底边当基线，
+   看着就是往下掉半格。 */
+.check__ring {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 18px;
+  height: 18px;
 }
 
-.check__bar i {
-  display: block;
-  height: 100%;
-  background: var(--accent);
-  border-radius: 999px;
-  transition: width var(--dur-slow) var(--ease-out);
+.check__ring circle {
+  fill: none;
+  stroke-width: 3;
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
 }
 
-.check__bar--full {
-  background: var(--ok);
+.check__ring-bg {
+  stroke: var(--surface-3);
+}
+
+.check__ring-fg {
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  transition:
+    stroke-dashoffset var(--dur-slow) var(--ease-out),
+    stroke var(--dur-fast) var(--ease-out);
+}
+
+/* 环是读数不是控件，所以备齐了可以换 --ok：这一档不邀请点击。 */
+.check__ring-fg--full {
+  stroke: var(--ok);
 }
 
 .check__list {
@@ -214,6 +262,15 @@ function remove(item: ChecklistItem) {
   background: var(--surface-hover);
 }
 
+/* 拖拽中的占位行压暗，且不跟 hover：跟行卡同一套读法——那是位置，不是可点的东西。 */
+.chk--ghost {
+  opacity: 0.4;
+}
+
+.chk--ghost:hover {
+  background: transparent;
+}
+
 .chk__box {
   display: grid;
   flex: 0 0 auto;
@@ -222,7 +279,7 @@ function remove(item: ChecklistItem) {
   padding: 0;
   color: transparent;
   background: var(--surface);
-  border: 2px solid var(--border-strong);
+  border: 2px solid var(--ink);
   border-radius: 6px;
   cursor: pointer;
   place-items: center;

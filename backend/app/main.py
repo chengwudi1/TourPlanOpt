@@ -72,6 +72,19 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("高德自检本身出错了（不影响启动）")
 
+    # 助手不做启动自检：启动时联网只会把一个可有可无的功能变成开机依赖。但这行必须打
+    # 出来 —— 没有它，「没配密钥」和「配错了却没人说」在日志里长得一模一样。
+    try:
+        from app.assistant.llm import endpoint_label, llm_ready
+
+        logger.info(
+            "对话式助手：%s（%s）",
+            "走模型解析，规则兜底" if llm_ready() else "未配 LLM_API_KEY，走规则解析",
+            endpoint_label(),
+        )
+    except Exception:
+        logger.exception("助手配置读取失败（不影响启动）")
+
     yield
 
     try:
@@ -80,6 +93,12 @@ async def lifespan(app: FastAPI):
         await close_amap_client()
     except Exception:
         logger.exception("关闭高德客户端时出错")
+    try:
+        from app.assistant.llm import close_llm_client
+
+        await close_llm_client()
+    except Exception:
+        logger.exception("关闭模型客户端时出错")
     logger.info("%s shutting down", settings.app_name)
 
 
@@ -110,6 +129,7 @@ def create_app() -> FastAPI:
     )
 
     from app.amap.errors import AmapError
+    from app.api.routes_assistant import router as assistant_router
     from app.api.routes_city import router as city_router
     from app.api.routes_config import router as config_router
     from app.api.routes_health import router as health_router
@@ -140,6 +160,7 @@ def create_app() -> FastAPI:
     app.include_router(optimize_router)
     app.include_router(city_router)
     app.include_router(auth_router)
+    app.include_router(assistant_router)
 
     @app.websocket("/ws/trips/{trip_id}")
     async def ws_trip_endpoint(websocket: WebSocket, trip_id: str) -> None:

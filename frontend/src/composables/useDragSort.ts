@@ -21,12 +21,15 @@ export interface DragSortSelectors {
   handle?: string
   /** 行元素上存 id 的 data 属性名（camelCase 会自动转成 kebab-case 的 dataset 键）。 */
   idAttr?: string
+  /** 占位幽灵的类名。各列表的行名不同，样式只能各自写，所以跟着行名一起给。 */
+  ghostClass?: string
 }
 
 const DEFAULTS = {
   item: '.place',
   handle: '.place__drag',
   idAttr: 'data-place-id',
+  ghostClass: 'place--ghost',
 }
 
 export function useDragSort(
@@ -35,7 +38,7 @@ export function useDragSort(
   onDragging?: (dragging: boolean) => void,
   selectors: DragSortSelectors = {},
 ) {
-  const { item, handle, idAttr } = { ...DEFAULTS, ...selectors }
+  const { item, handle, idAttr, ghostClass } = { ...DEFAULTS, ...selectors }
   let sortable: Sortable | null = null
 
   function idOf(el: Element): string | null {
@@ -56,7 +59,7 @@ export function useDragSort(
         animation: 150,
         handle,
         draggable: item,
-        ghostClass: 'place--ghost',
+        ghostClass,
         onStart() {
           onDragging?.(true)
         },

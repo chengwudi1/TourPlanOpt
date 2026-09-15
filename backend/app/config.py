@@ -40,6 +40,20 @@ class Settings(BaseSettings):
     amap_qps_limit: int = 3
     amap_timeout_s: float = 8.0
 
+    # --- 对话式助手：OpenAI 兼容的 chat/completions ------------------------------------
+    # 默认是智谱的免费模型 GLM-4-Flash。指向本地 Ollama 时（LLM_BASE_URL=
+    # http://127.0.0.1:11434/v1）连密钥都不需要——localhost 视为免鉴权，零成本零外传。
+    # 与 amap_web_key 同一条纪律：这把密钥只在服务端用，绝不出现在任何响应里。
+    llm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
+    llm_api_key: str = ""
+    llm_model: str = "glm-4-flash"
+    llm_timeout_s: float = 12.0
+    # 一次解析允许的最长用户输入。挡的是把整段聊天记录灌进 prompt，不是挡正常说话。
+    assistant_max_chars: int = 600
+    # 单条消息最多解析出几条指令，以及最多调用几次 POI 搜索（每次都是真配额）。
+    assistant_max_actions: int = 20
+    assistant_max_poi_lookups: int = 5
+
     # WebSocket hygiene
     ws_max_payload_bytes: int = 64 * 1024
     ws_silence_timeout_s: float = 60.0

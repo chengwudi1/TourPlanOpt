@@ -154,6 +154,7 @@ async def _place_add(
             note=str(data.get("note") or ""),
             added_by=str(data.get("added_by") or client_id),
             after_place_id=data.get("after_place_id"),
+            position=data.get("position"),
             photo_url=str(data.get("photo_url") or ""),
         )
     except (TypeError, ValueError):
@@ -370,8 +371,11 @@ async def _day_delete(
 
     deleted = await repositories.delete_day(db, trip_id, day_id)
     if not deleted:
-        # 有内容的天必须先删地点：拒绝并告知原因，绝不静默丢数据。
-        await _reject(conn, op_id, "day_not_empty", {"day_id": day_id})
+        # 两种「不能删」要分开说：有内容的天必须先移走地点，而最后一天是底线。
+        # 仓储那层的守卫留着——这里查完到真删之间别人还能改，返回 False 就照旧拒绝。
+        remaining = await repositories.place_ids_for_day(db, day_id)
+        reason = "day_not_empty" if remaining else "day_last"
+        await _reject(conn, op_id, reason, {"day_id": day_id})
         return
     await _broadcast(hub, db, trip_id, "day_deleted", op_id, client_id, {"day_id": day_id})
 

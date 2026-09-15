@@ -42,6 +42,7 @@ export {
   MoonStar,
   Navigation,
   Package,
+  Pencil,
   Plus,
   Receipt,
   Route,

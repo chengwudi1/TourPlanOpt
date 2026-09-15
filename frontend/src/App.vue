@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { RouterView } from 'vue-router'
+
+import DialogHost from '@/components/DialogHost.vue'
+import ToastHost from '@/components/ToastHost.vue'
 </script>
 
 <template>
@@ -11,4 +14,8 @@ import { RouterView } from 'vue-router'
       <component :is="Component" />
     </Transition>
   </RouterView>
+  <!-- 回执与对话框属于应用，不属于某个视图：换页时不该跟着闪掉，
+       也不能落进上面那个带 transform 的过渡容器里。 -->
+  <ToastHost />
+  <DialogHost />
 </template>

@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { X } from '@/components/icons'
+import { isTopModalLayer, popModalLayer, pushModalLayer } from '@/utils/modalStack'
+import { trapTab } from '@/utils/focusTrap'
 
 /**
  * 全站唯一的弹层。`variant="sheet"` 是「手机底部抽屉 + 桌面居中模态」的同一条实现：
@@ -22,6 +24,9 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{ close: [] }>()
+
+/** 叠放时键盘归属的凭据，见 utils/modalStack。挂载时领取，卸载时归还。 */
+let modalLayer = 0
 
 const panel = ref<HTMLElement | null>(null)
 const backdrop = ref<HTMLElement | null>(null)
@@ -48,32 +53,14 @@ function setDragY(px: number) {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  // 叠放时只有最上面那一层有权回应键盘，见 utils/modalStack。
+  if (!isTopModalLayer(modalLayer)) return
   if (e.key === 'Escape') {
     e.stopPropagation()
     void requestClose()
     return
   }
-  if (e.key === 'Tab') trapTab(e)
-}
-
-/** 焦点不外逃到遮罩后面的页面：抽屉是模态的，Tab 就该在里头转圈。 */
-function trapTab(e: KeyboardEvent) {
-  const root = panel.value
-  if (!root) return
-  const items = [
-    ...root.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])'),
-  ].filter((el) => el.offsetParent !== null || el === document.activeElement)
-  if (!items.length) return
-  const first = items[0]
-  const last = items[items.length - 1]
-  const active = document.activeElement
-  if (e.shiftKey && (active === first || active === root)) {
-    e.preventDefault()
-    last.focus()
-  } else if (!e.shiftKey && active === last) {
-    e.preventDefault()
-    first.focus()
-  }
+  if (e.key === 'Tab') trapTab(panel.value, e)
 }
 
 function delay(ms: number): Promise<void> {
@@ -144,6 +131,7 @@ function onGrabUp(e: PointerEvent) {
 }
 
 onMounted(() => {
+  modalLayer = pushModalLayer()
   document.addEventListener('keydown', onKeydown)
   prevOverflow = document.body.style.overflow
   document.body.style.overflow = 'hidden'
@@ -153,6 +141,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  popModalLayer(modalLayer)
   document.removeEventListener('keydown', onKeydown)
   document.body.style.overflow = prevOverflow
 })

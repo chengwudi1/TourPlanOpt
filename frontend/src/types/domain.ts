@@ -230,4 +230,6 @@ export interface PlaceCreateInput {
   note?: string
   added_by?: string
   after_place_id?: string | null
+  /** 绝对插入下标，越界由服务端夹到端点。排在第一位的地点没有 after_place_id 可指。 */
+  position?: number | null
 }

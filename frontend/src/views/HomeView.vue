@@ -20,6 +20,7 @@ import {
   X,
   Zap,
 } from '@/components/icons'
+import { useCopy } from '@/composables/useCopy'
 import {
   hideTrip,
   pruneRecentTrips,
@@ -29,6 +30,8 @@ import {
   type RecentTrip,
 } from '@/composables/useRecentTrips'
 import { useAuthStore, type MyTrip } from '@/stores/auth'
+import { useDialogStore } from '@/stores/dialog'
+import { useFeedbackStore } from '@/stores/feedback'
 import type { TripStatus, TripSummary } from '@/types/domain'
 import { apiFetch } from '@/utils/api'
 import { formatMoney } from '@/utils/money'
@@ -52,6 +55,9 @@ import { HOME_TABS, type Countdown, countdownOf, formatDateRange, needsWrapUp, p
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
+const feedback = useFeedbackStore()
+const dialog = useDialogStore()
+const copy = useCopy()
 
 interface HomeTrip {
   id: string
@@ -65,7 +71,6 @@ const serverTrips = ref<MyTrip[]>([])
 const summaries = ref<Record<string, TripSummary>>({})
 const summaryError = ref('')
 const loading = ref(true)
-const notice = ref('')
 const tab = ref<TripStatus>('planning')
 
 const showCreate = ref(false)
@@ -178,16 +183,19 @@ function toRow(trip: TripSummary): BoardRow {
   }
 }
 
-/** 出发看板：还没走的那几段按日子排队，hero 已经代表了一条，这里列其余的。 */
-const upcoming = computed<BoardRow[]>(() => {
+/** 出发看板：还没走的那几段按日子排队。hero 已经代表了一条，这里列其余的。 */
+const upcomingRest = computed<TripSummary[]>(() => {
   if (tab.value !== 'planning') return []
   return inTab.value
     .map((t) => t.summary)
-    .filter((s): s is TripSummary => !!s && s.id !== hero.value?.id && phaseOf(s.start_date, s.end_date) === 'upcoming')
+    .filter(
+      (s): s is TripSummary =>
+        !!s && s.id !== hero.value?.id && phaseOf(s.start_date, s.end_date) === 'upcoming',
+    )
     .sort(byDeparture)
-    .slice(0, 3)
-    .map(toRow)
 })
+/** 看板只列最近三段，但「几段在排队」要说的是总数——截断的是列表，不是事实。 */
+const upcoming = computed(() => upcomingRest.value.slice(0, 3).map(toRow))
 
 /** 回来了却没归档的行程：日期已经走完，status 还停在 planning。跟门面一样只属于规划中档。 */
 const wrapUps = computed<BoardRow[]>(() =>
@@ -237,10 +245,7 @@ async function refresh() {
 }
 
 function say(message: string) {
-  notice.value = message
-  window.setTimeout(() => {
-    if (notice.value === message) notice.value = ''
-  }, 2600)
+  feedback.show({ message })
 }
 
 function go(tripId: string) {
@@ -298,21 +303,21 @@ function setStatus(tripId: string, next: TripStatus, receipt: string | null = ST
 
 async function copyLink(tripId: string) {
   const url = `${window.location.origin}/trip/${tripId}`
-  try {
-    await navigator.clipboard.writeText(url)
-    say('分享链接已复制，同行者打开即可共同编辑')
-  } catch {
-    window.prompt('请复制以下分享链接：', url)
-  }
+  await copy(url, {
+    receipt: '分享链接已复制，同行者打开即可共同编辑',
+    fallbackTitle: '分享链接',
+  })
 }
 
-function removeFromHome(tripId: string) {
-  if (
-    !window.confirm(
-      '从首页移除这段行程？\n\n仅影响当前设备的首页，行程本身与分享链接保持不变；再次打开该行程会重新出现在首页。',
-    )
-  )
-    return
+async function removeFromHome(tripId: string) {
+  const ok = await dialog.confirm({
+    title: '从首页移除这段行程？',
+    message:
+      '仅影响当前设备的首页，行程本身与分享链接保持不变；再次打开该行程会重新出现在首页。',
+    confirmLabel: '移除',
+    danger: true,
+  })
+  if (!ok) return
   hidden.value = hideTrip(tripId)
   // 登录用户还有一份服务端足迹，能撤就撤；撤不掉也达到了「首页看不到」的目的。
   if (auth.user) {
@@ -411,7 +416,7 @@ onMounted(() => {
         <section v-if="upcoming.length" class="board card reveal" :style="{ '--base': '170ms' }">
           <div class="board__head">
             <h2 class="board__title"><CalendarClock class="ic" :size="14" /> 接下来要走</h2>
-            <span class="tiny muted">{{ upcoming.length }} 段在排队</span>
+            <span class="tiny muted">另有 {{ upcomingRest.length }} 段在排队</span>
           </div>
           <ul class="board__list">
             <li v-for="row in upcoming" :key="row.trip.id" class="board__item">
@@ -458,9 +463,9 @@ onMounted(() => {
         </section>
 
         <section v-if="trips.length" class="sec">
-          <div class="sec__head reveal reveal--fade" :style="{ '--base': '220ms' }">
+          <div v-if="grid.length" class="sec__head reveal reveal--fade" :style="{ '--base': '220ms' }">
             <h2>我的行程</h2>
-            <span class="tiny muted">{{ inTab.length }} 段</span>
+            <span class="tiny muted">{{ grid.length }} 段</span>
           </div>
           <div v-if="grid.length" class="sec__grid">
             <TripCard
@@ -484,7 +489,7 @@ onMounted(() => {
               <span>再建一段行程</span>
             </button>
           </div>
-          <p v-else-if="!loading" class="tiny sec__empty">
+          <p v-else-if="!loading && !inTab.length" class="tiny sec__empty">
             {{ tab === 'archived' ? '归档区暂无行程。行程结束后可先标记完成，再归档以保持首页简洁。' : '当前分类暂无行程。' }}
           </p>
         </section>
@@ -528,9 +533,6 @@ onMounted(() => {
     <button class="fab reveal reveal--pop" type="button" :style="{ '--base': '520ms' }" @click="showCreate = true">
       <Plus class="ic" :size="16" /> 新建行程
     </button>
-
-    <!-- 卡片菜单那几个动作的回执：就地一句话，2.6s 自己走，不弹任何东西。 -->
-    <p v-if="notice" class="tiny home__say">{{ notice }}</p>
 
     <CreateTripDialog v-if="showCreate" @created="onTripCreated" @done="onCreated" @cancel="showCreate = false" />
 
@@ -682,7 +684,7 @@ onMounted(() => {
   margin: 0;
   color: var(--text-3);
   text-align: center;
-  border: 1px dashed var(--border-strong);
+  border: 1px dashed var(--hairline);
   border-radius: var(--radius);
 }
 
@@ -762,12 +764,13 @@ onMounted(() => {
   font-weight: 600;
   color: var(--text-2);
   background: var(--surface-2);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
-/* --ember-deep 而不是 --ember：白字压 #b85c2c 只有 4.1:1，压 #98481f 才到 6.3:1，
-   深色主题下 ink 会翻成近黑，压在浅橙上同样是 6:1 以上。 */
+/* 实心用 --ember-deep（深陶土），字用 --ember-deep-ink（白）——不能拿 --ember-ink，
+   那是给亮陶土块配的近黑墨，压到深陶土上只剩 1.4:1。两个方向都算过：亮主题 6.5:1，
+   深色主题下 --ember-deep 反成浅桃、ink 跟着翻回近黑，仍然 7:1 以上。 */
 .board__count--soon {
-  color: var(--ember-ink);
+  color: var(--ember-deep-ink);
   background: var(--ember-deep);
 }
 .board__go {
@@ -893,7 +896,7 @@ onMounted(() => {
   min-height: 168px;
   color: var(--text-2);
   background: transparent;
-  border: 2px dashed var(--border-strong);
+  border: 2px dashed var(--hairline);
   border-radius: var(--radius);
   transition:
     color var(--dur) var(--ease-out),
@@ -944,7 +947,7 @@ onMounted(() => {
   font-weight: 600;
   background: var(--accent);
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   box-shadow: var(--shadow-lg);
   transition:
     background var(--dur-fast) var(--ease-out),
@@ -955,22 +958,6 @@ onMounted(() => {
 }
 .fab:active {
   transform: scale(0.97);
-}
-
-/* 动作回执：贴在 FAB 左边，不抢焦点也不挡内容。 */
-.home__say {
-  position: fixed;
-  bottom: 28px;
-  left: 22px;
-  z-index: var(--z-toast);
-  max-width: 46ch;
-  padding: 7px 12px;
-  color: var(--text);
-  background: var(--ok-soft);
-  border: 1px solid var(--ok-border);
-  border-radius: 999px;
-  box-shadow: var(--shadow-md);
-  animation: rise-in var(--dur-slow) var(--ease-out) backwards;
 }
 
 @media (max-width: 1000px) {

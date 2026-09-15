@@ -16,6 +16,8 @@ import {
   Check,
 } from '@/components/icons'
 import { getClientId } from '@/composables/useClientIdentity'
+import { useCopy } from '@/composables/useCopy'
+import { useDialogStore } from '@/stores/dialog'
 import { useTripStore } from '@/stores/trip'
 import type { Expense } from '@/types/domain'
 import {
@@ -33,6 +35,8 @@ import {
 } from '@/utils/money'
 
 const store = useTripStore()
+const dialog = useDialogStore()
+const copy = useCopy()
 
 const CATEGORY_ICONS = {
   transport: TrainFront,
@@ -109,25 +113,58 @@ function submit() {
   amount.value = ''
 }
 
-function editAmount(expense: Expense) {
-  const text = window.prompt('修改金额（元）：', (expense.amount_cents / 100).toString())
+/** 原生框时代最坑的一处：读不懂就悄悄不记，用户以为改好了。所以校验前移到输入框里。 */
+function moneyError(label: string, raw: string): string | null {
+  if (parseMoneyToCents(raw) !== null) return null
+  // 「0」不是看不懂，是不能要——两种情况的话得分开说。
+  const asNumber = Number((raw ?? '').replace(/[,，\s￥¥元]/g, ''))
+  if (raw.trim() && Number.isFinite(asNumber) && asNumber <= 0) {
+    return `${label}要大于 0`
+  }
+  return `${label}无法识别，请输入像 128 或 128.50 这样的数字`
+}
+
+async function editAmount(expense: Expense) {
+  const text = await dialog.prompt({
+    title: '修改金额',
+    value: (expense.amount_cents / 100).toString(),
+    inputMode: 'decimal',
+    unit: '元',
+    confirmLabel: '保存',
+    validate: (raw) => moneyError('金额', raw),
+  })
   if (text === null) return
   const cents = parseMoneyToCents(text)
   if (cents === null || cents === expense.amount_cents) return
   store.updateExpense(expense.id, { amount_cents: cents })
 }
 
-function editTitle(expense: Expense) {
-  const text = window.prompt('修改费用名称：', expense.title)
+async function editTitle(expense: Expense) {
+  const text = await dialog.prompt({
+    title: '修改费用名称',
+    value: expense.title,
+    confirmLabel: '保存',
+    emptyMessage: '费用名称不能为空',
+  })
   if (text === null) return
   const trimmed = text.trim()
-  if (!trimmed || trimmed === expense.title) return
+  if (trimmed === expense.title) return
   store.updateExpense(expense.id, { title: trimmed })
 }
 
-function setBudget() {
+async function setBudget() {
   const current = budget.value ? (budget.value / 100).toString() : ''
-  const text = window.prompt('请输入预算金额（元），留空表示不设置预算：', current)
+  const text = await dialog.prompt({
+    title: '设置预算',
+    message: '留空表示不设置预算。',
+    value: current,
+    placeholder: '例如 3000',
+    inputMode: 'decimal',
+    unit: '元',
+    required: false,
+    confirmLabel: '保存',
+    validate: (raw) => (raw.trim() ? moneyError('预算金额', raw) : null),
+  })
   if (text === null) return
   const cents = text.trim() ? parseMoneyToCents(text) : 0
   if (cents === null || cents === budget.value) return
@@ -152,14 +189,25 @@ function settlementText(): string {
 }
 
 async function copySettlement() {
-  const text = settlementText()
-  try {
-    await navigator.clipboard.writeText(text)
-    copied.value = true
-    setTimeout(() => (copied.value = false), 1500)
-  } catch {
-    window.prompt('复制结算明细：', text)
-  }
+  const ok = await copy(settlementText(), {
+    receipt: '结算明细已复制，可直接贴进群聊',
+    fallbackTitle: '结算明细',
+  })
+  if (!ok) return
+  copied.value = true
+  setTimeout(() => (copied.value = false), 1500)
+}
+
+/** 删一笔账直接改的是 AA 的结算结果，得先问一句（S2 那把尺子）。
+ * 不走「删了再撤销」：重新记一笔会把付款人记成我自己，那才是把账改错。 */
+async function drop(expense: Expense) {
+  const ok = await dialog.confirm({
+    title: '删除这笔开销？',
+    message: `${expense.title} ${formatMoney(expense.amount_cents)} 将从账本移除，分摊与结算跟着变。`,
+    confirmLabel: '删除',
+    danger: true,
+  })
+  if (ok) store.removeExpense(expense.id)
 }
 </script>
 
@@ -266,7 +314,7 @@ async function copySettlement() {
         <button class="entry__sum mono" type="button" title="点击改金额" @click="editAmount(e)">
           {{ formatMoney(e.amount_cents) }}
         </button>
-        <button class="iconbtn entry__drop" type="button" title="删除这笔记录" @click="store.removeExpense(e.id)">
+        <button class="iconbtn entry__drop" type="button" title="删除这笔记录" @click="void drop(e)">
           <Trash2 class="ic" :size="14" />
         </button>
       </li>
@@ -340,14 +388,14 @@ async function copySettlement() {
   height: 4px;
   overflow: hidden;
   background: var(--surface-3);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .exp__bar i {
   display: block;
   height: 100%;
-  background: var(--ember);
-  border-radius: 999px;
+  background: var(--ember-deep);
+  border-radius: var(--radius-pill);
   transition: width var(--dur-slow) var(--ease-out);
 }
 
@@ -378,7 +426,7 @@ async function copySettlement() {
   font-size: 12px;
   color: var(--text-2);
   background: var(--surface-2);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .exp__cat b {
@@ -396,12 +444,15 @@ async function copySettlement() {
   flex: 0 0 84px;
   align-items: center;
   background: var(--surface);
-  border: 1px solid var(--border-strong);
+  border: 1.5px solid var(--ink);
   border-radius: var(--radius-sm);
+  box-shadow: var(--edge);
 }
 
+/* 焦点归 accent，不归 ember：陶土一律不承担「可交互」的暗示，否则两个强调色抢同一层注意力。 */
 .exp__amount:focus-within {
-  border-color: var(--ember);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--edge);
 }
 
 .exp__yuan {
@@ -453,14 +504,14 @@ async function copySettlement() {
 
 .chip {
   display: inline-flex;
-  gap: 4px;
+  gap: var(--s1);
   align-items: center;
   padding: 3px 9px;
-  font-size: 12px;
+  font-size: var(--t-meta);
   color: var(--text-2);
   background: var(--surface-2);
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   cursor: pointer;
   transition:
     background var(--dur-fast) var(--ease-out),
@@ -471,14 +522,23 @@ async function copySettlement() {
   background: var(--surface-3);
 }
 
+/* 选中态归 accent，不归 ember：陶土是「费用/氛围」的颜色，不上可点控件。
+   分类自己的色相走 ramp 小圆点，和「这一个被选中了」分开说两件事。 */
 .chip--on {
-  color: var(--ember-deep);
-  background: var(--ember-soft);
-  border-color: var(--ember);
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 
 .chip--person {
   padding: 2px 8px;
+}
+
+/* 手机上这些 chip 是「谁来摊」的唯一开关，26px 高的落点按不准（O6）。 */
+@media (max-width: 860px) {
+  .chip {
+    min-height: 30px;
+  }
 }
 
 .exp__list {
@@ -548,7 +608,7 @@ async function copySettlement() {
 }
 
 .entry__sum:hover {
-  border-color: var(--border-strong);
+  border-color: var(--accent);
 }
 
 .entry__drop {

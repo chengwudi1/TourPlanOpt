@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AmapKeyCheck from '@/components/AmapKeyCheck.vue'
+import AssistantPanel from '@/components/AssistantPanel.vue'
 import ChecklistPanel from '@/components/ChecklistPanel.vue'
 import DaySection from '@/components/DaySection.vue'
 import ExpensePanel from '@/components/ExpensePanel.vue'
 import JoinGate from '@/components/JoinGate.vue'
 import MapPanel from '@/components/MapPanel.vue'
+import OpTicker from '@/components/OpTicker.vue'
 import PlaceSearch from '@/components/PlaceSearch.vue'
 import StashPanel from '@/components/StashPanel.vue'
+import Sprite from '@/components/Sprite.vue'
 import RecommendPanel from '@/components/RecommendPanel.vue'
 import TripHeader from '@/components/TripHeader.vue'
 import {
@@ -29,12 +32,16 @@ import {
   Search,
 } from '@/components/icons'
 import { getClientId, setClientName } from '@/composables/useClientIdentity'
+import { useCopy } from '@/composables/useCopy'
 import { recordRecentTrip } from '@/composables/useRecentTrips'
 import { useAuthStore } from '@/stores/auth'
+import { useDialogStore } from '@/stores/dialog'
+import { useFeedbackStore } from '@/stores/feedback'
 import { useSocketStore } from '@/stores/socket'
 import { useTripStore } from '@/stores/trip'
 import type { Place, Poi } from '@/types/domain'
 import { apiFetch } from '@/utils/api'
+import { anchorMenu, type MenuPosition } from '@/utils/anchorMenu'
 import { formatMoney } from '@/utils/money'
 import { formatMin } from '@/utils/time'
 
@@ -43,6 +50,9 @@ const props = defineProps<{ tripId: string }>()
 const store = useTripStore()
 const socket = useSocketStore()
 const auth = useAuthStore()
+const feedback = useFeedbackStore()
+const dialog = useDialogStore()
+const copy = useCopy()
 
 /** Per-tab: sessionStorage identity means a reload keeps your name, a new tab asks
  * again -- exactly the granularity the collaboration semantics need. */
@@ -81,6 +91,38 @@ watch(
   () => route.query.pane,
   (v) => {
     pane.value = readPane(v)
+  },
+)
+
+/**
+ * dock 的「行程 / 地图」是**行程这一页**的两个视图。清单或费用开着时按下去只改
+ * `mobileView` 是看不见的——屏幕上什么都不动（O9 里最伤的一条表现）。所以换视图
+ * 顺带把人带回行程页。
+ */
+function showMobileView(view: 'list' | 'map') {
+  mobileView.value = view
+  pane.value = 'trip'
+}
+
+// -- 写入失败的反馈（M26a）----------------------------------------------------------------
+// `store.opError` 仍是唯一真相（助手那侧靠它判断 optimize 有没有失败），这里只换呈现方式。
+// 旧做法是渲染在 `.panel__scroll` 最顶部：用户滚到第 3 天添加地点被拒时，消息落在视口外，
+// 屏幕上什么都没发生、只是刚加的那行自己消失了，而且它既不超时也没关闭按钮。
+let opErrorToast: number | null = null
+watch(
+  () => store.opError,
+  (err) => {
+    // 清空不当作关闭信号：`applyRemoteOp` 对**每一条**远端广播都会把 opError 置 null，
+    // 两个人的会话里别人一动，我刚要看的那条红色告警就没了——那正是 M26a 要修的病。
+    // 回执的寿命交给它自己的计时器（danger 9 秒），只有下一条错误才顶掉上一条。
+    if (!err) return
+    if (opErrorToast !== null) feedback.dismiss(opErrorToast)
+    // 连着一串拒绝时只留最新一枚，不然屏幕会被同一条消息糊满。
+    opErrorToast = feedback.show({
+      kind: err.level,
+      message: err.message,
+      hint: err.hint,
+    })
   },
 )
 
@@ -140,14 +182,26 @@ function initExpand() {
   expandedIds.value = next
 }
 
-function removeDay(dayId: string) {
-  if (window.confirm('确认删除该空白天？')) store.deleteDay(dayId)
+async function removeDay(dayId: string) {
+  const ok = await dialog.confirm({
+    title: '删除这空白的一天？',
+    message: '这一天尚未安排地点，删除后将从行程中去掉，同伴的视图同步变化。',
+    confirmLabel: '删除',
+    danger: true,
+  })
+  if (ok) store.deleteDay(dayId)
 }
 
-function renameDay(dayId: string) {
+async function renameDay(dayId: string) {
   const day = store.days.find((d) => d.id === dayId)
   if (!day) return
-  const name = window.prompt('请输入当天名称，留空恢复默认：', day.title)
+  const name = await dialog.prompt({
+    title: '当天名称',
+    message: `留空则恢复为默认的「第 ${day.day_index + 1} 天」。`,
+    value: day.title,
+    required: false,
+    confirmLabel: '保存',
+  })
   if (name === null) return
   store.updateDay(dayId, { title: name.trim() })
 }
@@ -163,14 +217,26 @@ function startFromDiscover() {
   recoEl.value?.show()
 }
 
-function setTripCity() {
-  const city = window.prompt('请输入目的地城市（推荐与搜索范围依据该城市）：', store.trip?.city ?? '')
+async function setTripCity() {
+  const city = await dialog.prompt({
+    title: '目的地城市',
+    message: '推荐与搜索的范围以该城市为准，留空则按已选地点自行判断。',
+    value: store.trip?.city ?? '',
+    placeholder: '例如 大理',
+    required: false,
+    confirmLabel: '保存',
+  })
   if (city === null) return
   store.updateTripFields({ city: city.trim() })
 }
 
-function renameTrip(current: string) {
-  const name = window.prompt('行程名称：', current)
+async function renameTrip(current: string) {
+  const name = await dialog.prompt({
+    title: '行程名称',
+    value: current,
+    confirmLabel: '保存',
+    emptyMessage: '请输入行程名称',
+  })
   if (name === null) return
   store.updateTripFields({ title: name.trim() })
 }
@@ -180,13 +246,13 @@ const copied = ref(false)
 
 async function copyShareLink() {
   const url = `${window.location.origin}/trip/${props.tripId}`
-  try {
-    await navigator.clipboard.writeText(url)
-    copied.value = true
-    setTimeout(() => (copied.value = false), 1500)
-  } catch {
-    window.prompt('请复制以下分享链接：', url)
-  }
+  const ok = await copy(url, {
+    receipt: '分享链接已复制，同行者打开即可共同编辑',
+    fallbackTitle: '分享链接',
+  })
+  if (!ok) return
+  copied.value = true
+  setTimeout(() => (copied.value = false), 1500)
 }
 
 async function copyTextItinerary() {
@@ -205,13 +271,13 @@ async function copyTextItinerary() {
     }
   }
   const text = lines.join('\n')
-  try {
-    await navigator.clipboard.writeText(text)
-    copied.value = true
-    setTimeout(() => (copied.value = false), 1500)
-  } catch {
-    window.prompt('复制文字版行程：', text)
-  }
+  const ok = await copy(text, {
+    receipt: '文字版行程已复制，可直接贴进群聊',
+    fallbackTitle: '文字版行程',
+  })
+  if (!ok) return
+  copied.value = true
+  setTimeout(() => (copied.value = false), 1500)
 }
 
 function onJoin() {
@@ -356,19 +422,31 @@ function stashMapPick() {
 
 /** 卡片操作菜单（右键/长按/⋯呼出）。 */
 const cardMenu = ref<{ place: Place; x: number; y: number } | null>(null)
+const cardMenuEl = ref<HTMLElement | null>(null)
+const cardMenuPos = ref<MenuPosition>({ left: 0, top: 0 })
+
+/**
+ * 打开卡片菜单：先按点击处摆出来，挂载之后再量真实尺寸夹进视口（O5）。
+ *
+ * 原来写的是 `innerHeight - 150`——一个凭空的估计。菜单高度随行程天数长：七天行程有
+ * 六行「移到 D×」再加固定项，约 300px，被裁掉的恰好是最常用的那几行。
+ */
+function openCardMenu(place: Place, pos: { x: number; y: number }) {
+  cardMenuPos.value = { left: pos.x, top: pos.y }
+  cardMenu.value = { place, ...pos }
+  void nextTick(() => {
+    if (cardMenuEl.value) {
+      cardMenuPos.value = anchorMenu(
+        { left: pos.x, right: pos.x, top: pos.y, bottom: pos.y },
+        cardMenuEl.value,
+      )
+    }
+  })
+}
 
 function closeCardMenu() {
   cardMenu.value = null
 }
-
-/** 菜单贴边夹紧：不让它被视口裁掉。 */
-const cardMenuPos = computed(() => {
-  if (!cardMenu.value) return {}
-  return {
-    left: `${Math.min(cardMenu.value.x, window.innerWidth - 190)}px`,
-    top: `${Math.min(cardMenu.value.y, window.innerHeight - 150)}px`,
-  }
-})
 
 /** 菜单里地点所在的天：卡片可以在非选中的天上，起点/终点只能落在它自己那一天。 */
 const menuDay = computed(() => {
@@ -386,12 +464,10 @@ const cardMenuOtherDays = computed(() => {
 
 async function copyAddress(place: Place) {
   closeCardMenu()
-  try {
-    await navigator.clipboard.writeText(place.address || `${place.lng}, ${place.lat}`)
-    store.opError = null
-  } catch {
-    window.prompt('复制地址：', place.address || `${place.lng}, ${place.lat}`)
-  }
+  await copy(place.address || `${place.lng}, ${place.lat}`, {
+    receipt: '地址已复制，可直接贴进地图或群聊',
+    fallbackTitle: '地点地址',
+  })
 }
 
 function closeCardMenuOnClick(e: MouseEvent) {
@@ -485,6 +561,7 @@ if (import.meta.env.DEV) {
             </span>
           </button>
         </nav>
+        <OpTicker />
         <div class="panel__scroll panel__content">
           <div v-if="store.loading" class="skeletongroup" aria-label="正在加载行程">
             <div class="skeleton" style="height: 30px" />
@@ -495,13 +572,6 @@ if (import.meta.env.DEV) {
           </div>
 
           <template v-else-if="store.trip">
-            <div v-if="store.opError" class="banner banner--warn">
-              <div class="banner__body">
-                <div class="banner__title">{{ store.opError.message }}</div>
-                <div v-if="store.opError.hint" class="banner__hint tiny">{{ store.opError.hint }}</div>
-              </div>
-            </div>
-
             <!-- v-show 不用 v-if：发现面板的缓存按 key 存在组件里，卸载一次就白烧一次配额。 -->
             <PlaceSearch
               v-show="pane === 'trip'"
@@ -532,7 +602,7 @@ if (import.meta.env.DEV) {
                 @toggle="toggleDay(day.id)"
                 @rename="renameDay(day.id)"
                 @remove="removeDay(day.id)"
-                @menu="(p, pos) => (cardMenu = { place: p, ...pos })"
+                @menu="openCardMenu"
               />
               <div class="daylist__foot">
                 <button class="btn btn--sm btn--ghost" type="button" @click="store.addDay()">
@@ -604,17 +674,17 @@ if (import.meta.env.DEV) {
     <nav class="mobile-switch" aria-label="切换视图">
       <button
         class="mobile-switch__btn"
-        :class="{ 'mobile-switch__btn--on': mobileView === 'list' }"
+        :class="{ 'mobile-switch__btn--on': pane === 'trip' && mobileView === 'list' }"
         type="button"
-        @click="mobileView = 'list'"
+        @click="showMobileView('list')"
       >
         <List class="ic" :size="15" /> 行程
       </button>
       <button
         class="mobile-switch__btn"
-        :class="{ 'mobile-switch__btn--on': mobileView === 'map' }"
+        :class="{ 'mobile-switch__btn--on': pane === 'trip' && mobileView === 'map' }"
         type="button"
-        @click="mobileView = 'map'"
+        @click="showMobileView('map')"
       >
         <MapIcon class="ic" :size="15" /> 地图
       </button>
@@ -622,10 +692,16 @@ if (import.meta.env.DEV) {
 
     <JoinGate v-if="!joined" @join="onJoin" />
 
+    <template v-if="joined">
+      <Sprite />
+      <AssistantPanel />
+    </template>
+
     <div
       v-if="cardMenu"
+      ref="cardMenuEl"
       class="cardmenu card"
-      :style="cardMenuPos"
+      :style="{ left: `${cardMenuPos.left}px`, top: `${cardMenuPos.top}px` }"
     >
       <button
         v-if="cardMenu.place.address"
@@ -768,7 +844,7 @@ if (import.meta.env.DEV) {
   padding: 8px 10px;
   font-size: 14px;
   background: var(--surface-2);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--ink);
   border-radius: var(--radius-sm);
 }
 
@@ -855,7 +931,7 @@ if (import.meta.env.DEV) {
   padding: 1px 6px;
   color: var(--text-2);
   background: var(--surface-3);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .panebar__btn--on .panebar__n {
@@ -873,9 +949,10 @@ if (import.meta.env.DEV) {
   padding: 14px 12px 24px;
 }
 
-/* 文档页铺页面底色：面板卡靠底色差浮出来，而不是贴边铺满。 */
+/* 文档页铺页面底色：面板卡靠底色差浮出来，而不是贴边铺满。
+   与 body 共用同一张顶光屏底，这两页才不像另一个系统的附表。 */
 .shell__body.doc-open .panel {
-  background: var(--bg);
+  background: var(--page-art);
 }
 
 .page__lead {

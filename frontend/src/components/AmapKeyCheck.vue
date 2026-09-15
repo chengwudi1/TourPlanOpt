@@ -1,95 +1,46 @@
 <script setup lang="ts">
 /**
- * The M1 diagnostic banner. Built once, kept forever.
+ * 高德 Key 的诊断面板（M1 建的，M26d 收敛）。
  *
- * It renders BOTH halves of the key check, because the backend cannot validate a
- * JS API key (that is checked in-browser against a domain whitelist) and the
- * browser cannot validate the Web服务 key (it never sees it).
+ * 状态不在这里，在 `composables/useAmapHealth.ts`：健康时这个组件一个字都不渲染，
+ * 健康度由顶栏那颗小点代劳，面板只在「有问题且没被忽略」或用户主动展开时出现。
+ *
+ * 两半都要报：后端只能验 Web服务 Key（那个 Key 从不出现在前端），浏览器只能验 JS Key
+ * （域名白名单在浏览器侧才生效）。
  */
-import { computed, onMounted, ref } from 'vue'
+import { onMounted } from 'vue'
 
-import { ShieldCheck } from '@/components/icons'
-import { ensureAmap, useAmap } from '@/composables/useAmap'
+import { useAmapHealth } from '@/composables/useAmapHealth'
 
-interface KeyCheck {
-  name: string
-  ok: boolean
-  present: boolean
-  detail: string
-  hint: string
-  infocode?: string
-  latency_ms?: number
-}
-
-const { status, diagnostics } = useAmap()
-
-const backendLoading = ref(true)
-const backendError = ref('')
-const webKey = ref<KeyCheck | null>(null)
-const jsKey = ref<KeyCheck | null>(null)
-
-const dismissed = ref(false)
-const expanded = ref(false)
-
-// The backend already reports "AMAP_JS_KEY is not configured". Suppressing the
-// browser's duplicate of that same diagnosis keeps the panel to one line per
-// real problem, while still surfacing what only the browser can detect: load
-// failures, INVALID_USER_SCODE, and the domain-whitelist warning.
-const frontendDiagnostics = computed(() => {
-  const backendCoveredMissingKey = jsKey.value !== null && !jsKey.value.present
-  return diagnostics.value.filter(
-    (d) => !(backendCoveredMissingKey && d.title.includes('AMAP_JS_KEY'))
-  )
-})
-
-async function checkBackend() {
-  backendLoading.value = true
-  backendError.value = ''
-  try {
-    // Costs exactly one Amap call, so this is on-demand only — never on a timer.
-    const res = await fetch('/api/amap/health')
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
-    webKey.value = data.web_key
-    jsKey.value = data.js_key
-  } catch (err) {
-    backendError.value = `${err}（后端没起来？在 backend/ 下运行 uv run uvicorn app.main:app --reload）`
-  } finally {
-    backendLoading.value = false
-  }
-}
-
-async function recheckAll() {
-  dismissed.value = false
-  expanded.value = true
-  await Promise.all([checkBackend(), ensureAmap().catch(() => undefined)])
-}
+const {
+  health,
+  showPanel,
+  expanded,
+  loading,
+  backendError,
+  webKey,
+  jsKey,
+  frontendDiagnostics,
+  status,
+  probe,
+  toggle,
+  dismiss,
+} = useAmapHealth()
 
 onMounted(() => {
-  void checkBackend()
-  void ensureAmap().catch(() => undefined)
+  // 一个会话只探一次：去重在那个 composable 里，这里每次挂载都会调用。
+  void probe()
 })
 
-const allGood = () =>
-  !backendLoading.value &&
-  !backendError.value &&
-  webKey.value?.ok === true &&
-  jsKey.value?.ok === true &&
-  status.value === 'ready' &&
-  frontendDiagnostics.value.every((d) => d.level !== 'danger')
+async function recheck() {
+  expanded.value = true
+  await probe(true)
+}
 </script>
 
 <template>
-  <div v-if="!dismissed" class="keycheck" :class="{ 'keycheck--quiet': allGood() && !expanded }">
-    <!-- 自检通过时只留一行：这块诊断是给「出问题了」看的，正常状态不该占走首屏。 -->
-    <div v-if="allGood() && !expanded" class="keycheck__quiet">
-      <ShieldCheck class="ic keycheck__ok-icon" :size="14" />
-      <span>高德 Key 已就绪</span>
-      <span class="tiny muted">Web服务 {{ webKey?.latency_ms }}ms · JS API {{ status }}</span>
-      <button class="btn btn--sm btn--ghost" type="button" @click="expanded = true">详情</button>
-    </div>
-
-    <div v-else-if="allGood()" class="banner banner--ok">
+  <div v-if="showPanel" class="keycheck" :class="{ 'keycheck--quiet': health === 'good' }">
+    <div v-if="health === 'good'" class="banner banner--ok">
       <span class="dot dot--ok" />
       <div class="banner__body">
         <div class="banner__title">高德 Key 自检通过</div>
@@ -97,12 +48,7 @@ const allGood = () =>
           Web服务 Key 探活 {{ webKey?.latency_ms }}ms · JS API {{ status }}
         </div>
       </div>
-      <button class="btn btn--sm btn--ghost" type="button" @click="expanded = false">
-        收起详情
-      </button>
-      <button class="btn btn--sm btn--ghost" type="button" @click="dismissed = true">
-        不再显示
-      </button>
+      <button class="btn btn--sm btn--ghost" type="button" @click="toggle">收起</button>
     </div>
 
     <template v-else>
@@ -169,14 +115,14 @@ const allGood = () =>
         </div>
       </div>
 
-      <div v-if="backendLoading" class="banner banner--warn">
+      <div v-if="loading" class="banner banner--warn">
         <div class="banner__body">
           <div class="banner__title">正在检查高德 Key…</div>
         </div>
       </div>
 
       <div class="keycheck__actions">
-        <button class="btn btn--sm" type="button" :disabled="backendLoading" @click="recheckAll">
+        <button class="btn btn--sm" type="button" :disabled="loading" @click="recheck">
           重新检查
         </button>
         <a
@@ -188,10 +134,10 @@ const allGood = () =>
           去高德控制台
         </a>
         <button
-          v-if="!backendLoading"
+          v-if="!loading"
           class="btn btn--sm btn--ghost"
           type="button"
-          @click="dismissed = true"
+          @click="dismiss"
         >
           先不管，继续
         </button>
@@ -217,26 +163,11 @@ const allGood = () =>
   border-bottom: 1px solid var(--border);
 }
 
+/* 健康时的展开只是「看一眼数」，不该抢走问题现场的视觉权重。 */
 .keycheck--quiet {
   padding: 6px 16px;
   background: var(--surface);
   border-bottom: 1px solid var(--border-faint);
-}
-
-.keycheck__quiet {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  font-size: 12px;
-  color: var(--text-2);
-}
-
-.keycheck__ok-icon {
-  color: var(--ok);
-}
-
-.keycheck__quiet .btn--ghost {
-  margin-left: auto;
 }
 
 .keycheck__actions {

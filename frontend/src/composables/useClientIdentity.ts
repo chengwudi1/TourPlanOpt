@@ -61,22 +61,29 @@ export function useClientIdentity(): ClientIdentity {
   return { client_id: getClientId(), name: getClientName() }
 }
 
-/** Participant colours, assigned round-robin so two people rarely collide. */
-const PALETTE = [
-  '#2f6feb', // blue
-  '#d64545', // red
-  '#1f9d55', // green
-  '#b7791f', // amber
-  '#7c3aed', // violet
-  '#0e7490', // teal
-  '#db2777', // pink
-  '#4d7c0f', // olive
-]
+/** Participant colours come from the `--warp-*` tokens in main.css, not a second
+ *  hardcoded list -- the previous one drifted, and still carried a `#2f6feb` the
+ *  audit had already retired. Resolved lazily because map markers and the share-card
+ *  canvas both need a real hex string. Those eight tokens are identity colours and
+ *  are deliberately not overridden in the dark theme, so this cache cannot go stale. */
+const WARP_SLOTS = 8
+let warpCache: string[] | null = null
+
+function warpPalette(): string[] {
+  if (!warpCache) {
+    const cs = getComputedStyle(document.documentElement)
+    warpCache = Array.from({ length: WARP_SLOTS }, (_, i) =>
+      cs.getPropertyValue(`--warp-${i + 1}`).trim(),
+    )
+  }
+  return warpCache
+}
 
 export function colorForClient(clientId: string): string {
   let hash = 0
   for (let i = 0; i < clientId.length; i += 1) {
     hash = (hash * 31 + clientId.charCodeAt(i)) >>> 0
   }
-  return PALETTE[hash % PALETTE.length]
+  const palette = warpPalette()
+  return palette[hash % palette.length]
 }

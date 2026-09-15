@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import { Moon } from '@/components/icons'
+import { useNow } from '@/composables/useNow'
 import { formatMin, MIN_PER_DAY } from '@/utils/time'
 
 /**
@@ -293,6 +294,20 @@ const arriveTick = computed(() => {
   return pct(g)
 })
 
+/** 「现在」游标：真读墙上时间，每 20s 走一次。轨道窗口只有几个小时，一分钟才值半像素，
+ *  秒级刷新是白烧定时器。 */
+const now = useNow(20_000)
+/** 轨道可以越过次日 00:00：夜里这一趟的「现在」既可能是今天的读数，也要试 +1440 那个。
+ *  两个都不在窗口里就不画——一根指错位置的针比没有针更糟。 */
+const nowTick = computed(() => {
+  const { lo, hi } = win.value
+  const d = new Date(now.value)
+  const base = d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60
+  const hit = [base, base + MIN_PER_DAY].find((m) => m >= lo && m <= hi)
+  if (hit === undefined) return null
+  return { left: pct(hit), label: formatMin(Math.floor(hit)) }
+})
+
 const bubble = computed(() => dragging.value || hovered.value || focused.value)
 </script>
 
@@ -344,6 +359,13 @@ const bubble = computed(() => dragging.value || hovered.value || focused.value)
         class="rail__mark"
         :style="{ left: `${pct(m.min)}%` }"
         :title="`${m.name} · ${formatMin(m.min)}`"
+      />
+      <span
+        v-if="nowTick"
+        class="rail__now"
+        :style="{ left: `${nowTick.left}%` }"
+        :title="`现在 ${nowTick.label}`"
+        aria-hidden="true"
       />
       <button
         class="rail__knob"
@@ -403,7 +425,7 @@ const bubble = computed(() => dragging.value || hovered.value || focused.value)
   position: relative;
   height: 6px;
   background: var(--surface-2);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   box-shadow: inset 0 0 0 1px var(--border);
   cursor: grab;
   touch-action: none;
@@ -430,7 +452,7 @@ const bubble = computed(() => dragging.value || hovered.value || focused.value)
   position: absolute;
   inset-block: 0;
   background: var(--surface-3);
-  border-radius: 0 999px 999px 0;
+  border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
 }
 
 .rail__mid {
@@ -449,7 +471,7 @@ const bubble = computed(() => dragging.value || hovered.value || focused.value)
   width: 1px;
   height: 16px;
   content: "";
-  background: var(--border-strong);
+  background: var(--hairline);
 }
 
 .rail__ticks {
@@ -462,7 +484,7 @@ const bubble = computed(() => dragging.value || hovered.value || focused.value)
   bottom: -4px;
   width: 1px;
   height: 3px;
-  background: var(--border-strong);
+  background: var(--hairline);
   transform: translateX(-50%);
 }
 
@@ -476,7 +498,7 @@ const bubble = computed(() => dragging.value || hovered.value || focused.value)
   top: 0;
   bottom: 0;
   background: var(--accent-soft);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .rail__gap--early {
@@ -504,6 +526,38 @@ const bubble = computed(() => dragging.value || hovered.value || focused.value)
   border: 1.5px solid var(--text-faint);
   border-radius: 50%;
   transform: translate(-50%, -50%);
+}
+
+/* 「现在」是一根 ambient 的针，不是控件：用 --ember 而不是 --accent，accent 只发给可点的东西。
+   到达标也是 2px 竖线，所以这里靠顶端那颗呼吸的圆点区分——它在说这一根是活的。 */
+.rail__now {
+  position: absolute;
+  top: -7px;
+  bottom: -7px;
+  width: 2px;
+  background: var(--ember);
+  border-radius: 2px;
+  opacity: 0.7;
+  transform: translateX(-50%);
+}
+
+.rail__now::before {
+  position: absolute;
+  top: -2px;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  content: "";
+  background: var(--ember);
+  border-radius: 50%;
+  transform: translateX(-50%);
+  animation: now-breathe 2.6s var(--ease-inout) infinite;
+}
+
+@keyframes now-breathe {
+  50% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ember) 26%, transparent);
+  }
 }
 
 .rail__knob {

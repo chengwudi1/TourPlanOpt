@@ -3,11 +3,10 @@ import { createApp } from 'vue'
 
 import App from './App.vue'
 import { router } from './router'
-// Poppins 只带拉丁与数字（中文走系统栈），按需引 4 个字重，不拉无关子集。
-import '@fontsource/poppins/latin-400.css'
-import '@fontsource/poppins/latin-500.css'
-import '@fontsource/poppins/latin-600.css'
-import '@fontsource/poppins/latin-700.css'
+// 拉丁与数字走本地打包的 variable 字体，中文仍用系统栈。
+// wght.css 声明了全部子集，但 unicode-range 决定浏览器只下 latin 那一个文件。
+import '@fontsource-variable/manrope/wght.css'
+import '@fontsource-variable/bricolage-grotesque/wght.css'
 import './styles/main.css'
 
 createApp(App).use(createPinia()).use(router).mount('#app')

@@ -525,7 +525,7 @@ defineExpose({ show: () => (open.value = true) })
   color: var(--text-2);
   background: var(--surface-2);
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .reco__tab--on {
@@ -631,7 +631,7 @@ defineExpose({ show: () => (open.value = true) })
   height: 4px;
   content: '';
   background: var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   transition: background var(--dur-fast) var(--ease-out);
 }
 

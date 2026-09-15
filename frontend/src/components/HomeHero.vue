@@ -2,9 +2,11 @@
 import { computed } from 'vue'
 
 import { CalendarDays, CheckCheck, ChevronRight, ListChecks, MapPin, Sparkles, Users, Wallet } from '@/components/icons'
+import { useCountUp } from '@/composables/useCountUp'
+import { useNow } from '@/composables/useNow'
 import type { TripSummary } from '@/types/domain'
 import { formatMoney } from '@/utils/money'
-import { formatDateRange, countdownOf, needsWrapUp, phaseOf, readinessHints } from '@/utils/tripstatus'
+import { formatDateRange, countdownOf, needsWrapUp, parseDateOnly, phaseOf, readinessHints } from '@/utils/tripstatus'
 import { formatAgo } from '@/utils/time'
 
 /**
@@ -27,11 +29,44 @@ const money = computed(() => {
   if (!t.budget_cents) return t.spent_cents ? `已花 ${formatMoney(t.spent_cents)}` : '未设预算'
   return `${formatMoney(t.spent_cents)} / ${formatMoney(t.budget_cents)}`
 })
-const checklistText = computed(() => (props.trip.checklist_total ? `${props.trip.checklist_done}/${props.trip.checklist_total}` : '—'))
 const ago = computed(() => {
   const built = formatAgo(props.trip.created_at)
   return built ? `建于 ${built}，最近编辑 ${formatAgo(props.trip.updated_at)}` : `最近编辑 ${formatAgo(props.trip.updated_at)}`
 })
+
+// -- 活起来（M26）----------------------------------------------------------------------
+// 数字滚动只在挂载这一次有意义，所以 useCountUp 的底数是 0；之后别人改了数，
+// 它从当前读数接着走，不会每次都从头滚一遍。
+
+const companions = useCountUp(() => props.trip.companion_count)
+const dayNum = useCountUp(() => props.trip.day_count)
+const placeNum = useCountUp(() => props.trip.place_count)
+const checklistDone = useCountUp(() => props.trip.checklist_done)
+const checklistTotal = useCountUp(() => props.trip.checklist_total)
+
+const checklistText = computed(() =>
+  props.trip.checklist_total ? `${checklistDone.value}/${checklistTotal.value}` : '—',
+)
+
+const clock = useNow(1000)
+/** 出发胶囊：三天开外「N 天后出发」就够准，秒在那时只是噪声。进了三天就换成分秒递进——
+ *  首页唯一会自己动的数字，放在最该被盯着的那一格。 */
+const liveCountdown = computed(() => {
+  const cd = countdown.value
+  if (cd.phase !== 'upcoming' || cd.days === null || cd.days > 3) return ''
+  const start = parseDateOnly(props.trip.start_date)
+  if (!start) return ''
+  const left = Math.floor((start.getTime() - clock.value) / 1000)
+  if (left <= 0) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const d = Math.floor(left / 86400)
+  const rest = left - d * 86400
+  const hms = `${pad(Math.floor(rest / 3600))}:${pad(Math.floor(rest / 60) % 60)}:${pad(rest % 60)}`
+  return d ? `${d} 天 ${hms}` : hms
+})
+const statusText = computed(() =>
+  liveCountdown.value ? `距出发 ${liveCountdown.value}` : countdown.value.label,
+)
 </script>
 
 <template>
@@ -58,10 +93,10 @@ const ago = computed(() => {
       <div class="hero__top">
         <span class="hero__badge">{{ trip.city || '未设置城市' }}</span>
         <span
-          v-if="countdown.label"
+          v-if="statusText"
           class="hero__status tiny"
           :class="`hero__status--${countdown.tone}`"
-          >{{ countdown.label }}</span
+          >{{ statusText }}</span
         >
         <span v-else class="hero__status tiny">{{ trip.place_count ? '继续编辑' : '先丢一个地点' }}</span>
       </div>
@@ -80,17 +115,17 @@ const ago = computed(() => {
       <div class="hero__stats card">
         <div class="hero__stat">
           <span class="hero__stat-key tiny"><Users class="ic" :size="12" /> 旅伴</span>
-          <strong class="hero__stat-num">{{ trip.companion_count }}</strong>
+          <strong class="hero__stat-num">{{ companions }}</strong>
           <span class="hero__stat-unit tiny">{{ trip.companion_count === 1 ? '人' : '位参与者' }}</span>
         </div>
         <div class="hero__stat">
           <span class="hero__stat-key tiny"><CalendarDays class="ic" :size="12" /> 行程</span>
-          <strong class="hero__stat-num">{{ trip.day_count }}</strong>
+          <strong class="hero__stat-num">{{ dayNum }}</strong>
           <span class="hero__stat-unit tiny">天</span>
         </div>
         <div class="hero__stat">
           <span class="hero__stat-key tiny"><MapPin class="ic" :size="12" /> 地点</span>
-          <strong class="hero__stat-num">{{ trip.place_count }}</strong>
+          <strong class="hero__stat-num">{{ placeNum }}</strong>
           <span class="hero__stat-unit tiny">个</span>
         </div>
         <div class="hero__stat">
@@ -155,10 +190,10 @@ const ago = computed(() => {
 
 .hero__fallback {
   /* 本质是「假封面」：两种主题下都必须保持深色，因为上面压的是白字。所以这里故意不用
-     ember 令牌——--ember-deep 在深色态是浅橙 #e8a675（那是给正文反着用的一套），
-     拿它当底会让白字掉到 1.7:1。四档从深到亮，白字压在哪一档都在 4:1 以上。 */
-  color: #f8e8db;
-  background: linear-gradient(140deg, #8a4520, #98481f 42%, #b85c2c 78%, #cf7539);
+     accent/ok 令牌——它们在深色态是亮蓝和亮绿（那是给正文反着用的一套），
+     拿它们当底会让白字掉到 2:1。四档从深海到山苔，白字压在哪一档都在 6:1 以上。 */
+  color: #eef4f2;
+  background: linear-gradient(140deg, #06283c, #0a3f61 42%, #12615c 78%, #1f5c46);
 }
 .hero__fallback svg {
   width: 100%;
@@ -211,10 +246,10 @@ const ago = computed(() => {
   content: '';
   background: linear-gradient(
     180deg,
-    rgba(30, 20, 10, 0.44) 0%,
-    rgba(30, 20, 10, 0.52) 34%,
-    rgba(30, 20, 10, 0.7) 66%,
-    rgba(30, 20, 10, 0.82) 100%
+    rgba(11, 22, 26, 0.44) 0%,
+    rgba(11, 22, 26, 0.52) 34%,
+    rgba(11, 22, 26, 0.7) 66%,
+    rgba(11, 22, 26, 0.82) 100%
   );
 }
 
@@ -241,27 +276,27 @@ const ago = computed(() => {
   font-weight: 600;
   color: var(--ember-ink);
   background: var(--ember);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
-/* 小字不跟遮罩赌照片明暗：自带深棕底，压在雪景上也是 7:1 以上。 */
+/* 三档实心色走 --photo-*：那组令牌刻意不跟主题反色（照片在深色态也还是那张照片），
+   压在照片上的白字才不会掉到 2:1。 */
 .hero__status {
   padding: 3px 10px;
   margin-left: auto;
+  font-variant-numeric: tabular-nums;
   color: #fff;
-  background: rgba(24, 16, 9, 0.72);
-  border-radius: 999px;
+  background: var(--photo-scrim);
+  border-radius: var(--radius-pill);
 }
-/* 三档实心色全部写死深色，不用 --ember / --ok：那两个令牌在深色主题是浅橙和亮绿，
-   白字压上去只有 2.2–2.6:1。这颗胶囊压在照片上，必须和主题反着走。 */
 .hero__status--soon {
-  background: #8a4520;
+  background: var(--photo-soon);
 }
 .hero__status--live {
-  background: #136f3c;
+  background: var(--photo-live);
 }
 .hero__status--past {
-  background: rgba(24, 16, 9, 0.52);
+  background: rgba(12, 20, 19, 0.55);
 }
 
 .hero__title {
@@ -272,7 +307,7 @@ const ago = computed(() => {
   font-weight: 700;
   line-height: 1.12;
   color: #fff;
-  text-shadow: 0 1px 2px rgba(30, 20, 10, 0.45);
+  text-shadow: 0 1px 2px rgba(11, 22, 26, 0.45);
   text-wrap: balance;
 }
 
@@ -283,10 +318,10 @@ const ago = computed(() => {
   align-items: center;
   margin: 0;
   color: rgba(255, 255, 255, 0.86);
-  text-shadow: 0 1px 2px rgba(30, 20, 10, 0.4);
+  text-shadow: 0 1px 2px rgba(11, 22, 26, 0.4);
 }
 .hero__sub .ic {
-  color: #f0b98a;
+  color: #a9d3ee;
 }
 .hero__sub-dot {
   opacity: 0.6;
@@ -301,11 +336,11 @@ const ago = computed(() => {
   padding: 3px 9px;
   margin: 0;
   color: #fff;
-  background: rgba(138, 69, 32, 0.62);
-  border-radius: 999px;
+  background: rgba(10, 63, 97, 0.66);
+  border-radius: var(--radius-pill);
 }
 .hero__hints .ic {
-  color: #f6c79c;
+  color: #bcdff5;
 }
 
 .hero__stats {
@@ -331,7 +366,7 @@ const ago = computed(() => {
 
 /* 票券式虚线分隔：TREK 用它替代硬边框，压在奶油底上不会显脏。 */
 .hero__stat + .hero__stat {
-  border-left: 1px dashed var(--border-strong);
+  border-left: 1px dashed var(--hairline);
 }
 
 .hero__stat-key {
@@ -344,6 +379,7 @@ const ago = computed(() => {
 .hero__stat-num {
   font-size: 24px;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
   line-height: 1.1;
 }
 

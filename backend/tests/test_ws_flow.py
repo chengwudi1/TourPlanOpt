@@ -412,6 +412,19 @@ def test_day_delete_empty_day_ok_and_non_empty_rejected(client):
         assert [d["id"] for d in snap["days"]] == [day1]
         assert len(snap["places"]) == 1
 
+        # 清空之后它成了最后一天：拒绝的理由必须是「最后一天」，不是「有内容」。
+        ws.send_json(
+            protocol.op_frame(
+                protocol.Ops.PLACE_DELETE, "op-del-3", {"place_id": snap["places"][0]["id"]}
+            )
+        )
+        assert read_op(ws, "place_deleted")["type"] == "op"
+        ws.send_json(protocol.op_frame(protocol.Ops.DAY_DELETE, "op-del-4", {"day_id": day1}))
+        # place_deleted 后面还跟着它自己的 timeline_updated，得按 op 名读到拒绝为止。
+        frame = read_op(ws, "op_reject")
+        assert frame["type"] == "op_reject"
+        assert frame["reason"] == "day_last"
+
 
 def test_stash_add_and_remove_round_trip(client):
     """想去清单：stash_add 广播权威条目并进快照；stash_remove 删掉。"""
@@ -472,3 +485,35 @@ def test_day_update_sets_start_place_anchor(client):
         frame = ws.receive_json()
         assert frame["type"] == "op" and frame["op"] == "day_updated"
         assert frame["data"]["day"]["start_place_id"] == place["id"]
+
+
+def test_place_add_position_survives_the_op_layer(client):
+    """撤销删除靠 place_add 带上绝对下标把那一行放回原位。
+
+    ops.py 少接一个字段不会报错，只会让「撤销之后地点跑到末尾」——所以这条线要在 WS
+    层钉住，只测仓储不够。
+    """
+    testclient, trip_id, day_id = client
+    first = _add_place_rest(testclient, trip_id, day_id, "外滩")
+    _add_place_rest(testclient, trip_id, day_id, "豫园")
+    with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
+        join_and_sync(ws, "c-1", "小明")
+        ws.send_json(
+            protocol.op_frame(
+                protocol.Ops.PLACE_ADD,
+                "op-head-1",
+                {
+                    "day_id": day_id,
+                    "name": "南京路",
+                    "lng": 121.48,
+                    "lat": 31.23,
+                    "position": 0,
+                },
+            )
+        )
+        added = read_op(ws, "place_added")
+        assert added["type"] == "op", added
+        assert added["data"]["place"]["sort_index"] == 0
+        assert added["data"]["place_ids"][0] == added["data"]["place"]["id"]
+        # 原来的第一行被顶下去一位，而不是和它抢同一个 0。
+        assert added["data"]["place_ids"].index(first["id"]) == 1

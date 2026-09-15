@@ -403,6 +403,7 @@ function blurNote() {
 
 <style scoped>
 .place {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -414,6 +415,27 @@ function blurNote() {
     background var(--dur-fast) var(--ease-out),
     box-shadow var(--dur) var(--ease-out),
     transform var(--dur) var(--ease-out);
+}
+
+/* 站点：一枚落在轨道中线上的实心圆（--dc 由这一天继承下来，所以颜色本身就是「第几天」）。
+   白环负责把它从虚线上摘出来，外圈 --ink 保证深色态下仍认得出边界。
+   挂在卡片上而不是列表上：重排与 hover 位移时节点要跟着这一站走。 */
+.place::before {
+  position: absolute;
+  top: 15px;
+  left: -17px;
+  width: 10px;
+  height: 10px;
+  content: "";
+  background: var(--dc, var(--accent));
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--ink);
+  transition: transform var(--dur) var(--ease-pop);
+}
+
+.place--active::before {
+  transform: scale(1.25);
 }
 
 /* 浮起 1px + 阴影升一级：行卡是列表里唯一可点的对象，靠这点位移认领 hover。
@@ -487,7 +509,7 @@ function blurNote() {
   color: #fff;
   background: var(--accent);
   border: 1.5px solid var(--surface);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .place__body {
@@ -577,6 +599,14 @@ function blurNote() {
 .place__delete {
   padding: 2px 6px;
   font-size: 13px;
+}
+
+/* 这两颗挨着，用 .tap-pad 向外撑会互相盖住落点——直接加高更诚实。 */
+@media (max-width: 860px) {
+  .place__menu,
+  .place__delete {
+    min-height: 30px;
+  }
 }
 
 /* ---------- 编辑面板 ---------- */
@@ -700,8 +730,8 @@ function blurNote() {
   white-space: nowrap;
   color: var(--text-2);
   background: var(--surface);
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border: 1px solid var(--ink);
+  border-radius: var(--radius-pill);
   transition:
     background var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-out),
@@ -739,8 +769,8 @@ function blurNote() {
   grid-template-columns: 28px auto 28px;
   align-items: center;
   background: var(--surface);
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border: 1px solid var(--ink);
+  border-radius: var(--radius-pill);
 }
 
 .stepper__btn {
@@ -812,8 +842,8 @@ function blurNote() {
   width: 34px;
   height: 20px;
   background: var(--surface-3);
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border: 1px solid var(--ink);
+  border-radius: var(--radius-pill);
   transition:
     background var(--dur) var(--ease-out),
     border-color var(--dur) var(--ease-out);

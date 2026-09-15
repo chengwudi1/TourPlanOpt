@@ -344,6 +344,9 @@ class PlaceCreate(BaseModel):
     note: str = ""
     added_by: str = ""
     after_place_id: str | None = None
+    # 绝对插入下标：撤销删除要把行放回原位，而一天里的第一个地点没有 after_place_id 可指。
+    # 越界由仓储层夹到端点，所以这里不设 bounds。
+    position: int | None = None
     photo_url: str = ""
 
 

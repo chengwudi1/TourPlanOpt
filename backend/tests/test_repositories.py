@@ -25,8 +25,17 @@ async def db(tmp_path: Path) -> Database:
     return database
 
 
-def make_place(name: str, after: str | None = None, lng: float = 121.47) -> PlaceCreate:
-    return PlaceCreate(name=name, lng=lng, lat=31.23, after_place_id=after, duration_min=45)
+def make_place(
+    name: str, after: str | None = None, lng: float = 121.47, position: int | None = None
+) -> PlaceCreate:
+    return PlaceCreate(
+        name=name,
+        lng=lng,
+        lat=31.23,
+        after_place_id=after,
+        position=position,
+        duration_min=45,
+    )
 
 
 async def new_day(db: Database, trip_id: str, day_index: int) -> str:
@@ -85,6 +94,35 @@ async def test_add_place_after_unknown_id_appends(db: Database) -> None:
     await repo.add_place(db, day_id, make_place("外滩"))
     placed = await repo.add_place(db, day_id, make_place("豫园", after="GHOST000"))
     assert placed.sort_index == 1
+
+
+async def test_add_place_at_position_zero_lands_at_the_head(db: Database) -> None:
+    """撤销删除要能把行放回原位。一天里的第一个地点没有 `after_place_id` 可指，
+    只能按绝对下标插——旧代码没有这个入口，只能追加到末尾。"""
+    trip_id, day_id = await repo.create_trip(db)
+    await repo.add_place(db, day_id, make_place("外滩"))
+    await repo.add_place(db, day_id, make_place("豫园"))
+    head = await repo.add_place(db, day_id, make_place("南京路", position=0))
+
+    assert head is not None and head.sort_index == 0
+    places = (await repo.get_snapshot(db, trip_id)).places
+    assert [p.name for p in places] == ["南京路", "外滩", "豫园"]
+    assert [p.sort_index for p in places] == [0, 1, 2]
+
+
+async def test_add_place_position_is_clamped_into_range(db: Database) -> None:
+    """位置是个建议，不是承诺：越界就夹到端点，绝不因为「下标没了」而拒掉整笔添加。
+    5 秒撤销窗口里别人可能已经删掉了后面的行。"""
+    trip_id, day_id = await repo.create_trip(db)
+    await repo.add_place(db, day_id, make_place("外滩"))
+    await repo.add_place(db, day_id, make_place("豫园"))
+    far = await repo.add_place(db, day_id, make_place("南京路", position=99))
+    neg = await repo.add_place(db, day_id, make_place("陆家嘴", position=-5))
+
+    assert far.sort_index == 2  # 夹到末尾
+    assert neg.sort_index == 0  # 夹到开头
+    places = (await repo.get_snapshot(db, trip_id)).places
+    assert [p.name for p in places] == ["陆家嘴", "外滩", "豫园", "南京路"]
 
 
 async def test_add_place_to_unknown_day_returns_none(db: Database) -> None:

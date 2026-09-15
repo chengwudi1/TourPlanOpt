@@ -4,6 +4,7 @@ import { computed, ref } from 'vue'
 import AppModal from '@/components/AppModal.vue'
 import SegmentedControl, { type SegOption } from '@/components/SegmentedControl.vue'
 import { ArrowRight, Check, ChevronDown, Link2, LoaderCircle, MapPin } from '@/components/icons'
+import { useCopy } from '@/composables/useCopy'
 import type { TravelMode, TripCreateResult } from '@/types/domain'
 import { ApiError, apiFetch, postJson } from '@/utils/api'
 import { parseHHMM } from '@/utils/time'
@@ -45,6 +46,7 @@ const busy = ref(false)
 const error = ref('')
 const created = ref<TripCreateResult | null>(null)
 const copied = ref(false)
+const copy = useCopy()
 const showOpen = ref(false)
 const rawId = ref('')
 
@@ -120,13 +122,13 @@ async function submitCreate() {
 async function copyLink() {
   if (!created.value) return
   const url = created.value.share_url || `${window.location.origin}/trip/${created.value.trip_id}`
-  try {
-    await navigator.clipboard.writeText(url)
-    copied.value = true
-    setTimeout(() => (copied.value = false), 1600)
-  } catch {
-    window.prompt('请复制以下分享链接：', url)
-  }
+  const ok = await copy(url, {
+    receipt: '分享链接已复制，同行者打开即可共同编辑',
+    fallbackTitle: '分享链接',
+  })
+  if (!ok) return
+  copied.value = true
+  setTimeout(() => (copied.value = false), 1600)
 }
 
 function enter() {
@@ -329,7 +331,7 @@ function openPasted() {
   color: var(--text);
   background: transparent;
   border: 0;
-  border-bottom: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--hairline);
   border-radius: 0;
   transition: border-color var(--dur-fast) var(--ease-out);
 }
@@ -407,7 +409,7 @@ function openPasted() {
   grid-template-columns: 30px 1fr 30px;
   align-items: center;
   background: var(--surface);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--ink);
   border-radius: var(--radius-sm);
 }
 

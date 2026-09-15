@@ -6,13 +6,16 @@
 
 import type { Place, Trip } from '@/types/domain'
 
+// 分享图是「发布物」，不跟查看者的深浅色走，所以这里钉死亮色值。
+// 数字来自 main.css 的亮色 :root（--accent / --accent-strong / --text / --text-2 / --bg），
+// 改色板时这一份要跟着改——它不参与主题，别改成 getComputedStyle。
 const W = 1080
 const H = 1440
-const TEAL = '#0e7a6e'
-const TEAL_DEEP = '#0a5f56'
-const INK = '#191c1a'
-const GRAY = '#5a655f'
-const BG = '#f6f7f6'
+const SEA = '#0f5c8c'
+const SEA_DEEP = '#0a3f61'
+const INK = '#16211f'
+const GRAY = '#4b5650'
+const BG = '#f7f5f1'
 
 const FONT = `-apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif`
 
@@ -66,9 +69,9 @@ export function drawTripCard(trip: Trip, places: Place[]): HTMLCanvasElement {
 
   // 头部色带：行程名 + 城市/站数
   const headerH = 300
-  ctx.fillStyle = TEAL
+  ctx.fillStyle = SEA
   ctx.fillRect(0, 0, W, headerH)
-  ctx.fillStyle = TEAL_DEEP
+  ctx.fillStyle = SEA_DEEP
   ctx.fillRect(0, headerH - 14, W, 14)
 
   ctx.fillStyle = '#ffffff'
@@ -89,7 +92,7 @@ export function drawTripCard(trip: Trip, places: Place[]): HTMLCanvasElement {
   let y = headerH + 84
   shown.forEach((place, index) => {
     // 序号圈
-    ctx.fillStyle = TEAL
+    ctx.fillStyle = SEA
     ctx.beginPath()
     ctx.arc(96, y, 30, 0, Math.PI * 2)
     ctx.fill()
@@ -114,7 +117,7 @@ export function drawTripCard(trip: Trip, places: Place[]): HTMLCanvasElement {
     if (place.start_min !== null && place.start_min !== undefined) {
       const hh = String(Math.floor((place.start_min % 1440) / 60)).padStart(2, '0')
       const mm = String(place.start_min % 60).padStart(2, '0')
-      ctx.fillStyle = TEAL_DEEP
+      ctx.fillStyle = SEA_DEEP
       ctx.font = `600 30px ${FONT}`
       ctx.textAlign = 'right'
       ctx.fillText(`${hh}:${mm}`, W - 84, y + 8)

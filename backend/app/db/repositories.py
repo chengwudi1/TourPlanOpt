@@ -302,7 +302,11 @@ async def add_place(db: Database, day_id: str, payload: PlaceCreate) -> PlaceOut
 
         ordered = _ordered_ids(conn, day_id)
         position = len(ordered)
-        if payload.after_place_id and payload.after_place_id in ordered:
+        if payload.position is not None:
+            # 绝对下标优先：撤销删除要回到原位，而排在第一位的地点没有 after_place_id 可指。
+            # 越界只夹到端点，不拒整笔——那 5 秒里别人可能已经动过这一天的行数。
+            position = max(0, min(payload.position, len(ordered)))
+        elif payload.after_place_id and payload.after_place_id in ordered:
             position = ordered.index(payload.after_place_id) + 1
         ordered.insert(position, place_id)
         _renumber(conn, day_id, ordered)

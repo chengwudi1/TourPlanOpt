@@ -1,60 +1,182 @@
 :root {
-  --bg: #faf5ee;
-  --surface: #fffdf9;
-  --surface-2: #f4ece1;
-  --surface-3: #ebe1d4;
-  --surface-hover: #f4ece1;
-  --surface-selected: #e4efe9;
-  --border: #e9dfd2;
-  --border-strong: #d8cabb;
-  --border-faint: rgba(61, 49, 36, 0.08);
-  --text: #2b221a;
-  --text-2: #6b5d4d;
-  --text-3: #93826e;
-  --text-faint: #b6a692;
-  /* 旅程青：地图与指南针的颜色，也是全站唯一的「可交互」强调色——按钮、选中、链接。
-     暖橙 --ember 只做氛围（首页封面、徽标、计数点），绝不上到可点控件上，
-     否则两个强调色抢同一层的注意力，就又回到「哪儿都能点」的老毛病了。 */
-  --accent: #0e7a6e;
-  --accent-strong: #0a5f56;
-  --accent-soft: #dcebe2;
-  /* 压在 --accent 实心上的字色：亮色是白字（5.2:1），深色主题下 accent 变亮青，
-     白字只剩 3.1:1，所以那边换成近黑的墨色（5.5:1）。 */
-  --accent-ink: #ffffff;
-  /* 暖橙：--ember 是实心/图标的颜色（on 卡片 4.5:1），文字一律用 --ember-deep（6.3:1）。
-     这条分界是算出来的，不是试出来的——#b85c2c 直接当正文只有 4.49:1，差一点点就是不合格。 */
-  --ember: #b85c2c;
-  --ember-deep: #98481f;
-  --ember-soft: #f8e8db;
-  --ember-ink: #ffffff;
-  --ok: #1f9d55;
-  --ok-soft: #e6f6ec;
-  --ok-border: #bfe6cd;
-  --warn: #9a6316;
-  --warn-soft: #fdf3e0;
-  --warn-border: #f0dcb4;
-  --danger: #c53636;
-  --danger-soft: #fdeaea;
-  --danger-border: #f2c9c9;
-  --code-bg: rgba(0, 0, 0, 0.06);
+  /* ---------- 中性阶：纸中性、墨冷 ----------
+     「土」的根因不是色相选错，是六档中性色的 hue 全挤在 30–35°：纸是黄的、线是黄的、
+     阴影也是黄的，任何彩色压上来都像贴在同一张牛皮纸上。这里纸面回到近中性，
+     墨换成冷的绿黑，彩色才有地方站。 */
+  --bg: #f7f5f1;
+  --surface: #ffffff;
+  --surface-2: #f1eee7;
+  --surface-3: #e5e0d5;
+  --surface-hover: #efece4;
+  --surface-selected: #dfeee9;
+  --border: #e6e1d7;
+  --border-faint: rgba(22, 33, 31, 0.08);
+  /* 1px 结构线（轨道刻度、票券虚线、行间细分割）走这个：不随主题反色，
+     永远是一条「有但不出声」的线。 */
+  --hairline: rgba(22, 33, 31, 0.14);
+  /* 描边即结构色：贴纸风不靠模糊投影撑层次，靠一条看得见的墨线 + 它的硬偏移阴影。
+     深色态下这条线翻成亮墨，所以组件写 --ink 而不是写 --text。 */
+  --ink: #16211f;
+  --text: #16211f;
+  --text-2: #4b5650;
+  --text-3: #646d66;
+  --text-faint: #8d968f;
+  /* 顶光：页面最上方 340px 蒙一层白，屏幕不再是均匀的一块涂料。 */
+  --page-art: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0) 340px),
+    var(--bg);
 
-  --radius-sm: 8px;
-  --radius: 12px;
-  --radius-lg: 16px;
+  /* ---------- 强调色：三条线各管一件事 ----------
+     --accent 海蓝＝可交互（按钮、选中、链接、焦点）；
+     --ember 陶土＝氛围与费用，绝不上到可点控件上，否则两个强调色抢同一层注意力；
+     六个 ramp 色相＝信息编码（第几天、费用分类），不承担「能点」的暗示。 */
+  --accent: #0f5c8c;
+  --accent-strong: #0a3f61;
+  --accent-soft: #d9eaf5;
+  /* 压在 --accent 实心上的字色：亮色是白字（7.17:1 AAA），深色主题下 accent 变亮蓝，
+     白字不够，所以那边换成近黑的墨。 */
+  --accent-ink: #ffffff;
+  /* 陶土：实心/图标用 --ember，正文用 --ember-deep。这条分界是算出来的——
+     #d1663f 直接当正文不合格。实心块上的字必须用深墨 --ember-ink，白字只有 3.69:1。 */
+  --ember: #d1663f;
+  --ember-deep: #9c421f;
+  --ember-soft: #f7e2d7;
+  --ember-ink: #2a0f04;
+  /* 压在 --ember-deep（更深的实心陶土）上的字：这里必须用白，不能复用 --ember-ink，
+     那个是给亮陶土块配的深墨，压到 #9c421f 上只剩 1.4:1。 */
+  --ember-deep-ink: #ffffff;
+
+  /* ---------- 六色 ramp：天数与费用分类共用这一套 ----------
+     每档三个成员，谁用谁查表，不许现场发明：
+       --ramp-N      实心色（色块、徽标、轨道带）
+       --ramp-N-soft 浅底（tinted 卡片背景）
+       --ramp-N-deep 正文色（压在白底或浅底上的字）
+       --ramp-N-ink  实心块上的字色——这条是硬规矩：海蓝/苔绿/藕紫/玫红用白字，
+                     陶土与沙金用近黑墨字（#fff on #e3b23c 实测只有 1.96:1）。 */
+  --ramp-1: #0f5c8c;
+  --ramp-1-soft: #dceaf4;
+  --ramp-1-deep: #0b4a70;
+  --ramp-1-ink: #ffffff;
+  --ramp-2: #3f7d5a;
+  --ramp-2-soft: #e2efe6;
+  --ramp-2-deep: #2c5c41;
+  --ramp-2-ink: #ffffff;
+  --ramp-3: #d1663f;
+  --ramp-3-soft: #f8e3d8;
+  --ramp-3-deep: #9c421f;
+  --ramp-3-ink: #2a0f04;
+  --ramp-4: #e3b23c;
+  --ramp-4-soft: #f8eecf;
+  --ramp-4-deep: #7d5512;
+  --ramp-4-ink: #2a1e02;
+  --ramp-5: #6f5293;
+  --ramp-5-soft: #eae3f3;
+  --ramp-5-deep: #5a3f7d;
+  --ramp-5-ink: #ffffff;
+  --ramp-6: #a8385f;
+  --ramp-6-soft: #f7e2e9;
+  --ramp-6-deep: #8a2748;
+  --ramp-6-ink: #ffffff;
+  /* 游游的画身色。这是插画配色而不是界面配色，所以深色态刻意不反色（同 --photo-scrim 的
+     理由：一张会眨眼的图在两种主题下是同一张图）。唯一跟着主题走的是描边，它用 --ink——
+     贴纸的轮廓必须永远比它贴着的界面亮/暗一档，否则深色态下就是一只糊死的黑洞。 */
+  --pet-body: #f6d36b;
+  --pet-shade: #e8bd43;
+  --pet-beak: #e8763c;
+  --pet-beak-deep: #cf5f2a;
+  --pet-blush: #e88a5a;
+  /* 参与者 8 色盘：地图群像与协作标记的唯一来源，收编自 useClientIdentity 的硬编码。
+     这一档深色块里「故意不覆写」：它是身份色，跟查看者的主题走会让同一个人被两个人看成两种颜色，
+     而地图标记压在永远偏亮的高德瓦片上、白字实心角标，只有这一组暗度够。
+     八色都按「白字压得上去 ≥4.5:1」配过，所以头像/角标只用 --warp-ink 一个反色。 */
+  --warp-1: #0f5c8c;
+  --warp-2: #b4552a;
+  --warp-3: #3f7d5a;
+  --warp-4: #9a6b12;
+  --warp-5: #6f5293;
+  --warp-6: #0e7490;
+  --warp-7: #a8385f;
+  --warp-8: #4f7a2f;
+  --warp-ink: #ffffff;
+  /* 头像那圈环负责画「这颗色盘的边界」。亮色下它等于卡片色，看起来是无边的；
+     深色下八色身份盘普遍偏暗，环必须换成亮色才认得出边界，所以单独一档。 */
+  --avatar-ring: var(--surface);
+
+  /* 压在照片上的实心色：照片在两种主题下都是照片，所以这一档刻意不跟主题反色。
+     HomeHero 与 TripCard 的倒计时/状态胶囊共用，深色态里也不能换成亮色。 */
+  --photo-scrim: rgba(12, 20, 19, 0.74);
+  --photo-soon: #8a5f10;
+  --photo-live: #2c5c41;
+
+  --ok: #3f7d5a;
+  --ok-soft: #e2efe6;
+  --ok-border: #bfe0cb;
+  /* warn 降权：琥珀只留给「真告警」。从亮黄改成深琥珀，面积再大也不刺眼。 */
+  --warn: #8a5f10;
+  --warn-soft: #f7ecd6;
+  --warn-border: #e3cd9f;
+  --danger: #b3392f;
+  --danger-soft: #f8e2df;
+  --danger-border: #eec5be;
+  --code-bg: rgba(22, 33, 31, 0.06);
+
+  /* ---------- 阶：半径 ----------
+     控件 / 卡片 / 浮层 / 贴边大浮层 / 芯片，五档封顶，不许发明中间值。
+     原来全站 25 处硬编码 999px 全收进 --radius-pill。 */
+  --radius-sm: 10px;
+  --radius: 14px;
+  --radius-lg: 18px;
   /* 只给贴边的大浮层用（底部抽屉的顶部圆角）。按钮和输入框永远不许碰这一档。 */
   --radius-xl: 22px;
-  /* 阴影阶梯：卡片 → 悬浮 → 浮层 → 弹窗，越浮越重，不许发明中间值。
-     色调跟着中性阶走暖棕（rgba(82,55,26)）——压在奶油底上，青灰阴影会发脏。 */
-  --shadow-sm: 0 1px 2px rgba(82, 55, 26, 0.07);
-  --shadow-md: 0 2px 6px rgba(82, 55, 26, 0.09);
-  --shadow-lg: 0 6px 20px rgba(82, 55, 26, 0.11);
-  --shadow-pop: 0 12px 32px rgba(82, 55, 26, 0.15);
-  --shadow-modal: 0 20px 48px rgba(82, 55, 26, 0.22);
+  --radius-pill: 999px;
+
+  /* ---------- 阶：间距 ----------
+     项目原先有 13 档散 gap、无 scale；这七档是新的唯一来源。
+     命名用 s1..s7——短，因为要写进每一次 padding。 */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 34px;
+  --s7: 48px;
+
+  /* ---------- 阶：字阶与字距 ----------
+     字距必须双向：大字号收（-0.035em）、小字号放（+0.02em）。
+     原先全站 letter-spacing 只有 1 处，这是「像后台系统」的第二大来源。 */
+  --t-hero: clamp(34px, 6vw, 52px);
+  --t-h1: 24px;
+  --t-h2: 17px;
+  --t-body: 15px;
+  --t-meta: 13px;
+  --t-micro: 11px;
+  --ls-display: -0.035em;
+  --ls-tight: -0.015em;
+  --ls-label: 0.02em;
+  --ls-caps: 0.08em;
+  --lh-body: 1.55;
+  --lh-tight: 1.25;
+
+  /* ---------- 阶：阴影 ----------
+     两段式：第一段的 0 模糊是「贴纸的厚度」，第二段负责散开。
+     色调从暖棕翻到冷墨——压在冷纸上的棕阴影会发脏。 */
+  --shadow-sm: 0 1px 0 rgba(22, 33, 31, 0.08);
+  --shadow-md: 0 2px 0 rgba(22, 33, 31, 0.06), 0 8px 18px -12px rgba(22, 33, 31, 0.3);
+  --shadow-lg: 0 3px 0 rgba(22, 33, 31, 0.08), 0 18px 32px -16px rgba(22, 33, 31, 0.36);
+  --shadow-pop: 0 5px 0 rgba(22, 33, 31, 0.1), 0 26px 48px -22px rgba(22, 33, 31, 0.44);
+  --shadow-modal: 0 8px 0 rgba(22, 33, 31, 0.1), 0 40px 80px -28px rgba(22, 33, 31, 0.5);
+  /* 硬偏移：lift 是 hover 的一档，sticker 是选中与 hero 的一档——「贴上去」而不是「浮起来」。 */
+  --shadow-lift: 2px 2px 0 var(--ink);
+  --shadow-sticker: 3px 3px 0 var(--ink);
+  /* 内高光：所有实心块的顶部一条亮线，把「塑料按钮」变成「有厚度的物件」。 */
+  --edge: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+
   /* z 阶梯：局部下拉 → 浮动条 → 遮罩对话框 → 导航 → 通知 → toast → 模态。 */
   --z-pop: 40;
   --z-bar: 60;
   --z-overlay: 70;
   --z-nav: 200;
+  /* 精灵贴在导航之上，但必须低于 toast：op 的回执与失败要能盖在它上面。 */
+  --z-sprite: 210;
   --z-notice: 300;
   --z-toast: 400;
   --z-modal: 10000;
@@ -76,58 +198,100 @@
 
   --panel-w: 400px;
   --header-h: 56px;
+  /* 移动端底部 dock 的整条高度（不含安全区）。精灵靠它让位，所以两边共用这一个数。 */
+  --dock-h: 53px;
 
-  /* Poppins 管拉丁与数字，中文回落系统栈——为 CJK 拉整套字体不值得。 */
-  --font: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+  /* 拉丁与数字用 variable 字体（本地打包，unicode-range 只让浏览器下 latin 子集），
+     中文回落系统栈——为 CJK 拉整套字体不值得。
+     display 面（Bricolage）管标题与英雄数字，body 面（Manrope）管正文。 */
+  --font: 'Manrope Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
     'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --font-display: 'Bricolage Grotesque Variable', 'Manrope Variable', 'PingFang SC',
+    'Microsoft YaHei', sans-serif;
   --mono: ui-monospace, SFMono-Regular, 'Cascadia Mono', Consolas, monospace;
 
   color-scheme: light;
 }
 
 /* 深色模式：跟随系统。地图瓦片仍是亮色（行业惯例，叠加层已用 token），
-   其余界面全部走这里的变量。 */
+   其余界面全部走这里的变量。中性阶从暖棕翻到冷板岩，描边墨 --ink 反过来是亮墨——
+   贴纸风在深底上靠的是「比界面更亮的轮廓」，不是阴影。 */
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --bg: #191512;
-    --surface: #221c17;
-    --surface-2: #2c241d;
-    --surface-3: #352b22;
-    --surface-hover: #2c241d;
-    --surface-selected: #123c37;
-    --border: #3a2f26;
-    --border-strong: #4b3d31;
-    --border-faint: rgba(255, 255, 255, 0.06);
-    --text: #f0e7dd;
-    --text-2: #bfae9c;
-    --text-3: #8d7c6a;
-    --text-faint: #6f6152;
-    --accent: #2aa393;
-    --accent-strong: #45c0b0;
-    --accent-soft: #123c37;
-    --accent-ink: #08201c;
-    /* 深色下 ember 反过来走亮（同 accent-strong 的处理），且实心上的字必须是深墨：
-       亮橙压近白字只有 2.2:1，压 #241407 才有 6.6:1。 */
-    --ember: #d98a54;
-    --ember-deep: #e8a675;
-    --ember-soft: #3a2618;
-    --ember-ink: #241407;
-    --ok: #34b96f;
-    --ok-soft: #12291b;
-    --ok-border: #1f4430;
-    --warn: #d9a24a;
-    --warn-soft: #2e2415;
+    --bg: #0f1416;
+    --surface: #171d20;
+    --surface-2: #1f272a;
+    --surface-3: #283235;
+    --surface-hover: #232c30;
+    --surface-selected: #11333a;
+    --border: #2a3437;
+    --border-faint: rgba(255, 255, 255, 0.07);
+    --hairline: rgba(255, 255, 255, 0.16);
+    --ink: #dceae5;
+    --text: #e9f0ec;
+    --text-2: #b4c0bb;
+    --text-3: #93a09b;
+    --text-faint: #75827d;
+    --page-art: linear-gradient(180deg, rgba(255, 255, 255, 0.045),
+        rgba(255, 255, 255, 0) 340px), var(--bg);
+    /* 深色下 accent 走亮蓝，实心上的字必须是近黑的墨（白字只有 3.1:1）。 */
+    --accent: #3f97cc;
+    --accent-strong: #6fb7e3;
+    --accent-soft: #10303f;
+    --accent-ink: #05202e;
+    --ember: #e08a5f;
+    --ember-deep: #f0ab80;
+    --ember-soft: #3a2117;
+    --ember-ink: #2a0f04;
+    /* 深色态 --ember-deep 反成浅桃（那是正文色），压它就得换回近黑的墨。 */
+    --ember-deep-ink: #2a0f04;
+    /* 六色 ramp 在深底上整体提亮、降饱和，soft 档换成「深色 tint」。
+       deep 直接回指实心色——深色态下实心色本身就够亮，可以当正文用；
+       ink 反过来全部走近黑：中亮度的色块压在深底上，白字只有 2~3:1。 */
+    --ramp-1: #4d9ccb;
+    --ramp-1-soft: #10293a;
+    --ramp-1-deep: var(--ramp-1);
+    --ramp-1-ink: #06202e;
+    --ramp-2: #5aa87b;
+    --ramp-2-soft: #10291d;
+    --ramp-2-deep: var(--ramp-2);
+    --ramp-2-ink: #06210f;
+    --ramp-3: #e08a5f;
+    --ramp-3-soft: #3a2116;
+    --ramp-3-deep: var(--ramp-3);
+    --ramp-3-ink: #2a1206;
+    --ramp-4: #e3b23c;
+    --ramp-4-soft: #33290f;
+    --ramp-4-deep: var(--ramp-4);
+    --ramp-4-ink: #2a1e02;
+    --ramp-5: #9d80c2;
+    --ramp-5-soft: #241b32;
+    --ramp-5-deep: var(--ramp-5);
+    --ramp-5-ink: #180e24;
+    --ramp-6: #d4708f;
+    --ramp-6-soft: #351522;
+    --ramp-6-deep: var(--ramp-6);
+    --ramp-6-ink: #26070f;
+    /* 深色态八色都是暗身份盘，边界只能由这圈亮环画出来（环本身算过 ≥3:1）。 */
+    --avatar-ring: #5b6a6f;
+    --ok: #56ab77;
+    --ok-soft: #10291d;
+    --ok-border: #24503a;
+    --warn: #d8a53a;
+    --warn-soft: #33290f;
     --warn-border: #4d3d1d;
-    --danger: #e06666;
-    --danger-soft: #2e1717;
-    --danger-border: #4d2424;
+    --danger: #e0655a;
+    --danger-soft: #351512;
+    --danger-border: #5a2a25;
     --code-bg: rgba(255, 255, 255, 0.08);
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.45);
-    --shadow-lg: 0 6px 20px rgba(0, 0, 0, 0.5);
-    --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.55);
-    --shadow-modal: 0 20px 48px rgba(0, 0, 0, 0.6);
+    /* 深底上第一段硬边要更实（黑），第二段负责把重量推开。 */
+    --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.5);
+    --shadow-md: 0 2px 0 rgba(0, 0, 0, 0.4), 0 8px 18px -12px rgba(0, 0, 0, 0.9);
+    --shadow-lg: 0 3px 0 rgba(0, 0, 0, 0.45), 0 18px 32px -16px rgba(0, 0, 0, 0.95);
+    --shadow-pop: 0 5px 0 rgba(0, 0, 0, 0.5), 0 26px 48px -22px rgba(0, 0, 0, 1);
+    --shadow-modal: 0 8px 0 rgba(0, 0, 0, 0.5), 0 40px 80px -28px rgba(0, 0, 0, 1);
+    --edge: inset 0 1px 0 rgba(255, 255, 255, 0.07);
   }
 }
 
@@ -144,20 +308,78 @@ body,
 
 body {
   font-family: var(--font);
-  font-size: 14px;
-  line-height: 1.55;
-  /* 时间表的对齐靠它：数字全部等宽（作用于 Poppins 的数字与拉丁）。 */
+  font-size: var(--t-body);
+  line-height: var(--lh-body);
+  /* 时间表的对齐靠它：数字全部等宽（作用于 Manrope 的数字与拉丁）。 */
   font-variant-numeric: tabular-nums;
+  /* 字距不在全局收：中文要的是松弛，收紧只属于大字号（见 h1..h3）和小号标签。 */
   color: var(--text);
-  background: var(--bg);
+  /* 顶光屏底：原来是一整块均匀涂料，现在最上方 340px 有一层光。 */
+  background: var(--page-art);
   -webkit-font-smoothing: antialiased;
 }
 
+/* ---------- 环境层：会动的纸面 ----------
+   一块均匀的底色读起来就是「后台系统的一块涂料」。这里补两层：三团极慢漂移的柔光，
+   和一层淡到几乎看不见的同心等高线（地图的味道）。两团都不参与命中，也不带自己的颜色——
+   全部从 --accent / --ramp-2 / --ember 用 color-mix 派生，所以换肤与深色态自动跟上。
+
+   负 z-index 能压在内容之下、画布底色之上，靠的是 body 的 background 被提升到画布：
+   画布永远最先画，之后才是根元素的负层级子节点。 */
+body::before {
+  position: fixed;
+  inset: -18%;
+  z-index: -2;
+  pointer-events: none;
+  content: "";
+  background:
+    radial-gradient(38vmax 30vmax at 12% 10%,
+      color-mix(in srgb, var(--accent) 15%, transparent), transparent 62%),
+    radial-gradient(32vmax 26vmax at 86% 16%,
+      color-mix(in srgb, var(--ramp-2) 13%, transparent), transparent 60%),
+    radial-gradient(30vmax 28vmax at 62% 96%,
+      color-mix(in srgb, var(--ember) 11%, transparent), transparent 62%);
+  animation: ambient-drift 54s var(--ease-inout) infinite alternate;
+}
+
+/* 等高线只用 --border-faint，所以两种主题下都是「有但不出声」的那一档；
+   mask 把它收在上方 70%，越往下越干净，正文所在的下半屏不会被搅脏。 */
+body::after {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  content: "";
+  mask-image: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.35) 46%, transparent 78%);
+  background:
+    repeating-radial-gradient(circle at 18% 20%,
+      transparent 0 27px, var(--border-faint) 27px 28px),
+    repeating-radial-gradient(circle at 84% 62%,
+      transparent 0 35px, var(--border-faint) 35px 36px);
+}
+
+@keyframes ambient-drift {
+  from {
+    transform: translate3d(-2.5%, -1.5%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(3%, 2.5%, 0) scale(1.08);
+  }
+}
+
+/* 标题走 display 面并把字距收紧——字号大而不收，就是后台系统的第一特征。 */
 h1,
 h2,
 h3 {
   margin: 0;
-  line-height: 1.3;
+  font-family: var(--font-display);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--ls-display);
+  font-weight: 700;
+}
+h3 {
+  font-size: var(--t-h2);
+  letter-spacing: var(--ls-tight);
 }
 
 button {
@@ -175,47 +397,76 @@ textarea {
 
 /* ---------- primitives ---------- */
 
+/* 按钮＝贴纸：一条墨线 + 一段硬偏移。三个状态共用 --btn-shadow 这一个真源，
+   抬起（hover）偏移变厚，按下（active）偏移归零并位移到右下——像把贴纸按回纸面。
+   内高光 --edge 挂在所有实心块上，塑料感就是这么被顶掉的。 */
 .btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--s2);
   padding: 7px 14px;
-  border: 1px solid var(--border-strong);
+  border: 1.5px solid var(--ink);
   border-radius: var(--radius-sm);
   background: var(--surface);
+  letter-spacing: var(--ls-label);
+  --btn-shadow: var(--shadow-sm), var(--edge);
+  box-shadow: var(--btn-shadow);
   transition:
     background var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
     transform var(--dur) var(--ease-pop);
 }
 .btn:hover:not(:disabled) {
-  background: var(--surface-2);
+  background: var(--surface-hover);
+  --btn-shadow: var(--shadow-lift), var(--edge);
+  transform: translate(-1px, -1px);
 }
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 .btn--primary {
-  border-color: var(--accent);
+  border-color: var(--ink);
   background: var(--accent);
   color: var(--accent-ink);
+  --btn-shadow: 0 2px 0 var(--ink), var(--edge);
 }
 .btn--primary:hover:not(:disabled) {
   background: var(--accent-strong);
+  --btn-shadow: var(--shadow-lift), var(--edge);
+}
+/* 会丢数据的确认按钮：整块染 --accent 会把「accent = 可逆交互」这条信号用废，
+   所以描边与硬偏移换成 danger，底色停在 danger-soft；hover 反相成实心。
+   两套主题下前景/底色都比对都是 AA（#b3392f on #f8e2df、#351512 on #e0655a）。 */
+.btn--danger {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+  --btn-shadow: 0 2px 0 var(--danger), var(--edge);
+}
+.btn--danger:hover:not(:disabled) {
+  background: var(--danger);
+  color: var(--danger-soft);
+  --btn-shadow: var(--shadow-lift), var(--edge);
 }
 .btn:active:not(:disabled) {
-  transform: scale(0.97);
+  --btn-shadow: var(--edge);
+  transform: translate(1px, 1px);
 }
 .btn--sm {
   padding: 4px 9px;
-  font-size: 13px;
+  font-size: var(--t-meta);
 }
 .btn--ghost {
   border-color: transparent;
   background: transparent;
+  --btn-shadow: none;
 }
 .btn--ghost:hover:not(:disabled) {
   background: var(--surface-2);
+  --btn-shadow: none;
+  transform: none;
 }
 
 /* 纯图标动作按钮：天头与卡片上的次要动作用它，文字交给 title/aria-label——
@@ -248,6 +499,20 @@ textarea {
   cursor: not-allowed;
 }
 
+/* 触屏落点补丁：视觉盒子一点不动，只把可点区域向外撑（O6）。
+   桌面上的 20px 图标配的是指针，不该为它牺牲整屏密度，所以只在手机断点里生效。
+   相邻的两个小按钮别用这个——撑出来的落点会互相盖住，那种情况直接加高更诚实。 */
+@media (max-width: 860px) {
+  .tap-pad {
+    position: relative;
+  }
+  .tap-pad::after {
+    content: "";
+    position: absolute;
+    inset: -6px -4px;
+  }
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -255,33 +520,41 @@ textarea {
 }
 .field > label {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
+  /* 小号标签放字距，和大字号收字距是同一条规则的两端。 */
+  letter-spacing: var(--ls-label);
   color: var(--text-2);
 }
 .input {
   padding: 8px 10px;
-  border: 1px solid var(--border-strong);
+  border: 1.5px solid var(--ink);
   border-radius: var(--radius-sm);
   background: var(--surface);
+  box-shadow: var(--edge);
   outline: none;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
 }
 .input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--edge);
 }
 
+/* 卡片是「贴」在纸面上的：1px 墨线 + 两段式阴影。控件描 1.5px、容器描 1px，
+   这个粗细差就是「可以拿起来」和「只是一张纸」的区别。 */
 .card {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--ink);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
 }
 
 .muted {
   color: var(--text-2);
 }
 .tiny {
-  font-size: 12px;
+  font-size: var(--t-meta);
 }
 .mono {
   font-family: var(--mono);
@@ -393,6 +666,9 @@ textarea {
     display: flex;
     gap: 4px;
     flex: 0 0 auto;
+    /* 高度写死成令牌（精灵按同一个数让位，S1），安全区在下面另加。 */
+    height: calc(var(--dock-h) + env(safe-area-inset-bottom, 0px));
+    align-items: stretch;
     padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
     background: var(--surface);
     border-top: 1px solid var(--border);
@@ -414,10 +690,6 @@ textarea {
     color: var(--accent-strong);
     background: var(--accent-soft);
     border-color: var(--accent);
-  }
-  .triphead__status span:last-child,
-  .triphead__status .tiny {
-    display: none;
   }
 }
 
@@ -482,6 +754,19 @@ textarea {
 }
 .reveal--lg {
   --rise: var(--rise-lg);
+}
+
+/* 刚落库的一行要点一下名：只有 from 帧、不带 fill-mode，所以动画一走完就交回自然态，
+   残留的 class 不会把背景色钉在元素上。用 class 而不是 WAAPI，是因为 token 要在真实
+   CSS 里解析，还要让上面那条 reduced-motion 兜底管得住它。 */
+@keyframes flash-in {
+  from {
+    background-color: var(--accent-soft);
+    box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-md);
+  }
+}
+.flash-in {
+  animation: flash-in 900ms var(--ease-out);
 }
 
 /* 首页 ↔ 行程页：退场快、进场慢半拍，读起来像翻开下一页而不是两块墙互换。
@@ -568,9 +853,9 @@ textarea {
   width: 26px;
   height: 26px;
   margin-left: -6px;
-  border: 2px solid var(--surface);
+  border: 2px solid var(--avatar-ring);
   border-radius: 50%;
-  color: #fff;
+  color: var(--warp-ink);
   font-size: 11px;
   font-weight: 700;
   /* 挂在 animation 而不是 transition 上：Vue 移动已有节点不会重放动画，所以只有

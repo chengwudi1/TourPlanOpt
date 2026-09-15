@@ -5,6 +5,8 @@ import { nextTick, watch } from 'vue'
  *  曲线就是 --ease-out 那一条，JS 里读不到 CSS 变量，只能抄一份。 */
 const DURATION_MS = 340
 const EASING = 'cubic-bezier(0.16, 1, 0.3, 1)'
+/** 与 main.css 里 .flash-in 的那 900ms 同步：类留着只是为了让动画跑完，摘晚了没人管。 */
+const FLASH_MS = 900
 
 function rowKey(node: Element): string | null {
   const el = node as HTMLElement
@@ -52,9 +54,20 @@ export function useFlipList(container: Ref<HTMLElement | null>, keys: () => stri
           const key = rowKey(node)
           if (!key) continue
           const oldRect = before.get(key)
-          // 老行做位移，新来的行做淡入；对不上号的（换到天那边去了）什么都不做。
+          // 老行做位移，新来的行做淡入 + 点名底色；对不上号的（换到天那边去了）什么都不做。
           if (!oldRect) {
-            node.animate(
+            const row = node as HTMLElement
+            const flash = (e?: AnimationEvent) => {
+              if (e && (e.target !== row || e.animationName !== 'flash-in')) return
+              row.classList.remove('flash-in')
+              row.removeEventListener('animationend', flash)
+            }
+            row.classList.add('flash-in')
+            // animationend 只对 CSS 动画响，WAAPI 那次不触发它；行如果在 900ms 内被卸掉
+            // 就再也收不到事件，所以超时兜底，两条都做同一件事。
+            row.addEventListener('animationend', flash)
+            setTimeout(flash, FLASH_MS)
+            row.animate(
               [
                 { opacity: 0, transform: 'scale(0.97)' },
                 { opacity: 1, transform: 'none' },

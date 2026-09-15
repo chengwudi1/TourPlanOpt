@@ -181,8 +181,8 @@ onBeforeUnmount(() => {
 
 /** 叠加层配色跟底图走、不跟界面主题走：高德没有暗色底图，瓦片永远偏亮，
  * 所以描边固定用白，只有芯色读 accent（两套主题下的 teal 在白底上都够对比）。 */
-const CASING_COLOR = '#1b2a26'
-const FALLBACK_ACCENT = '#0e7a6e'
+const CASING_COLOR = '#16211f'
+const FALLBACK_ACCENT = '#0f5c8c'
 
 function cssColor(name: string, fallback: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
@@ -454,7 +454,7 @@ defineExpose({
   font-size: 13px;
   color: var(--text);
   background: var(--surface);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--ink);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-sm);
   cursor: pointer;
@@ -493,7 +493,7 @@ defineExpose({
 /* Global on purpose: marker nodes live inside the AMap container, outside this
    component's scoped tree, so scoped attributes would never match them. */
 .tp-marker {
-  --tp-fill: #0e7a6e;
+  --tp-fill: var(--accent);
   position: relative;
   display: grid;
   place-items: center;
@@ -526,7 +526,7 @@ defineExpose({
 
 /* 有照片：照片铺满圆，序号退到右下角的小角标——和列表行的 .place__order 同一个位置。 */
 .tp-marker--photo {
-  background: #e6eae7;
+  background: var(--surface-3);
 }
 
 .tp-marker--photo .tp-marker__img {
@@ -542,7 +542,7 @@ defineExpose({
   width: 15px;
   height: 15px;
   font-size: 9.5px;
-  color: #fff;
+  color: var(--warp-ink);
   background: var(--tp-fill);
   border: 1.5px solid #fff;
   border-radius: 50%;

@@ -9,6 +9,7 @@ import type {
   Participant,
   Place,
   PlaceCreateInput,
+  PlaceStatus,
   Presence,
   Snapshot,
   StashItem,
@@ -18,13 +19,44 @@ import type { OpBroadcastFrame } from '@/types/protocol'
 import { Ops } from '@/types/protocol'
 import { colorForClient, getClientId, useClientIdentity } from '@/composables/useClientIdentity'
 import { apiFetch, postJson } from '@/utils/api'
+import { formatMoney } from '@/utils/money'
 import { useSocketStore } from '@/stores/socket'
+import { useFeedbackStore } from '@/stores/feedback'
 
 type PendingOp =
-  | { kind: 'place_add'; tempId: string }
+  | { kind: 'place_add'; tempId: string; restore?: PlaceRestore; cancelled?: boolean }
   /** 一批清单条目共用一条 op：整批的临时行要在回广播时一起清掉。 */
   | { kind: 'checklist_add'; tempIds: string[] }
   | { kind: 'expense_add'; tempId: string }
+  /** 删除是本地先移除再发 op，回广播时那一行已经查不到了：名字只能暂存在这里。 */
+  | { kind: 'deleted'; name: string }
+
+/**
+ * 撤销删除时要在 place_add 落地之后补发的第二笔。
+ *
+ * 为什么不能一次做完：新行的 id 是服务端给的，`place_update` / `place_lock` 都只认真 id，
+ * 拿临时 id 去发只会收到一个 `place_not_found`。所以先记下要恢复什么，回执到了再发。
+ */
+export interface PlaceRestore {
+  /** 只有原值与「新行的默认值」不同才带上；undefined 表示不动。 */
+  patch: { start_min?: number; status?: PlaceStatus }
+  /** 钉了位置但没钉时刻：只能靠 place_lock 恢复。 */
+  lock: boolean
+  /** 这一天原本从这个地点出发 / 收在这个地点：撤销后要把锚改指到新 id。 */
+  startAnchor: boolean
+  endAnchor: boolean
+}
+
+/** 删除地点前拍下的快照：够把这一行原样放回原位。 */
+export interface DeletedPlace {
+  /** 整行原样留着——撤销一条「刚加完还没落地」的行时要把乐观行放回去。 */
+  row: Place
+  /** 删的那一刻这一行还没有服务端身份（PLACE_ADD 的回执还在路上）。 */
+  wasTemp: boolean
+}
+
+/** 删除回执里「撤销」能按多久。够读完一句话再抬手点一下，长过这个就该让屏幕安静下来。 */
+const UNDO_MS = 5000
 
 export interface OptimizeSummary {
   before_min: number
@@ -42,6 +74,17 @@ export interface OptimizeResult {
   end_min: number
   warnings: string[]
   exact: boolean
+}
+
+/** op 流台账的一行。seq 原样带给界面看：「序号在涨」本身就是两端还在同步的证据。 */
+export interface OpEvent {
+  seq: number
+  op: string
+  /** 发起者的 client_id；服务端自己生成的那类（优化排程）为空。 */
+  origin: string
+  ts: number
+  /** 「动词 + 对象」的一句话摘要，在行被覆盖或删除之前取好。 */
+  text: string
 }
 
 /**
@@ -71,7 +114,9 @@ export const useTripStore = defineStore('trip', () => {
   const selectedPlaceId = ref<string | null>(null)
   const loading = ref(false)
   const loadError = ref<{ message: string; hint: string } | null>(null)
-  const opError = ref<{ message: string; hint: string } | null>(null)
+  /** 最近一次写入失败的唯一真相；呈现交给 ToastHost。level 区分「你的数据没存进去」与
+   * 「并发对手赢了、本地已收敛到权威值」——后者不是失败，不该用同一套告警色喊人。 */
+  const opError = ref<{ message: string; hint: string; level: 'danger' | 'info' } | null>(null)
   const optimizing = ref(false)
   const optimizeResult = ref<OptimizeResult | null>(null)
 
@@ -141,6 +186,9 @@ export const useTripStore = defineStore('trip', () => {
     stash.value = snap.stash ?? []
     checklist.value = snap.checklist ?? []
     expenses.value = snap.expenses ?? []
+    // 台账只记这一页亲眼看到的广播：换行程与重连都会重新 welcome，
+    // 留着上一段行程的 seq 等于把别处的改动报成本页刚发生的。
+    opLog.value = []
     const alive = new Set(snap.days.map((d) => d.id))
     timelines.value = Object.fromEntries(
       Object.entries(timelines.value).filter(([dayId]) => alive.has(dayId)),
@@ -195,9 +243,14 @@ export const useTripStore = defineStore('trip', () => {
   // -- outbound mutations (optimistic) -------------------------------------------------
 
   /** Add a place. Optimistically inserts a temp row; the echo (or another client's
-   * place_added) replaces it with the server's authoritative row. */
-  function addPlace(input: PlaceCreateInput): Place | null {
-    const dayId = currentDayId.value
+   * place_added) replaces it with the server's authoritative row.
+   * `forDayId` overrides the target day -- the assistant says which day it parsed. */
+  function addPlace(
+    input: PlaceCreateInput,
+    forDayId?: string | null,
+    restore?: PlaceRestore,
+  ): Place | null {
+    const dayId = forDayId || currentDayId.value
     if (!dayId || !trip.value) return null
 
     const tempId = `tmp-${crypto.randomUUID()}`
@@ -205,11 +258,15 @@ export const useTripStore = defineStore('trip', () => {
       (max, p) => (p.day_id === dayId ? Math.max(max, p.sort_index) : max),
       -1,
     )
+    // 撤销删除会指定 position：乐观行照着它落位，否则本地先插到末尾、回执到了再跳回去。
+    const sortIndex = input.position ?? maxIndex + 1
+    // 恢复时刻的那一笔要等真 id 才发得出去，但卡片不能先演一遍「没钉住」再钉上。
+    const pin = restore?.patch.start_min
     const optimistic: Place = {
       id: tempId,
       day_id: dayId,
       trip_id: trip.value.id,
-      sort_index: maxIndex + 1,
+      sort_index: sortIndex,
       name: input.name,
       amap_poi_id: input.amap_poi_id ?? '',
       address: input.address ?? '',
@@ -217,22 +274,28 @@ export const useTripStore = defineStore('trip', () => {
       lng: input.lng,
       lat: input.lat,
       duration_min: input.duration_min ?? 60,
-      user_start_min: null,
-      start_min: null,
+      user_start_min: pin ?? null,
+      start_min: pin ?? null,
       arrive_min: null,
       travel_min_before: null,
-      locked: false,
-      status: 'pending',
+      locked: pin !== undefined ? true : (restore?.lock ?? false),
+      status: restore?.patch.status ?? 'pending',
       note: input.note ?? '',
       added_by: input.added_by || useClientIdentity().name,
       rev: 1,
       created_at: '',
       updated_at: '',
     }
+    if (input.position !== null && input.position !== undefined) {
+      // 服务端会把这一位之后的行整体后移一位，本地跟着做，免得两行抢同一个 sort_index。
+      for (const p of places.value) {
+        if (p.day_id === dayId && p.sort_index >= sortIndex) p.sort_index += 1
+      }
+    }
     places.value.push(optimistic)
 
     const opId = useSocketStore().sendOp(Ops.PLACE_ADD, { day_id: dayId, ...input })
-    pendingOps.set(opId, { kind: 'place_add', tempId })
+    pendingOps.set(opId, { kind: 'place_add', tempId, ...(restore ? { restore } : {}) })
     return optimistic
   }
 
@@ -274,10 +337,127 @@ export const useTripStore = defineStore('trip', () => {
     useSocketStore().sendOp(Ops.PLACE_LOCK, { place_id: placeId, locked })
   }
 
-  function deletePlace(placeId: string) {
+  /**
+   * 撤销删除的第二笔：新行的 id 是服务端给的，拿到之后才能把时刻、状态、钉住与锚补回去。
+   * 带时刻的那一笔会连带镜像出 locked（设置即锁定），所以只在「钉位置不钉时间」时另发 place_lock。
+   */
+  function applyPlaceRestore(place: Place, restore: PlaceRestore) {
+    if (Object.keys(restore.patch).length) updatePlace(place.id, restore.patch)
+    if (restore.lock) setPlaceLocked(place.id, true)
+    // 撤销是「重新加一行」，id 换了：原来指着旧 id 的起点/终点锚得跟着改指。
+    if (restore.startAnchor) setStartPlace(place.day_id, place.id)
+    if (restore.endAnchor) setEndPlace(place.day_id, place.id)
+  }
+
+  /**
+   * 删除一个地点，并回一份够把它原样放回去的快照。
+   *
+   * 临时 id 的行不能发 `place_delete`：服务端还不认它，只会回一个 `place_not_found`，
+   * 而那一笔还在路上的 `place_add` 落地时又把行送回来——「删了又自己长回来」。
+   * 所以给它立个墓碑，等回执到了反过来补一发删除（见 applyRemoteOp）。
+   */
+  function deletePlace(placeId: string): DeletedPlace | null {
+    const place = places.value.find((p) => p.id === placeId)
+    if (!place) return null
+    const row: Place = { ...place }
     places.value = places.value.filter((p) => p.id !== placeId)
     if (selectedPlaceId.value === placeId) selectedPlaceId.value = null
-    useSocketStore().sendOp(Ops.PLACE_DELETE, { place_id: placeId })
+    const wasTemp = placeId.startsWith('tmp-')
+    if (wasTemp) {
+      cancelPendingAdd(placeId)
+    } else {
+      const opId = useSocketStore().sendOp(Ops.PLACE_DELETE, { place_id: placeId })
+      pendingOps.set(opId, { kind: 'deleted', name: row.name })
+    }
+    return { row, wasTemp }
+  }
+
+  /** 给还在等回执的那笔 place_add 立墓碑；找不到（早落地了）就不立。 */
+  function cancelPendingAdd(tempId: string): boolean {
+    for (const pending of pendingOps.values()) {
+      if (pending.kind === 'place_add' && pending.tempId === tempId) {
+        pending.cancelled = true
+        return true
+      }
+    }
+    return false
+  }
+
+  function erasePendingAddTombstone(tempId: string): boolean {
+    for (const pending of pendingOps.values()) {
+      if (pending.kind === 'place_add' && pending.tempId === tempId) {
+        if (!pending.cancelled) return false
+        pending.cancelled = false
+        return true
+      }
+    }
+    return false
+  }
+
+  /** 从原行算出「落地后要补的第二笔」；没什么要补的就返回 undefined，免得回执处空转。 */
+  function restoreOf(row: Place): PlaceRestore | undefined {
+    const patch: PlaceRestore['patch'] = {}
+    // 新行的默认值是 status='pending'、时刻交给排程重算，只有原值不同才值得再发一笔。
+    if (row.status !== 'pending') patch.status = row.status
+    // 「设置即锁定」：带 user_start_min 的补丁会把时刻与钉住一起写回。
+    if (row.user_start_min !== null) patch.start_min = row.user_start_min
+    const lock = row.locked && row.user_start_min === null
+    const day = days.value.find((d) => d.id === row.day_id)
+    const startAnchor = day?.start_place_id === row.id || false
+    const endAnchor = day?.end_place_id === row.id || false
+    if (!Object.keys(patch).length && !lock && !startAnchor && !endAnchor) return undefined
+    return { patch, lock, startAnchor, endAnchor }
+  }
+
+  /**
+   * 撤销一次删除。
+   *
+   * 两条路：那一行如果到现在都还没落地（墓碑还在），把乐观行原样放回去就是完整的撤销；
+   * 否则重新加一遍——内容、所在天、在原天里的位次都按快照复原，时刻与状态等第二笔补发。
+   */
+  function restorePlace(snap: DeletedPlace) {
+    const row = snap.row
+    if (snap.wasTemp && erasePendingAddTombstone(row.id)) {
+      places.value = [...places.value, row]
+      return
+    }
+    const day = days.value.find((d) => d.id === row.day_id)
+    if (!day) {
+      // 撤销窗口里那一天被删了：与其插一个服务端不认的行，不如说清楚为什么放不回去。
+      useFeedbackStore().show({
+        kind: 'danger',
+        message: `无法放回「${row.name}」`,
+        hint: '那一天已经被删除',
+      })
+      return
+    }
+    addPlace(
+      {
+        name: row.name,
+        lng: row.lng,
+        lat: row.lat,
+        address: row.address,
+        amap_poi_id: row.amap_poi_id,
+        photo_url: row.photo_url,
+        duration_min: row.duration_min,
+        note: row.note,
+        added_by: row.added_by,
+        position: row.sort_index,
+      },
+      row.day_id,
+      restoreOf(row),
+    )
+  }
+
+  /** 删除地点的界面入口：删完给一条带「撤销」的回执（S2）。 */
+  function deletePlaceWithUndo(placeId: string) {
+    const snap = deletePlace(placeId)
+    if (!snap) return
+    useFeedbackStore().show({
+      message: `已删除「${snap.row.name}」`,
+      durationMs: UNDO_MS,
+      action: { label: '撤销', run: () => restorePlace(snap) },
+    })
   }
 
   /** Drag result: send the FULL ordered id array (never a delta) and apply optimistically. */
@@ -291,9 +471,10 @@ export const useTripStore = defineStore('trip', () => {
     useSocketStore().sendOp(Ops.TRIP_UPDATE, { patch })
   }
 
-  /** Append a new day to the trip. */
-  function addDay() {
-    useSocketStore().sendOp(Ops.DAY_ADD, {})
+  /** Append a new day to the trip. `title`/`date` are optional; the server appends after
+   * the last day and works out the date when none is given. */
+  function addDay(title = '', date?: string | null) {
+    useSocketStore().sendOp(Ops.DAY_ADD, { title, date: date ?? null })
   }
 
   /** 删除一个空的天（服务端拒绝有内容的天与最后一天）。 */
@@ -417,8 +598,10 @@ export const useTripStore = defineStore('trip', () => {
   }
 
   function removeChecklist(id: string) {
+    const item = checklist.value.find((i) => i.id === id)
     checklist.value = checklist.value.filter((i) => i.id !== id)
-    useSocketStore().sendOp(Ops.CHECKLIST_DELETE, { id })
+    const opId = useSocketStore().sendOp(Ops.CHECKLIST_DELETE, { id })
+    if (item) pendingOps.set(opId, { kind: 'deleted', name: item.text })
   }
 
   /** 拖动结果：发整条有序 id 数组，与 day_reorder 同一套规矩（不发送增量）。 */
@@ -480,8 +663,10 @@ export const useTripStore = defineStore('trip', () => {
   }
 
   function removeExpense(id: string) {
+    const expense = expenses.value.find((e) => e.id === id)
     expenses.value = expenses.value.filter((e) => e.id !== id)
-    useSocketStore().sendOp(Ops.EXPENSE_DELETE, { id })
+    const opId = useSocketStore().sendOp(Ops.EXPENSE_DELETE, { id })
+    if (expense) pendingOps.set(opId, { kind: 'deleted', name: expense.title })
   }
 
 
@@ -507,7 +692,7 @@ export const useTripStore = defineStore('trip', () => {
       applyOptimizeResult(result)
     } catch (err) {
       const e = err as { message?: string; hint?: string }
-      opError.value = { message: e?.message ?? '优化失败', hint: e?.hint ?? '' }
+      opError.value = { message: e?.message ?? '优化失败', hint: e?.hint ?? '', level: 'danger' }
     } finally {
       optimizing.value = false
     }
@@ -547,21 +732,133 @@ export const useTripStore = defineStore('trip', () => {
 
   // -- inbound results -----------------------------------------------------------------
 
+  /** 台账只留最近这些条：它回答的是「刚刚发生了什么」，不是审计日志。 */
+  const OP_LOG_MAX = 24
+
+  /** 服务端广播的是过去式的结果名，与客户端发出的 Ops.* 差一个 _ed。 */
+  const OP_LABELS: Record<string, string> = {
+    place_added: '添加地点',
+    place_updated: '修改地点',
+    place_locked: '改固定状态',
+    place_deleted: '删除地点',
+    place_moved: '移动地点',
+    day_reordered: '重排顺序',
+    day_added: '新增一天',
+    day_deleted: '删除一天',
+    day_updated: '修改这一天',
+    trip_updated: '修改行程',
+    stash_added: '收进想去',
+    stash_removed: '移出想去',
+    checklist_added: '添加待办',
+    checklist_updated: '修改待办',
+    checklist_deleted: '删除待办',
+    checklist_reordered: '重排清单',
+    expense_added: '记一笔',
+    expense_updated: '修改一笔',
+    expense_deleted: '删除一笔',
+    route_optimized: '优化排程',
+  }
+
+  const opLog = ref<OpEvent[]>([])
+
+  function dayLabel(dayId: string, fallbackIndex?: number): string {
+    const day = days.value.find((d) => d.id === dayId)
+    const index = day?.day_index ?? fallbackIndex
+    if (index === undefined) return ''
+    return `D${index + 1}`
+  }
+
+  /** 摘要里的对象名：能从 payload 拿就从它拿，拿不到才回本地行查（删除类只有这一条路）。
+   * deletedName 是发起方在本地移除前暂存的那一份——删除类广播里只有 id，别人那端还能查到行，
+   * 自己这端查不到。 */
+  function opSubject(op: string, data: Record<string, unknown>, deletedName = ''): string {
+    const nameOf = (row: unknown) => {
+      const name = (row as { name?: unknown } | undefined)?.name
+      return typeof name === 'string' ? name : ''
+    }
+    switch (op) {
+      case 'place_added':
+      case 'place_updated':
+      case 'place_locked':
+      case 'place_moved':
+        return nameOf(data.place)
+      case 'place_deleted':
+        return places.value.find((p) => p.id === data.place_id)?.name ?? deletedName
+      case 'day_reordered':
+      case 'day_deleted':
+        return dayLabel(String(data.day_id ?? ''))
+      // 这两条广播只带整行，没有顶层 day_id。
+      case 'day_updated':
+      case 'day_added': {
+        const row = data.day as Day | undefined
+        return dayLabel(String(row?.id ?? ''), row?.day_index)
+      }
+      case 'checklist_added':
+        return `${((data.items as ChecklistItem[] | undefined) ?? []).length} 项`
+      case 'checklist_updated':
+        return String((data.item as ChecklistItem | undefined)?.text ?? '')
+      case 'checklist_deleted':
+        return checklist.value.find((i) => i.id === data.id)?.text ?? deletedName
+      case 'expense_added':
+      case 'expense_updated': {
+        const expense = data.expense as Expense | undefined
+        return expense ? `${expense.title} ${formatMoney(expense.amount_cents)}` : ''
+      }
+      case 'expense_deleted':
+        return expenses.value.find((e) => e.id === data.id)?.title ?? deletedName
+      case 'stash_added':
+        return nameOf(data.item)
+      case 'route_optimized':
+        return dayLabel(String(data.day_id ?? ''))
+      default:
+        return ''
+    }
+  }
+
+  /** 记一条广播结果。放在 switch 之前调用：删除与覆盖类的名字只有那一刻还拿得到。 */
+  function logOp(frame: OpBroadcastFrame) {
+    const label = OP_LABELS[frame.op]
+    if (!label) return
+    const data = frame.data as Record<string, unknown>
+    const pending = pendingOps.get(frame.op_id)
+    const subject = opSubject(frame.op, data, pending?.kind === 'deleted' ? pending.name : '')
+    opLog.value = [
+      {
+        seq: frame.seq,
+        op: frame.op,
+        origin: frame.origin,
+        ts: frame.ts,
+        text: subject ? `${label} ${subject}` : label,
+      },
+      ...opLog.value,
+    ].slice(0, OP_LOG_MAX)
+  }
+
   /** The echo or another client's op. `pendingOps` distinguishes the two. */
   function applyRemoteOp(frame: OpBroadcastFrame) {
     const data = frame.data as Record<string, unknown>
     opError.value = null
+    logOp(frame)
 
     switch (frame.op) {
       case 'place_added': {
         const place = data.place as Place
         const pending = pendingOps.get(frame.op_id)
         pendingOps.delete(frame.op_id)
+        if (pending?.kind === 'place_add' && pending.cancelled) {
+          // 这一行在等回执期间就被删掉了：不要插进来，反过来补一发删除把它在服务器上收掉。
+          // 位次交给紧随其后的 place_deleted 广播纠正。
+          useSocketStore().sendOp(Ops.PLACE_DELETE, { place_id: place.id })
+          break
+        }
         if (pending?.kind === 'place_add') {
           removeLocalRow(pending.tempId)
         }
         upsertPlaceIfNewer(place)
         applyOrder(String(data.day_id), data.place_ids as string[])
+        if (pending?.kind === 'place_add' && pending.restore) {
+          applyPlaceRestore(place, pending.restore)
+        }
         break
       }
       case 'place_updated':
@@ -695,12 +992,16 @@ export const useTripStore = defineStore('trip', () => {
     if (reason === 'order_stale') {
       // Converge to the authoritative array the server attached to the rejection.
       applyOrder(String(data.day_id), data.place_ids as string[])
-      opError.value = { message: '顺序已被其他成员调整，已同步至最新', hint: '' }
+      opError.value = { message: '顺序已被其他成员调整，已同步至最新', hint: '', level: 'info' }
       return
     }
     if (reason === 'checklist_stale') {
       applyChecklistOrder((data.item_ids ?? []) as string[])
-      opError.value = { message: '清单顺序已被其他成员调整，已同步至最新', hint: '' }
+      opError.value = {
+        message: '清单顺序已被其他成员调整，已同步至最新',
+        hint: '',
+        level: 'info',
+      }
       return
     }
     if (pending?.kind === 'place_add') {
@@ -715,6 +1016,8 @@ export const useTripStore = defineStore('trip', () => {
     const messages: Record<string, string> = {
       place_not_found: '该地点已被删除',
       day_not_found: '目标天不存在',
+      day_not_empty: '这一天还有地点没删掉，先把它们移到别的天',
+      day_last: '行程至少保留一天，最后一天不能删',
       bad_patch: '修改内容无效',
       bad_payload: '提交的内容无效',
       stash_not_found: '该想去地点已被删除',
@@ -724,8 +1027,10 @@ export const useTripStore = defineStore('trip', () => {
       op_failed: '服务端处理这一步时出了错，请重试',
     }
     opError.value = {
-      message: messages[reason] ?? `操作被拒绝（${reason}）`,
+      // 认不出的 reason 不把内部标识拼上界面（用户读不懂 `place_not_found`）。
+      message: messages[reason] ?? '这一步没有保存，请重试',
       hint: '',
+      level: 'danger',
     }
   }
 
@@ -734,7 +1039,13 @@ export const useTripStore = defineStore('trip', () => {
     places.value = places.value.filter((p) => !p.id.startsWith('tmp-'))
     checklist.value = checklist.value.filter((i) => !i.id.startsWith('tmp-'))
     expenses.value = expenses.value.filter((e) => !e.id.startsWith('tmp-'))
+    // 例外：等回执期间被删掉的那笔 place_add。它还排在 socket 的离线队列里，重连之后
+    // 照样会落地——墓碑跟着一起清，删掉的地点就会在重连后自己长回来。
+    const tombstones = [...pendingOps].filter(
+      ([, p]) => p.kind === 'place_add' && p.cancelled,
+    )
     pendingOps.clear()
+    for (const [opId, pending] of tombstones) pendingOps.set(opId, pending)
   }
 
   // -- presence ------------------------------------------------------------------------
@@ -873,7 +1184,7 @@ export const useTripStore = defineStore('trip', () => {
     addPlace,
     updatePlace,
     setPlaceLocked,
-    deletePlace,
+    deletePlaceWithUndo,
     reorderDay,
     updateTripFields,
     addDay,
@@ -895,6 +1206,7 @@ export const useTripStore = defineStore('trip', () => {
     optimize,
     undoOptimize,
     dismissOptimizeResult,
+    opLog,
     applyRemoteOp,
     applyReject,
     applyPresence,

@@ -51,6 +51,10 @@ const isSelected = computed(() => store.currentDayId === props.day.id)
 const startPlace = computed(() => places.value.find((p) => p.id === props.day.start_place_id) ?? null)
 const endPlace = computed(() => places.value.find((p) => p.id === props.day.end_place_id) ?? null)
 
+/** 天色带：六档 ramp 按 day_index 轮着用，这一天的顶边、序号牌、纵向轨道共用这四条变量。
+ *  颜色在这里是「第几天」的编码，所以取值只能是既有的 ramp 阶，不现场发明色相。 */
+const ramp = computed(() => (props.day.day_index % 6) + 1)
+
 /** 天头概要：`N 个地点 · 09:00–21:40`。收束时刻先取服务端排程的 end_min（它把当天每一
  * 站都算进去了），再退回终点锚到达、最后一站推导值。直接用行数据会在「刚加的地点还没
  * 排程」时把 null 当 0，得出 09:00–01:00 这种荒谬区间。 */
@@ -158,6 +162,12 @@ function runOptimize() {
   <section
     class="daysec card"
     :class="{ 'daysec--open': expanded, 'daysec--on': isSelected }"
+    :style="{
+      '--dc': `var(--ramp-${ramp})`,
+      '--dc-soft': `var(--ramp-${ramp}-soft)`,
+      '--dc-deep': `var(--ramp-${ramp}-deep)`,
+      '--dc-ink': `var(--ramp-${ramp}-ink)`,
+    }"
   >
     <header
       class="daysec__head"
@@ -166,7 +176,7 @@ function runOptimize() {
       @dblclick.prevent="emit('rename')"
     >
       <button
-        class="daysec__arrow"
+        class="daysec__arrow tap-pad"
         type="button"
         :aria-label="expanded ? '折叠这一天' : '展开这一天'"
         @click.stop="emit('toggle')"
@@ -214,10 +224,10 @@ function runOptimize() {
           >
             <template v-for="(place, index) in places" :key="place.id">
               <li v-if="index > 0" class="leg" :data-flip-key="`leg:${place.id}`">
-                <span class="leg__line" />
-                <component :is="modeIcon" class="leg__icon" :size="12" />
-                <span class="leg__text tiny">{{ legText(place, index) }}</span>
-                <span class="leg__line" />
+                <span class="leg__chip">
+                  <component :is="modeIcon" class="leg__icon" :size="11" />
+                  <span class="leg__text tiny">{{ legText(place, index) }}</span>
+                </span>
               </li>
               <PlaceCard
                 :place="place"
@@ -228,7 +238,7 @@ function runOptimize() {
                 :creator-color="store.creatorColorOf(place.added_by)"
                 :marks="railMarks(place.id)"
                 @select="store.selectPlace(place.id)"
-                @remove="store.deletePlace(place.id)"
+                @remove="store.deletePlaceWithUndo(place.id)"
                 @lock="(p, locked) => store.setPlaceLocked(p.id, locked)"
                 @patch="(p, patch) => store.updatePlace(p.id, patch)"
                 @menu="(p, pos) => emit('menu', p, pos)"
@@ -298,7 +308,20 @@ function runOptimize() {
 
 <style scoped>
 .daysec {
+  position: relative;
   overflow: hidden;
+}
+
+/* 顶边色带：这一天的天色从左边实心起、往右淡出。用 ::before 而不是 border-top，
+   是因为被选中的那天要把描边换成 --accent——两件事不能抢同一条边。 */
+.daysec::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3px;
+  content: "";
+  background: linear-gradient(90deg, var(--dc), color-mix(in srgb, var(--dc) 12%, transparent));
 }
 
 .daysec--on {
@@ -343,11 +366,13 @@ function runOptimize() {
 .daysec__badge {
   flex: 0 0 auto;
   padding: 1px 7px;
+  font-family: var(--font-display);
   font-size: 12px;
-  font-weight: 600;
-  color: var(--accent-strong);
-  background: var(--accent-soft);
-  border-radius: 999px;
+  font-weight: 700;
+  letter-spacing: var(--ls-label);
+  color: var(--dc-ink);
+  background: var(--dc);
+  border-radius: var(--radius-pill);
 }
 
 .daysec__title {
@@ -386,7 +411,7 @@ function runOptimize() {
 .daysec__drag {
   flex: 0 0 auto;
   padding: 2px 8px;
-  border: 1px dashed var(--border-strong);
+  border: 1px dashed var(--hairline);
   border-left: 3px solid var(--accent);
   border-radius: var(--radius-sm);
   animation: daysec-drag-in var(--dur) var(--ease-out);
@@ -466,23 +491,47 @@ function runOptimize() {
 }
 
 .bookend {
+  position: relative;
   display: flex;
   gap: 6px;
   align-items: center;
-  padding: 4px 2px;
+  padding: 4px 2px 4px 20px;
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
+}
+
+/* 起点是空心环，站点是实心圆：两种东西在轨道上必须能靠形状分开。
+   left: 3px 把它压在同一道中线上（凹槽 20px、节点 10px 宽）。 */
+.bookend::before {
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 10px;
+  height: 10px;
+  content: "";
+  background: var(--surface);
+  border: 2px solid var(--dc);
+  border-radius: 50%;
+  transform: translateY(-50%);
 }
 
 .bookend--end {
   justify-content: flex-end;
 }
 
+/* 终点那一枚右对齐，左侧凹槽里不该再留它的节点。 */
+.bookend--end::before {
+  display: none;
+}
+
 .daysec__list {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 0;
+  gap: 4px;
+  /* 左凹槽只让给轨道：线路画在这 20px 里，卡片本身不跟着缩，
+     否则侧栏 400px 的卡片会被再啃掉一截正文。 */
+  padding: 0 0 0 20px;
   margin: 0;
   list-style: none;
 }
@@ -492,33 +541,67 @@ function runOptimize() {
   pointer-events: none;
 }
 
+/* 站与站之间这一段就是轨道本身：线段落在左凹槽的中线上，
+   虚线往下流——行程的方向在这儿是「向下」，不是原来的「向右」。 */
 .leg {
+  position: relative;
   display: flex;
-  gap: 6px;
   align-items: center;
-  padding: 0 0 0 14px;
+  min-height: 21px;
   list-style: none;
 }
 
-.leg__line {
-  flex: 1 1 auto;
+.leg::before {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  left: -13px;
+  width: 2px;
+  content: "";
+  background-image: repeating-linear-gradient(180deg, var(--dc) 0 5px, transparent 5px 10px);
+  animation: leg-flow 1.3s linear infinite;
+}
+
+/* 一根短横线把胶囊引到轨道上，读数才不会像飘在空里。 */
+.leg::after {
+  position: absolute;
+  top: 50%;
+  left: -12px;
+  width: 10px;
   height: 1px;
-  background: var(--border-strong);
+  content: "";
+  background: var(--hairline);
+  transform: translateY(-50%);
+}
+
+@keyframes leg-flow {
+  to {
+    background-position-y: 10px;
+  }
+}
+
+.leg__chip {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 1px 7px;
+  background: var(--surface-2);
+  border-radius: var(--radius-pill);
 }
 
 .leg__icon {
   flex: 0 0 auto;
-  color: var(--text-3);
+  color: var(--dc-deep);
 }
 
 .leg__text {
-  flex: 0 0 auto;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
 
 .daysec__empty {
   padding: 10px 12px;
+  margin-left: 20px;
   background: var(--surface-2);
   border-radius: var(--radius-sm);
 }
@@ -548,6 +631,8 @@ function runOptimize() {
   display: inline-flex;
   gap: 4px;
   align-items: center;
+  /* 落点是整条 label（里面那颗原生复选框只有 13×13）。 */
+  min-height: 28px;
 }
 
 .daysec__hint {

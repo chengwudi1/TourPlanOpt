@@ -170,6 +170,8 @@ onBeforeUnmount(() => {
 .search__input {
   flex: 1;
   min-width: 0;
+  /* 文字框的落点本来就该容得下一根手指（O6 实测只有 23px）。 */
+  min-height: 28px;
   padding: 0;
   background: none;
   border: 0;

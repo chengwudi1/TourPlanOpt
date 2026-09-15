@@ -226,7 +226,7 @@ onBeforeUnmount(closeMenu)
     transform var(--dur) var(--ease-out);
 }
 .tripcard:hover {
-  border-color: var(--border-strong);
+  border-color: var(--accent);
   box-shadow: var(--shadow-lg);
   transform: translateY(-2px);
 }
@@ -247,7 +247,7 @@ onBeforeUnmount(closeMenu)
   place-items: center;
   height: 92px;
   overflow: hidden;
-  color: var(--ember);
+  color: var(--ember-deep);
   background: linear-gradient(135deg, var(--ember-soft), var(--surface-2));
   border-bottom: 1px solid var(--border-faint);
 }
@@ -282,30 +282,29 @@ onBeforeUnmount(closeMenu)
 }
 
 /* 倒计时胶囊压在照片上，所以自带深色底，不跟照片明暗赌运气。
-   三档底色一律写死深色，不用 --ember / --ok：那两个令牌在深色主题是浅橙 #d98a54 和
-   亮绿 #34b96f，白字压上去只有 2.2–2.6:1。这里是「压在图上的实心胶囊」，和 HomeHero
-   的假封面同理，必须和主题反着走。 */
+   三档底色走 --photo-*：那组令牌刻意不跟主题反色（照片在深色态也还是那张照片），
+   白字压上去才不会只剩 2.2–2.6:1。与 HomeHero 的状态胶囊同理，共用一份。 */
 .tripcard__count {
   position: absolute;
   top: 8px;
   left: 8px;
   padding: 2px 8px;
-  font-size: 11px;
+  font-size: var(--t-micro);
   font-weight: 600;
   line-height: 1.6;
   color: #fff;
-  background: rgba(24, 16, 9, 0.68);
-  border-radius: 999px;
+  background: var(--photo-scrim);
+  border-radius: var(--radius-pill);
   backdrop-filter: blur(4px);
 }
 .tripcard__count--soon {
-  background: #8a4520;
+  background: var(--photo-soon);
 }
 .tripcard__count--live {
-  background: #136f3c;
+  background: var(--photo-live);
 }
 .tripcard__count--past {
-  background: rgba(24, 16, 9, 0.5);
+  background: rgba(12, 20, 19, 0.5);
 }
 
 .tripcard__body {
@@ -347,7 +346,7 @@ onBeforeUnmount(closeMenu)
   color: var(--text-2);
   background: var(--surface-2);
   border: 1px solid var(--border-faint);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .tripcard__foot {
