@@ -16,7 +16,9 @@ import Sprite from '@/components/Sprite.vue'
 import RecommendPanel from '@/components/RecommendPanel.vue'
 import TripHeader from '@/components/TripHeader.vue'
 import {
+  ArrowDown,
   ArrowRight,
+  ArrowUp,
   BedDouble,
   Check,
   Compass,
@@ -455,6 +457,17 @@ const menuDay = computed(() => {
   return store.days.find((d) => d.id === menu.place.day_id) ?? null
 })
 
+/** 卡片菜单里那张卡在本天序列里的位次（按 id 比，不按对象——菜单存的是打开那一刻的引用）。 */
+const cardMenuOrder = computed(() => {
+  const menu = cardMenu.value
+  if (!menu) return { index: -1, count: 0 }
+  const ordered = store.places
+    .filter((p) => p.day_id === menu.place.day_id)
+    .slice()
+    .sort((a, b) => a.sort_index - b.sort_index)
+  return { index: ordered.findIndex((p) => p.id === menu.place.id), count: ordered.length }
+})
+
 /** 卡片菜单里的「移到其他天」候选（地点当前所在的天除外）。 */
 const cardMenuOtherDays = computed(() => {
   const menu = cardMenu.value
@@ -749,6 +762,22 @@ if (import.meta.env.DEV) {
         @click="store.setEndPlace(menuDay.id, cardMenu.place.id); closeCardMenu()"
       >
         <BedDouble class="ic" :size="13" /> 设为终点
+      </button>
+      <button
+        v-if="cardMenuOrder.index > 0"
+        class="cardmenu__item"
+        type="button"
+        @click="store.nudgePlace(cardMenu.place.day_id, cardMenu.place.id, -1); closeCardMenu()"
+      >
+        <ArrowUp class="ic" :size="13" /> 上移一位
+      </button>
+      <button
+        v-if="cardMenuOrder.index >= 0 && cardMenuOrder.index < cardMenuOrder.count - 1"
+        class="cardmenu__item"
+        type="button"
+        @click="store.nudgePlace(cardMenu.place.day_id, cardMenu.place.id, 1); closeCardMenu()"
+      >
+        <ArrowDown class="ic" :size="13" /> 下移一位
       </button>
       <button
         v-for="d in cardMenuOtherDays"

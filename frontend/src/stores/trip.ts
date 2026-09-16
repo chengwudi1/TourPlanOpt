@@ -466,6 +466,23 @@ export const useTripStore = defineStore('trip', () => {
     useSocketStore().sendOp(Ops.DAY_REORDER, { day_id: dayId, place_ids: orderedIds })
   }
 
+  /**
+   * 上移 / 下移一位。拖动是手上的事，键盘和误触得有第二条路；两条路走的是同一个
+   * `DAY_REORDER`（这里给的仍是整天完整的序列，不是位移量），所以收敛行为一致。
+   */
+  function nudgePlace(dayId: string, placeId: string, delta: number) {
+    const ordered = places.value
+      .filter((p) => p.day_id === dayId)
+      .slice()
+      .sort((a, b) => a.sort_index - b.sort_index)
+      .map((p) => p.id)
+    const from = ordered.indexOf(placeId)
+    const to = from + delta
+    if (from < 0 || to < 0 || to >= ordered.length) return
+    ordered.splice(to, 0, ordered.splice(from, 1)[0])
+    reorderDay(dayId, ordered)
+  }
+
   function updateTripFields(patch: Partial<Trip>) {
     if (trip.value) Object.assign(trip.value, patch)
     useSocketStore().sendOp(Ops.TRIP_UPDATE, { patch })
@@ -541,17 +558,27 @@ export const useTripStore = defineStore('trip', () => {
     stashRemove(item.id)
   }
 
-  /** 跨天移动：把地点移到目标天末尾（place_move op，两天顺序由服务端权威重排）。 */
-  function movePlaceToDay(placeId: string, toDayId: string) {
+  /**
+   * 跨天移动。`beforePlaceId` 给的是「插到目标天哪一个地点前面」，不给或认不出就是末尾。
+   *
+   * 协议里没有「移到某天第几位」这一发 op，所以这里是两条既有 op 的组合：先 `place_move`
+   * （服务端把它落到目标天末尾，并回广播两天的权威顺序），再补一条 `day_reorder` 挪到指定位。
+   * 顺序不能反：reorder 的置换校验按当前库内容判，先重排再挪天必然被判 order_stale。
+   * 别人在这一瞬并发改了目标天时，第二条会拿到 order_stale —— 那是按权威顺序收敛，不是丢数据。
+   */
+  function movePlaceToDay(placeId: string, toDayId: string, beforePlaceId?: string | null) {
     const place = places.value.find((p) => p.id === placeId)
     if (!place || place.day_id === toDayId) return
     removeLocalRow(placeId)
-    const maxIndex = places.value.reduce(
-      (max, p) => (p.day_id === toDayId ? Math.max(max, p.sort_index) : max),
-      -1,
-    )
-    places.value.push({ ...place, day_id: toDayId, sort_index: maxIndex + 1 })
-    useSocketStore().sendOp(Ops.PLACE_MOVE, { place_id: placeId, day_id: toDayId })
+    const ordered = places.value.filter((p) => p.day_id === toDayId).map((p) => p.id)
+    const at = beforePlaceId ? ordered.indexOf(beforePlaceId) : -1
+    if (at >= 0) ordered.splice(at, 0, placeId)
+    else ordered.push(placeId)
+    places.value.push({ ...place, day_id: toDayId, sort_index: 0 })
+    applyOrder(toDayId, ordered)
+    const socket = useSocketStore()
+    socket.sendOp(Ops.PLACE_MOVE, { place_id: placeId, day_id: toDayId })
+    if (at >= 0) socket.sendOp(Ops.DAY_REORDER, { day_id: toDayId, place_ids: ordered })
   }
 
   // -- checklist（出行清单）--------------------------------------------------------------
@@ -1186,6 +1213,7 @@ export const useTripStore = defineStore('trip', () => {
     setPlaceLocked,
     deletePlaceWithUndo,
     reorderDay,
+    nudgePlace,
     updateTripFields,
     addDay,
     updateDay,

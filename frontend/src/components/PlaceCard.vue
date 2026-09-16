@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import TimeRail, { type RailMark } from '@/components/TimeRail.vue'
 import {
@@ -15,6 +15,7 @@ import {
   Plus,
   Sparkles,
   Timer,
+  Trash2,
   X,
 } from '@/components/icons'
 import type { Place } from '@/types/domain'
@@ -36,6 +37,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   select: [place: Place]
+  close: [place: Place]
   remove: [place: Place]
   lock: [place: Place, locked: boolean]
   patch: [place: Place, patch: { duration_min?: number; note?: string; start_min?: number | null }]
@@ -174,6 +176,29 @@ function blurNote() {
   noteTyping.value = false
   commitNote()
 }
+
+/** 收起详情。备注必须先提交：Esc 与点「收起」都不走 textarea 的 blur，而面板一卸载，
+ *  没发出去的那半行字就再也找不回来了。 */
+function closePanel() {
+  blurNote()
+  emit('close', props.place)
+}
+
+// Esc 是展开态的退出键——监听只在这一张卡展开期间挂着，同时最多一张，不会互相抢。
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') closePanel()
+}
+
+let escOn = false
+function esc(on: boolean) {
+  if (on === escOn) return
+  escOn = on
+  if (on) window.addEventListener('keydown', onKeydown)
+  else window.removeEventListener('keydown', onKeydown)
+}
+
+watch(() => props.active, esc, { immediate: true })
+onBeforeUnmount(() => esc(false))
 </script>
 
 <template>
@@ -189,73 +214,91 @@ function blurNote() {
     @pointermove="pressCancel"
     @pointercancel="pressCancel"
   >
-    <span class="place__drag" title="拖动排序" aria-hidden="true">
-      <GripVertical :size="14" />
-    </span>
-
-    <span class="place__lead">
-      <img
-        v-if="place.photo_url"
-        class="place__photo"
-        :src="place.photo_url"
-        :alt="`${place.name} 的照片`"
-        loading="lazy"
-        referrerpolicy="no-referrer"
-      />
-      <span v-else class="place__photo place__photo--empty" aria-hidden="true">
-        <MapPin :size="14" />
+    <!-- 整行都是把手：以前只有那一枚 grip 能拖，鼠标要瞄 14px 宽的窄条。触屏反过来——
+         行上没有 touch-action:none，手指一划仍然是滚动，能拖的仍然只有那一枚 grip。 -->
+    <div class="place__row">
+      <span class="place__drag" title="拖动排序" aria-hidden="true">
+        <GripVertical :size="14" />
       </span>
-      <span
-        class="place__order"
-        :style="creatorColor ? { background: creatorColor } : undefined"
-      >{{ index + 1 }}</span>
-    </span>
 
-    <div class="place__body">
-      <div class="place__title">
-        <span class="place__name">{{ place.name }}</span>
-        <span
-          v-if="place.locked"
-          class="place__pin tiny"
-          :title="
-            place.user_start_min === null
-              ? '本站已固定，优化排程不会调整'
-              : '开始时间已固定，本站随之固定'
-          "
-        >
-          <Lock :size="11" />
+      <span class="place__lead">
+        <img
+          v-if="place.photo_url"
+          class="place__photo"
+          :src="place.photo_url"
+          :alt="`${place.name} 的照片`"
+          loading="lazy"
+          referrerpolicy="no-referrer"
+        />
+        <span v-else class="place__photo place__photo--empty" aria-hidden="true">
+          <MapPin :size="14" />
         </span>
-        <span v-if="place.status === 'confirmed'" class="place__confirmed tiny">已确认</span>
-        <span v-if="editingBy" class="place__editor tiny" :style="{ color: editingBy.color }">
-          {{ editingBy.name }} 正在编辑
-        </span>
+        <span class="place__order" :style="creatorColor ? { background: creatorColor } : undefined">{{
+          index + 1
+        }}</span>
+      </span>
+
+      <div class="place__body">
+        <div class="place__title">
+          <span class="place__name">{{ place.name }}</span>
+          <span
+            v-if="place.locked"
+            class="place__pin tiny"
+            :title="
+              place.user_start_min === null
+                ? '本站已固定，优化排程不会调整'
+                : '开始时间已固定，本站随之固定'
+            "
+          >
+            <Lock :size="11" />
+          </span>
+          <span v-if="place.status === 'confirmed'" class="place__confirmed tiny">已确认</span>
+          <span v-if="editingBy" class="place__editor tiny" :style="{ color: editingBy.color }">
+            {{ editingBy.name }} 正在编辑
+          </span>
+        </div>
+
+        <div v-if="place.address" class="place__address tiny">{{ place.address }}</div>
+
+        <div v-if="place.note && !active" class="place__note tiny">{{ place.note }}</div>
       </div>
 
-      <div v-if="place.address" class="place__address tiny">{{ place.address }}</div>
+      <div class="place__time">
+        <span class="place__clock">{{ clock }}</span>
+        <span class="place__stay tiny">{{ stayText }}</span>
+      </div>
 
-      <div v-if="place.note && !active" class="place__note tiny">{{ place.note }}</div>
-    </div>
-
-    <div class="place__time">
-      <span class="place__clock">{{ clock }}</span>
-      <span class="place__stay tiny">{{ stayText }}</span>
-    </div>
-
-    <div class="place__side">
-      <button
-        class="btn btn--sm btn--ghost place__menu"
-        title="更多操作"
-        @click.stop="emit('menu', place, { x: $event.clientX, y: $event.clientY })"
-      >
-        <Ellipsis :size="14" />
-      </button>
-      <button
-        class="btn btn--sm btn--ghost place__delete"
-        title="删除这个地点"
-        @click.stop="emit('remove', place)"
-      >
-        <X :size="14" />
-      </button>
+      <div class="place__side">
+        <!-- 退出键长在删除旁边，且必须比删除更显眼：× 这个字形人人读作「关闭」，
+             而它以前恰好是删除——展开详情后找不到出口、只能把地点删掉，就是这么来的。 -->
+        <button
+          v-if="active"
+          class="btn btn--sm btn--ghost place__close"
+          type="button"
+          title="收起详情"
+          aria-label="收起详情"
+          @click.stop="closePanel"
+        >
+          <X :size="14" />
+        </button>
+        <button
+          class="btn btn--sm btn--ghost place__menu"
+          type="button"
+          title="更多操作"
+          @click.stop="emit('menu', place, { x: $event.clientX, y: $event.clientY })"
+        >
+          <Ellipsis :size="14" />
+        </button>
+        <button
+          class="btn btn--sm btn--ghost place__delete"
+          type="button"
+          title="删除这个地点"
+          aria-label="删除这个地点"
+          @click.stop="emit('remove', place)"
+        >
+          <Trash2 :size="14" />
+        </button>
+      </div>
     </div>
 
     <!-- 编辑器：只在选中的卡片上展开，并且横跨整张卡片——侧栏只有 400px，
@@ -386,16 +429,20 @@ function blurNote() {
           </span>
           <span class="switch__text">固定本站</span>
         </button>
-        <a
-          v-if="navHref"
-          class="btn btn--sm btn--ghost"
-          :href="navHref"
-          target="_blank"
-          rel="noopener"
-          title="跳转到高德地图导航"
-        >
-          <Navigation class="ic" :size="13" /> 导航到这里
-        </a>
+        <span class="edit__acts">
+          <a
+            v-if="navHref"
+            class="btn btn--sm btn--ghost"
+            :href="navHref"
+            target="_blank"
+            rel="noopener"
+            title="跳转到高德地图导航"
+          >
+            <Navigation class="ic" :size="13" /> 导航到这里
+          </a>
+          <!-- 面板比一屏高时，顶部那颗 × 已经滚出视野了：出口在末尾再给一次。 -->
+          <button class="btn btn--sm" type="button" @click="closePanel">收起详情</button>
+        </span>
       </div>
     </div>
   </li>
@@ -405,9 +452,9 @@ function blurNote() {
 .place {
   position: relative;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
-  align-items: flex-start;
+  align-items: stretch;
   padding: 8px 10px;
   cursor: pointer;
   transition:
@@ -415,6 +462,15 @@ function blurNote() {
     background var(--dur-fast) var(--ease-out),
     box-shadow var(--dur) var(--ease-out),
     transform var(--dur) var(--ease-out);
+}
+
+/* 正文行＝拖拽把手（`useDragSort` 的 handle 就指这里）。编辑面板故意不在这行里：
+   否则按住备注框选两个字就把整张卡拖走了，时刻轨道也拖不动。 */
+.place__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
 }
 
 /* 站点：一枚落在轨道中线上的实心圆（--dc 由这一天继承下来，所以颜色本身就是「第几天」）。
@@ -455,22 +511,23 @@ function blurNote() {
   box-shadow: var(--shadow-sm);
 }
 
+/* 鼠标端整行都能拖了，这一枚仍是触屏上唯一的把手：touch-action:none 只写在把手上，
+   手指划过卡片正文照常滚动列表，按住 grip 不动才算拖动。常亮是因为它的职责按设备而变，
+   不亮就没人知道触屏该按哪里。 */
 .place__drag {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
   align-self: stretch;
-  padding: 0 1px;
-  color: var(--text-faint);
+  padding: 0 2px;
+  color: var(--text-2);
   cursor: grab;
   user-select: none;
-  opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease-out);
+  touch-action: none;
 }
 
-.place:hover .place__drag,
-.place--active .place__drag {
-  opacity: 1;
+.place__drag:active {
+  cursor: grabbing;
 }
 
 .place__lead {
@@ -513,17 +570,24 @@ function blurNote() {
 }
 
 .place__body {
-  flex: 1 1 auto;
+  /* basis 必须是 0：换行是在「收缩之前」按假想主轴尺寸定的，而标题那一列的自动 basis
+     就把 357px 的卡片撑满了 —— 于是右侧的 ⋯/× 被整块挤到第二行，孤零零挂在正文下面。
+     给 0 之后第一行永远装得下，这一列照样靠 grow 吃掉剩余宽度。 */
+  flex: 1 1 0;
   min-width: 0;
 }
 
 .place__title {
   display: flex;
-  gap: 5px;
+  flex-wrap: wrap;
+  gap: 2px 5px;
   align-items: baseline;
 }
 
 .place__name {
+  /* 必须给个下限：overflow:hidden 把这枚 flex 项的自动最小尺寸压成 0，于是窄屏上
+     旁边的「某某 正在编辑」会把地名挤成一两个省略号，而不是把自己换到下一行去。 */
+  min-width: 5em;
   overflow: hidden;
   font-size: 13px;
   font-weight: 500;
@@ -583,9 +647,12 @@ function blurNote() {
 
 .place__side {
   display: flex;
+  /* 竖着叠：这一行在拖把手、照片、时间列之后只剩 ~280px，横着排两颗按钮要吃掉 58px，
+     地点名就会被挤到「成都大熊猫繁育研究…」。叠成竖列只占 26px，名字回到十一个字。 */
+  flex-direction: column;
   flex: 0 0 auto;
-  gap: 2px;
-  align-items: flex-start;
+  gap: 0;
+  align-items: center;
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease-out);
 }
@@ -595,17 +662,40 @@ function blurNote() {
   opacity: 1;
 }
 
+.place__close,
 .place__menu,
 .place__delete {
   padding: 2px 6px;
   font-size: 13px;
 }
 
-/* 这两颗挨着，用 .tap-pad 向外撑会互相盖住落点——直接加高更诚实。 */
+/* 出口与删除挨着长，颜色必须分开：× 走主色，垃圾桶才走危险色。 */
+.place__close:hover {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+/* 这三颗挨着，用 .tap-pad 向外撑会互相盖住落点——直接加高更诚实。 */
 @media (max-width: 860px) {
+  .place__close,
   .place__menu,
   .place__delete {
     min-height: 30px;
+  }
+
+  /* 竖叠在桌面上省的是宽度，手机上正相反：宽度富余（正文列 218px 起），高度才贵——
+     两颗 30px 摞起来会把每一行都撑高 12px。所以手机上回到横排。 */
+  .place__side {
+    flex-direction: row;
+    gap: 2px;
+    align-items: flex-start;
+  }
+
+  /* 把手在卡片最左边，左右没有别的落点，可以安心撑宽到可指按的尺寸。 */
+  .place__drag {
+    min-width: 28px;
+    justify-content: center;
+    padding: 0;
   }
 }
 
@@ -613,9 +703,7 @@ function blurNote() {
 
 .place__edit {
   display: flex;
-  flex: 1 1 100%;
   flex-direction: column;
-  order: 5;
   gap: 10px;
   margin-top: 2px;
   padding-top: 10px;
@@ -824,6 +912,15 @@ function blurNote() {
   display: inline-flex;
   align-items: center;
   text-decoration: none;
+}
+
+/* 右端那一组：导航是外链、收起是这块面板的出口，并排同权重，窄了就换行。 */
+.edit__acts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
 }
 
 .switch {

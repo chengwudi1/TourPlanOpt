@@ -6,6 +6,7 @@ import type { RailMark } from '@/components/TimeRail.vue'
 import { BedDouble, Car, ChevronDown, Flag, Footprints, Navigation, Ruler, X, Zap } from '@/components/icons'
 import { useDragSort } from '@/composables/useDragSort'
 import { useFlipList } from '@/composables/useFlipList'
+import { usePlaceDrag } from '@/composables/usePlaceDrag'
 import { useSocketStore } from '@/stores/socket'
 import { useTripStore } from '@/stores/trip'
 import type { OptimizeResult } from '@/stores/trip'
@@ -122,14 +123,35 @@ function railMarks(exceptId: string): RailMark[] {
     .map((p) => ({ name: p.name, min: p.start_min as number }))
 }
 
-// -- 拖拽：只在本区块内排序；拖动状态作为 presence 广播给同房间。 --------------------
+// -- 拖拽：本天内排序 + 跨天搬走；拖动状态作为 presence 广播给同房间。 ------------------
 
 const listEl = ref<HTMLElement | null>(null)
+const { dragFromDay, dragOverDay, endPlaceDrag } = usePlaceDrag()
+
+/** 指针悬在本天、且不是本天自己拿起来的：这时松手就会把一个地点送进来。 */
+const isDropTarget = computed(
+  () => dragOverDay.value === props.day.id && dragFromDay.value !== props.day.id,
+)
+
 useDragSort(
   listEl,
   (orderedIds) => store.reorderDay(props.day.id, orderedIds),
-  (dragging) =>
-    socket.sendPresence(props.day.id, store.selectedPlaceId, dragging ? props.day.id : null),
+  (dragging) => {
+    if (dragging) dragFromDay.value = props.day.id
+    else endPlaceDrag()
+    socket.sendPresence(props.day.id, store.selectedPlaceId, dragging ? props.day.id : null)
+  },
+  {
+    group: 'trip-places',
+    // 整行是把手之后，行内那三颗按钮必须从拖拽源里摘出去：手一抖就把卡片拖走，
+    // 而这一次点击也不会发生。编辑面板不在正文行里，本来就不参与。
+    filter: 'button',
+    onTransfer: (placeId, _fromDay, toDay, beforeId) =>
+      store.movePlaceToDay(placeId, toDay, beforeId),
+    onHoverList: (dayId) => {
+      dragOverDay.value = dayId
+    },
+  },
 )
 // 一键优化、别人把地点挪走、跨天移动之后，行与行之间要看得见位移而不是瞬间换位。
 useFlipList(
@@ -217,10 +239,10 @@ function runOptimize() {
           </div>
 
           <ul
-            v-if="places.length"
             ref="listEl"
             class="daysec__list"
-            :class="{ 'daysec__list--locked': !!dragger }"
+            :class="{ 'daysec__list--locked': !!dragger, 'daysec__list--over': isDropTarget }"
+            :data-day-id="day.id"
           >
             <template v-for="(place, index) in places" :key="place.id">
               <li v-if="index > 0" class="leg" :data-flip-key="`leg:${place.id}`">
@@ -238,15 +260,19 @@ function runOptimize() {
                 :creator-color="store.creatorColorOf(place.added_by)"
                 :marks="railMarks(place.id)"
                 @select="store.selectPlace(place.id)"
+                @close="store.selectPlace(null)"
                 @remove="store.deletePlaceWithUndo(place.id)"
                 @lock="(p, locked) => store.setPlaceLocked(p.id, locked)"
                 @patch="(p, patch) => store.updatePlace(p.id, patch)"
                 @menu="(p, pos) => emit('menu', p, pos)"
               />
             </template>
+            <!-- 空天也得是个接收方：这一行不能换成 v-else 的 <p>，否则 listEl 不存在，
+                 别天的地点就拖不进来了。 -->
+            <li v-if="!places.length" class="daysec__empty tiny">
+              {{ isDropTarget ? '松手即移到本天' : '这一天暂无安排。选中后可通过搜索或「发现」添加地点。' }}
+            </li>
           </ul>
-
-          <p v-else class="daysec__empty tiny muted">这一天暂无安排。选中后可通过搜索或「发现」添加地点。</p>
 
           <div v-if="endPlace" class="bookend bookend--end tiny">
             <BedDouble class="ic" :size="12" />
@@ -536,6 +562,14 @@ function runOptimize() {
   list-style: none;
 }
 
+/* 正被拖进来的那一天：虚线 + 浅色垫，落在列表本身，行不跟着位移。 */
+.daysec__list--over {
+  outline: 2px dashed var(--accent);
+  outline-offset: 3px;
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+}
+
 .daysec__list--locked {
   opacity: 0.6;
   pointer-events: none;
@@ -601,9 +635,9 @@ function runOptimize() {
 
 .daysec__empty {
   padding: 10px 12px;
-  margin-left: 20px;
   background: var(--surface-2);
   border-radius: var(--radius-sm);
+  color: var(--text-2);
 }
 
 .daysec__warnings {
