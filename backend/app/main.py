@@ -52,6 +52,9 @@ async def lifespan(app: FastAPI):
         level=logging.INFO,
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
     )
+    # 高德密钥走 query 参数，而 httpx 在 INFO 级把完整请求 URL 原样打进来 —— 那等于把
+    # 密钥抄进日志。第三方库的日志级别不由我们决定，所以把它抬到 WARNING。
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     _guard_single_worker()
     logger.info("%s v%s starting", settings.app_name, settings.version)
 
@@ -85,6 +88,18 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("助手配置读取失败（不影响启动）")
 
+    # 语音识别同理：只报配置成了什么，不联网探活。
+    try:
+        from app.assistant.speech import asr_label, asr_ready
+
+        logger.info(
+            "语音输入：%s（%s）",
+            "录音上传后端转写" if asr_ready() else "未配 ASR_BASE_URL，退回浏览器识别",
+            asr_label(),
+        )
+    except Exception:
+        logger.exception("语音识别配置读取失败（不影响启动）")
+
     yield
 
     try:
@@ -99,6 +114,12 @@ async def lifespan(app: FastAPI):
         await close_llm_client()
     except Exception:
         logger.exception("关闭模型客户端时出错")
+    try:
+        from app.assistant.speech import close_asr_client
+
+        await close_asr_client()
+    except Exception:
+        logger.exception("关闭转写客户端时出错")
     logger.info("%s shutting down", settings.app_name)
 
 

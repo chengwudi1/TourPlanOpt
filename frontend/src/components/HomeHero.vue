@@ -70,7 +70,7 @@ const statusText = computed(() =>
 </script>
 
 <template>
-  <section class="hero">
+  <section class="hero" :class="{ 'hero--nophoto': !trip.cover_photo }">
     <div v-if="trip.cover_photo" class="hero__photo">
       <img :src="trip.cover_photo" :alt="`${trip.title || '未命名行程'}的封面`" decoding="async" referrerpolicy="no-referrer" />
     </div>
@@ -189,16 +189,15 @@ const statusText = computed(() =>
 }
 
 .hero__fallback {
-  /* 本质是「假封面」：两种主题下都必须保持深色，因为上面压的是白字。所以这里故意不用
-     accent/ok 令牌——它们在深色态是亮蓝和亮绿（那是给正文反着用的一套），
-     拿它们当底会让白字掉到 2:1。四档从深海到山苔，白字压在哪一档都在 6:1 以上。 */
-  color: #eef4f2;
-  background: linear-gradient(140deg, #06283c, #0a3f61 42%, #12615c 78%, #1f5c46);
+  /* 没有封面就不装成有封面：这块是「地图底」，不是「假照片」。所以它跟着主题走——
+     亮色态是浅蓝到纸色的一层淡彩，深色态自己落回夜航蓝；压在上面的是墨色大字，
+     不是白字。原来那四档深色渐变在奶油色的首页上就是一块黑石板，越干净越像漏了底。 */
+  color: var(--accent);
 }
 .hero__fallback svg {
   width: 100%;
   height: 100%;
-  opacity: 0.4;
+  opacity: 0.5;
 }
 
 /* 路线自绘：这条线是虚线点阵，stroke-dashoffset 派不上用场（只会让点往前爬，
@@ -251,6 +250,65 @@ const statusText = computed(() =>
     rgba(11, 22, 26, 0.7) 66%,
     rgba(11, 22, 26, 0.82) 100%
   );
+}
+
+/* -- 没有封面的那一路：淡彩底 + 墨色字，整块留在纸面上，不再是一枚深色石板 ---------- */
+.hero--nophoto {
+  background: linear-gradient(150deg, var(--accent-soft) 0%, var(--bg) 54%, var(--surface-2) 100%);
+}
+
+.hero--nophoto::after {
+  background: none;
+}
+
+/* 照片卡要高，是因为照片要留出被看见的部分；淡彩底留那么多空白就是空。 */
+.hero--nophoto .hero__inner {
+  min-height: clamp(240px, 34vh, 320px);
+}
+
+.hero--nophoto .hero__title {
+  color: var(--ink);
+  text-shadow: none;
+}
+
+.hero--nophoto .hero__sub {
+  color: var(--text-2);
+  text-shadow: none;
+}
+.hero--nophoto .hero__sub .ic {
+  color: var(--accent);
+}
+
+.hero--nophoto .hero__hints {
+  color: var(--accent-strong);
+  background: color-mix(in srgb, var(--surface) 74%, transparent);
+}
+.hero--nophoto .hero__hints .ic {
+  color: var(--accent);
+}
+
+/* 倒计时胶囊：照片那套是「实心深底 + 白字」，淡彩底上要换成软底 + 深色字，
+   否则一块棕色贴在浅蓝上，读起来像贴错了卡。 */
+.hero--nophoto .hero__status {
+  color: var(--text);
+  background: var(--surface-3);
+}
+.hero--nophoto .hero__status--soon {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.hero--nophoto .hero__status--live {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.hero--nophoto .hero__status--past {
+  color: var(--text-2);
+  background: var(--surface-3);
+}
+
+.hero--nophoto .hero__stats {
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  border-color: var(--border);
 }
 
 .hero__inner {

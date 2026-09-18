@@ -38,6 +38,17 @@ const done = computed(() => store.checklistDoneCount)
 const pct = computed(() => (total.value ? Math.round((done.value / total.value) * 100) : 0))
 const allDone = computed(() => total.value > 0 && done.value === total.value)
 
+/**
+ * 全员同一人整理时，那个名字在表头说一次就够了。
+ *
+ * 逐行挂署名是在「多人协作」时才成立的信息；一份由「补常用」一次生成的清单，
+ * 15 行重复同一个昵称会把整页压成噪声，反而看不出谁后来加过东西。
+ */
+const sharedAuthor = computed(() => {
+  const names = new Set(store.checklist.map((i) => i.added_by).filter(Boolean))
+  return names.size === 1 && store.checklist.length > 1 ? [...names][0] : ''
+})
+
 const listEl = ref<HTMLElement | null>(null)
 useDragSort(listEl, (ids) => store.reorderChecklist(ids), undefined, {
   item: '.chk',
@@ -109,6 +120,7 @@ async function remove(item: ChecklistItem) {
       </svg>
       <span v-if="total" class="tiny muted">{{ done }}/{{ total }} 已备好</span>
       <span v-else class="tiny muted">出发前逐项确认，避免临行遗漏</span>
+      <span v-if="sharedAuthor" class="tiny muted">· 由 {{ sharedAuthor }} 整理</span>
       <button
         v-if="total"
         class="btn btn--sm btn--ghost check__fill"
@@ -147,7 +159,7 @@ async function remove(item: ChecklistItem) {
         >
           {{ item.text }}
         </button>
-        <span v-if="item.added_by" class="tiny muted chk__by">{{ item.added_by }}</span>
+        <span v-if="item.added_by && !sharedAuthor" class="tiny muted chk__by">{{ item.added_by }}</span>
         <button class="iconbtn chk__drag" type="button" title="拖动排序">
           <GripVertical class="ic" :size="14" />
         </button>

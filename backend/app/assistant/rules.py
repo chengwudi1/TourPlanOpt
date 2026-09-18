@@ -34,22 +34,74 @@ _CLOCK_WORDS = re.compile(
 )
 _DURATION_WORDS = re.compile(
     r"(玩|停留|逛|待|游玩|安排|预计|大概)?\s*"
-    r"([0-9]+(?:\.[0-9]{1,2})?|[一二两三四五六七八九十]{1,3})\s*(个)?\s*(小时|钟头|分钟)"
+    r"([0-9]+(?:\.[0-9]{1,2})?|[一二两三四五六七八九十半]{1,3})\s*(个)?\s*(小时|钟头|分钟)"
+)
+# 「一个半小时」：半个单位夹在量词和单位名称中间，上面那条按顺序拼不出来。
+# 「半」以前根本不在时长词表里，于是「玄武湖玩半小时」整截被当地名送进确认卡。
+# 前面那个动词也要一起吃掉，理由和上面那条一样——不吞的话「玄武湖玩」会留在名字里。
+_AND_HALF = re.compile(
+    r"(?:玩|停留|逛|待|游玩|安排|预计|大概)?\s*"
+    r"([0-9一二两三四五六七八九十]{1,3})\s*个\s*半\s*(?:小时|钟头)"
 )
 _FILLER = re.compile(
     r"帮我|给我|麻烦|请|我们|我|你|把|将|再|也|都|就|要|去|到|一下|一个|个|吧|呢|啊|了"
 )
 _ADD_TRIGGERS = re.compile(r"添加|加入|新增|加上|加|想去|安排|记一下|列一下|排进|插进|增加到行程")
-_REMOVE_TRIGGERS = re.compile(r"删除|删掉|去掉|移除|取消|不要|不去了")
+# 「不去了」以前是整条写死的，于是「明天不去中山陵了」一路掉到 place_add 分支（那句里
+# 有个「去」字），最后报出一个叫「不中山陵」的地点——漏认只是让人再打一遍，
+# 这种错认是要人点撤销的。删了/划掉同理：口语里没人说「删除」。
+_REMOVE_TRIGGERS = re.compile(
+    r"删除|删掉|删了|剔掉|拿掉|划掉|去掉|移除|取消|不要|(?<![得必需肯])不去|去不了|去不成"
+)
 # 元词指的是那张清单本身，不是清单里的某一条：「防晒霜的待办」内容是防晒霜。
 _META_WORDS = re.compile(r"待办|待办事项|清单|备忘|事项")
 
-_CN_NUM = {
-    "零": 0, "一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5,
-    "六": 6, "七": 7, "八": 8, "九": 9, "十": 10, "半": 30,
+_CN_DIGIT = {
+    "零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
+    "五": 5, "六": 6, "七": 7, "八": 8, "九": 9,
 }
-# 「预算三千」的千、「先花两万」的万：数字后面的量级单位。
-_CN_UNIT = {"万": 10_000, "千": 1_000, "百": 100}
+_CN_UNIT_VALUE = {"十": 10, "百": 100, "千": 1_000}
+
+
+def _cn_number(token: str) -> float | None:
+    """三百八 / 三千二百 / 十一 / 两万：中文数字读法。
+
+    末尾那个孤立数字按口语省略规则升一级：「三百八」是 380 不是 308，「一千二」是 1200。
+    只有前面出现过 百/千/万 才升，所以「十一」还是 11、「八」还是 8。
+    """
+    s = token.strip()
+    if not s or any(c not in _CN_DIGIT and c not in _CN_UNIT_VALUE and c != "万" for c in s):
+        return None
+    total = 0
+    cur: int | None = None
+    last_unit = 0
+    for ch in s:
+        if ch in _CN_DIGIT:
+            cur = _CN_DIGIT[ch]
+            continue
+        if ch == "万":
+            total = (total + (cur if cur is not None else 1)) * 10_000
+            cur, last_unit = None, 10_000
+            continue
+        unit = _CN_UNIT_VALUE[ch]
+        total += (cur if cur is not None else 1) * unit
+        cur, last_unit = None, unit
+    if cur is not None:
+        # 省略式：三百八 = 380。只在 百 以上才升一级，「十一」不在此列。
+        total += cur * (last_unit // 10 if last_unit >= 100 else 1)
+    return float(total)
+
+
+# 钱数的数字部分。语音里没人会先补一个「元」字，所以中文数字也得能吃。
+# 注意这是一个带顶层 `|` 的并联式：嵌进别处必须先用非捕获括号包住，否则拼接点两侧的
+# 分支会被它劈开（「元」后缀会只挂在中文数字那一半上，裸数字就成了随时能认的金额）。
+_AMOUNT_NUM = r"[0-9]+(?:\.[0-9]{1,2})?|[零一二两三四五六七八九十百千万]{1,6}"
+_AMOUNT_ALT = "(?:" + _AMOUNT_NUM + ")"
+_AMOUNT = re.compile(_AMOUNT_NUM)
+# 紧跟量词的不是钱，是数量：「花了两晚」「买了3张」都要在这一步被挡回去。
+_COUNTER_CHARS = "张间份人位只杯瓶夜晚次天日号"
+_AMOUNT_TAIL = "(?!" + "[" + _COUNTER_CHARS + "])"
+_COUNTER_WORDS = re.compile("[" + _COUNTER_CHARS + "]")
 
 # 中文列举的分隔符。「和」两侧不一定有空格，「雨伞和充电宝」是三种里最常见的一种写法。
 _ITEM_SEP = re.compile(r"[、,，]|和|与|加上|以及|还有")
@@ -68,9 +120,9 @@ _CATEGORY_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 _EXPENSE = re.compile(
-    r"(?:¥|￥)\s*([0-9]+(?:\.[0-9]{1,2})?)"
-    r"|[0-9]+(?:\.[0-9]{1,2})?\s*(?:元|块钱|块)"
-    r"|(?:花了|花|付了|付|消费|交了|出了)\s*([0-9]+(?:\.[0-9]{1,2})?)"
+    r"(?:¥|￥)\s*(" + _AMOUNT_ALT + r")"
+    r"|" + _AMOUNT_ALT + r"\s*(?:元|块钱|块)"
+    r"|(?:花了|花|付了|付|消费|交了|出了|吃了|喝了)\s*(" + _AMOUNT_ALT + r")" + _AMOUNT_TAIL
 )
 # 裸「带」不做触发词：「带女儿去玩」会往清单里塞一条「女儿去玩」。要有量词或
 # 副词跟着（再带 / 带个 / 携带）才算在交代待办。长的写法排在前面，re 取最左分支。
@@ -109,8 +161,8 @@ _ADD_DAY = re.compile(
     r"|加第([0-9]{1,2})天"
 )
 _BUDGET = re.compile(
-    r"预算[^\d一二两三四五六七八九十]{0,4}"
-    r"([0-9]+(?:\.[0-9]{1,2})?|[一二两三四五六七八九十]{1,4})\s*(万|元|块|k|千)?"
+    r"预算[^\d一二两三四五六七八九十百千万]{0,4}"
+    r"(" + _AMOUNT_ALT + r")\s*(万|元|块|k|千)?"
 )
 # 「打车花了 88.5」里的「打车」是花销的描述，不是指令 —— 没有改的口吻就没有资格认成出行方式。
 _MODE = re.compile(
@@ -136,25 +188,16 @@ def _num(token: str) -> float | None:
     except ValueError:
         pass
     if token == "半":
+        # 「半小时」的 30 分钟从这里来，不是 `_CN_NUM` 里那个半。
         return 0.5
-    if len(token) == 1 and token in _CN_NUM and token != "半":
-        return float(_CN_NUM[token])
-    # 十一 / 二十 / 二十三 这种两位中文数字。
-    if "十" in token:
-        head, _, tail = token.partition("十")
-        tens = _CN_NUM.get(head, 1) if head else 1
-        ones = _CN_NUM.get(tail, 0) if tail else 0
-        if isinstance(tens, int) and isinstance(ones, int):
-            return float(tens * 10 + ones)
-    # 三千 / 两万 / 一百五 这种「数字 + 尾缀单位」。
-    if len(token) > 1 and token[-1] in _CN_UNIT:
-        base = _num(token[:-1])
-        if base is not None:
-            return base * _CN_UNIT[token[-1]]
-    return None
+    return _cn_number(token)
 
 
 def _duration_minutes(clause: str) -> int | None:
+    match = _AND_HALF.search(clause)
+    if match:
+        whole = _num(match.group(1))
+        return None if whole is None else int(round(whole * 60)) + 30
     match = _DURATION_WORDS.search(clause)
     if not match:
         return None
@@ -189,6 +232,8 @@ def _strip_noise(clause: str) -> str:
     """剥掉一切已知修饰，剩下的就是地名/条目名。"""
     rest = _DAY_WORDS.sub("", clause)
     rest = _CLOCK_WORDS.sub("", rest)
+    # 先剥「一个半小时」：`_DURATION_WORDS` 按顺序拼不出这种半截夹在中间的写法。
+    rest = _AND_HALF.sub("", rest)
     rest = _DURATION_WORDS.sub("", rest)
     # 「玄武湖改成玩90分钟」剥完时长还剩「玄武湖改成」。这截尾巴不清掉就匹配不上
     # 行程里的既有地点，于是一次时长编辑会掉进最后的分支变成一颗重复钉。
@@ -201,14 +246,31 @@ def _strip_noise(clause: str) -> str:
 
 def _amount(clause: str) -> float | None:
     match = _EXPENSE.search(clause)
-    if not match:
+    if match:
+        for group in match.groups():
+            if group:
+                value = _num(group)
+                if value is not None:
+                    return value
+        # 「240元」这一支不带捕获组：钱数还在句子里，扫回来。
+        digits = _AMOUNT.search(clause)
+        return _num(digits.group(0)) if digits else None
+    return _bare_amount(clause)
+
+
+def _bare_amount(clause: str) -> float | None:
+    """「住宿一千二」「门票240」：说了花钱的类目，没说「花了」也没说「元」。
+
+    这笔账只在四个数字都无主的时候才认——时长、时刻、日期、数量各自先认领自己的数：
+    「玩90分钟」「下午3点」「第2天」「买3张门票」。把那些数记成金额，比漏掉这条贵得多。
+    """
+    if _DURATION_WORDS.search(clause) or _AND_HALF.search(clause):
         return None
-    for group in match.groups():
-        if group:
-            value = _num(group)
-            if value is not None:
-                return value
-    digits = re.search(r"[0-9]+(?:\.[0-9]{1,2})?", clause)
+    if _CLOCK_WORDS.search(clause) or _DAY_WORDS.search(clause):
+        return None
+    if _COUNTER_WORDS.search(clause) or _category(clause) == "other":
+        return None
+    digits = _AMOUNT.search(clause)
     return _num(digits.group(0)) if digits else None
 
 
@@ -325,7 +387,9 @@ def _parse_clause(clause: str, existing: list[str]) -> Intent | None:  # noqa: C
             return Intent(kind="place_move", place=place)
 
     if amount := _amount(clause):
-        title = _strip_noise(_EXPENSE.sub("", clause))
+        # 钱数不进标题：`_EXPENSE.sub` 只能剥有「花了/元」包着的那一种，
+        # 「住宿一千二」这种裸数字得靠 _AMOUNT 自己扫掉。
+        title = _strip_noise(_AMOUNT.sub("", _EXPENSE.sub("", clause)))
         return Intent(
             kind="expense_add",
             title=title[:80],

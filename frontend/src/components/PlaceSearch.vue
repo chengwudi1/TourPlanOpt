@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 
 import { LoaderCircle, Search, ShoppingBasket } from '@/components/icons'
 import type { Poi } from '@/types/domain'
@@ -7,6 +7,12 @@ import { ApiError, apiFetch } from '@/utils/api'
 
 const props = defineProps<{ city?: string }>()
 const emit = defineEmits<{ select: [poi: Poi]; stash: [poi: Poi] }>()
+
+// 示例地名跟着行程城市走：成都的行程里提示「外滩」会被当成串城的 bug。
+const placeholder = computed(() => {
+  const city = props.city?.trim()
+  return city ? `搜索${city}的地点，例如「${city}博物馆」` : '搜索地点，例如「博物馆」'
+})
 
 const keyword = ref('')
 const results = ref<Poi[]>([])
@@ -95,7 +101,7 @@ onBeforeUnmount(() => {
         v-model="keyword"
         class="search__input"
         type="text"
-        placeholder="搜索地点，例如「外滩」"
+        :placeholder="placeholder"
         autocomplete="off"
         @input="onInput"
         @keydown="onKeydown"

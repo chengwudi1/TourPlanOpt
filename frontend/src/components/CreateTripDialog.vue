@@ -40,7 +40,16 @@ const city = ref('')
 const travelMode = ref<TravelMode>('driving')
 const startDate = ref('')
 const days = ref(1)
-const dayStart = ref('')
+
+/** 服务端 schema 的默认值（`day_start_min = 540`）。空着的 `<input type="time">` 会渲染成
+ *  一串占位破折号，看着像乱码，而它想表达的本来就是「用默认值」——所以把默认值显式写出来。 */
+const DEFAULT_DAY_START = '09:00'
+const dayStart = ref(DEFAULT_DAY_START)
+
+/** 时间框被手动清空（按 Delete）后同样只剩破折号，失焦时补回默认值。留空与 09:00 建出的行程本来就一模一样。 */
+function normalizeDayStart() {
+  if (!dayStart.value) dayStart.value = DEFAULT_DAY_START
+}
 
 const busy = ref(false)
 const error = ref('')
@@ -50,9 +59,13 @@ const copy = useCopy()
 const showOpen = ref(false)
 const rawId = ref('')
 
-/** 小灰字只在用户真的填可选项时改口，否则它就是那句最该被看到的默认值说明。 */
+/** 小灰字只在用户真的填可选项时改口，否则它就是那句最该被看到的默认值说明。
+ *  时间框预填了默认值，所以判据是「偏离默认」而不是「非空」。 */
 const hasOptions = computed(
-  () => Boolean(city.value.trim() || startDate.value || dayStart.value) || days.value > 1,
+  () =>
+    Boolean(city.value.trim() || startDate.value)
+    || days.value > 1
+    || dayStart.value !== DEFAULT_DAY_START,
 )
 
 /** 分享链接和裸 ID 都收：用户从微信里复制出来的往往是整条 URL。 */
@@ -93,7 +106,7 @@ const builtLine = computed(() => {
   parts.push(`${trip.day_count} 天`)
   if (city.value.trim()) parts.push(city.value.trim())
   parts.push(MODE_TEXT[travelMode.value] ?? travelMode.value)
-  if (dayStart.value) parts.push(`每天 ${dayStart.value} 出发`)
+  if (dayStart.value) parts.push(`每天 ${dayStart.value} 开始`)
   return parts.join(' · ')
 })
 
@@ -203,8 +216,15 @@ function openPasted() {
               <input id="new-start" v-model="startDate" class="input" type="date" />
             </div>
             <div class="opt__cell">
-              <label class="opt__label" for="new-time">每天出发</label>
-              <input id="new-time" v-model="dayStart" class="input" type="time" />
+              <label class="opt__label" for="new-time">每日开始</label>
+              <input
+                id="new-time"
+                v-model="dayStart"
+                class="input"
+                type="time"
+                aria-describedby="new-time-hint"
+                @blur="normalizeDayStart"
+              />
             </div>
             <div class="opt__cell">
               <span class="opt__label">行程天数</span>
@@ -232,6 +252,10 @@ function openPasted() {
             </div>
           </div>
 
+          <p id="new-time-hint" class="tiny muted opt__hint">
+            出发日期决定这些天排在几号；每日开始指第一站开排的时间点，后面各站按路程与停留顺延。
+          </p>
+
           <div class="opt__cell">
             <span class="opt__label">默认交通方式</span>
             <SegmentedControl v-model="travelMode" :options="MODES" label="默认交通方式" />
@@ -239,8 +263,8 @@ function openPasted() {
 
           <p class="tiny muted opt__note">
             {{ hasOptions
-              ? '建好之后这些都能在行程页改。'
-              : '都留空也行：1 天、09:00 出发、按驾车算路线，日期不填就不给每天排日期。' }}
+              ? '行程名称、城市与每天的安排都能在行程页改；交通方式与每日开始跟助手说一声即可调整。'
+              : '都留空也行：1 天、每天 09:00 开始、按驾车算路线，日期不填就不给每天排日期。' }}
           </p>
         </div>
 
@@ -398,6 +422,11 @@ function openPasted() {
 .opt__grid .input,
 .stepper {
   width: 100%;
+}
+
+.opt__hint {
+  /* 这句是解释上面那一行三格的，得贴回字段下面：负 margin 抵掉 .opt 的 gap。 */
+  margin: -7px 0 0;
 }
 
 .opt__note {

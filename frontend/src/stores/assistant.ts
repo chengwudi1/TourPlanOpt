@@ -72,8 +72,17 @@ export const useAssistantStore = defineStore('assistant', () => {
     try {
       status.value = await apiFetch<AssistantStatus>('/api/assistant/status')
     } catch {
-      // 状态拿不到只影响精灵怎么说第一句话，不影响它能不能用：解析接口自己会兜底。
-      status.value = { llm_ready: false, model: '', endpoint: '', max_chars: 600 }
+      // 状态拿不到只影响两件事：精灵第一句话怎么说，以及话筒走哪条识别路（退回浏览器）。
+      // 解析接口自己会兜底。
+      status.value = {
+        llm_ready: false,
+        model: '',
+        endpoint: '',
+        max_chars: 600,
+        speech_ready: false,
+        speech_endpoint: '',
+        speech_max_seconds: 90,
+      }
     }
   }
 
@@ -99,7 +108,7 @@ export const useAssistantStore = defineStore('assistant', () => {
   function greeting(): string {
     // 没配模型时也要说清这次是谁在出力——把兜底说成故障，用户就再也不点这里了。
     return status.value?.llm_ready === false
-      ? `${GREETING}当前由本机词表理解，请带上「哪天、哪个地点、多少钱」这类明确信息。`
+      ? `${GREETING}当前为基础理解，请带上「哪天、哪个地点、多少钱」这类明确信息。`
       : GREETING
   }
 

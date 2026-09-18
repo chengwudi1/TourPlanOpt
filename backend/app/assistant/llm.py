@@ -29,14 +29,15 @@ LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "0.0.0.0"})
 _code_fence = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
 
 
-def _is_local(base_url: str) -> bool:
+def is_local_endpoint(base_url: str) -> bool:
+    """localhost 一律视为免鉴权：本地跑的服务不该逼用户再编一把密钥。"""
     host = (urlparse(base_url).hostname or "").lower()
     return host in LOCAL_HOSTS
 
 
 def llm_ready() -> bool:
     """能不能调模型。本地端点（Ollama）不要求密钥，那才是真正零成本的一条路。"""
-    return bool(settings.llm_api_key.strip()) or _is_local(settings.llm_base_url)
+    return bool(settings.llm_api_key.strip()) or is_local_endpoint(settings.llm_base_url)
 
 
 def endpoint_label() -> str:

@@ -175,3 +175,14 @@ class AssistantStatus(BaseModel):
     model: str
     endpoint: str
     max_chars: int = settings.assistant_max_chars
+    # 语音输入走哪条路：speech_ready 为真时前端录音上传到这里，否则退回浏览器自带识别
+    # （那条路的识别服务在境外，网络到不了就只会报 network）。
+    speech_ready: bool = False
+    speech_endpoint: str = ""
+    speech_max_seconds: int = settings.asr_max_seconds
+
+
+class SpeechReply(BaseModel):
+    """一段录音换一行文字。只回文字，不回音频、不回密钥。"""
+
+    text: str

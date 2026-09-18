@@ -100,6 +100,7 @@ onMounted(async () => {
     zoom: DEFAULT_ZOOM,
     resizeEnable: true,
     viewMode: '2D',
+    mapStyle: basemapStyle(),
   })
   map.value.addControl(new AMap.Scale())
   bindPickHandlers()
@@ -164,7 +165,11 @@ function bindPickHandlers() {
 }
 
 const darkScheme = window.matchMedia('(prefers-color-scheme: dark)')
-const onSchemeChange = () => syncPolyline()
+const onSchemeChange = () => {
+  // 底图必须跟着翻：暗色界面配一张亮瓦片，等于在屏幕右侧糊了一块白光。
+  map.value?.setMapStyle?.(basemapStyle())
+  syncPolyline()
+}
 
 onBeforeUnmount(() => {
   detachPickHandlers?.()
@@ -179,10 +184,15 @@ onBeforeUnmount(() => {
   map.value = null
 })
 
-/** 叠加层配色跟底图走、不跟界面主题走：高德没有暗色底图，瓦片永远偏亮，
- * 所以描边固定用白，只有芯色读 accent（两套主题下的 teal 在白底上都够对比）。 */
-const CASING_COLOR = '#16211f'
-const FALLBACK_ACCENT = '#0f5c8c'
+/** 描边跟底图走、不跟界面令牌走：亮底图用墨色压边把亮芯抬起来，暗底图反过来要一条浅色边，
+ * 否则同一条深色描边压在夜航图上就是「没有描边」。芯色始终读 --accent。 */
+const CASING_LIGHT = '#2e3132'
+const CASING_DARK = '#dbe6ef'
+const FALLBACK_ACCENT = '#1670c2'
+
+function basemapStyle(): string {
+  return darkScheme.matches ? 'amap://styles/dark' : 'amap://styles/normal'
+}
 
 function cssColor(name: string, fallback: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
@@ -321,12 +331,13 @@ function syncPolyline() {
   }
 
   const accent = cssColor('--accent', FALLBACK_ACCENT)
+  const casingColor = darkScheme.matches ? CASING_DARK : CASING_LIGHT
   if (!route.value) {
     const base = { path, lineJoin: 'round', lineCap: 'round', bubble: true }
     route.value = {
       casing: new AMap.Polyline({
         ...base,
-        strokeColor: CASING_COLOR,
+        strokeColor: casingColor,
         strokeWeight: 8,
         strokeOpacity: 0.25,
         zIndex: 40,
@@ -352,7 +363,8 @@ function syncPolyline() {
     const { casing, core, hl } = route.value
     casing.setPath(path)
     core.setPath(path)
-    // 芯色是唯一跟着主题走的那个值，所以每次重画都要重新读一遍。
+    // 芯色与描边色都要跟着主题重读一次，否则翻主题后路线只剩一半换了颜色。
+    casing.setOptions({ strokeColor: casingColor })
     core.setOptions({ strokeColor: accent })
     hl.setOptions({ strokeColor: accent })
   }
@@ -449,6 +461,14 @@ defineExpose({
   gap: 6px;
   align-items: flex-end;
 }
+
+/* 桌面端右下角是精灵的（88px 宽、离边 24px），工具条让到它左边去。
+   手机端不用让：那边精灵已经抬到 dock 之上（Sprite.vue 的 --dock-h 那条）。 */
+@media (min-width: 861px) {
+  .map-panel__tools {
+    right: 124px;
+  }
+}
 .map-panel__locate {
   padding: 7px 12px;
   font-size: 13px;
@@ -501,7 +521,7 @@ defineExpose({
   width: 34px;
   height: 34px;
   background: var(--tp-fill);
-  /* 白描边写死不读 --surface：底图永远是亮的，深色主题下用界面底色描边会糊成一片。 */
+  /* 白描边写死不读 --surface：亮底图和夜航底图上白圈都干净，界面底色只在其中一边成立。 */
   border: 2.5px solid #fff;
   border-radius: 50%;
   box-shadow: 0 0 0 1.5px var(--tp-fill), var(--shadow-sm);
@@ -585,6 +605,16 @@ defineExpose({
   }
   100% {
     transform: scale(1.25);
+  }
+}
+
+/* 夜航底图上的高德角标与审图号是深色字，压在深色图上等于没有——这两条是必须留着的
+   归属信息，所以把它反成浅灰，而不是藏起来。 */
+@media (prefers-color-scheme: dark) {
+  .amap-logo img,
+  .amap-copyright {
+    filter: invert(0.9) hue-rotate(180deg);
+    opacity: 0.82;
   }
 }
 </style>

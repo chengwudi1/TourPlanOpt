@@ -138,6 +138,12 @@ export interface AssistantStatus {
   model: string
   endpoint: string
   max_chars: number
+  /** 后端有没有可用的语音转写服务；为假时话筒退回浏览器自带的识别。 */
+  speech_ready: boolean
+  /** 转写端点的标识（host · 模型名），不含密钥。 */
+  speech_endpoint: string
+  /** 一次录音允许的最长秒数，到点前端自己收。 */
+  speech_max_seconds: number
 }
 
 /** 带 kind 的判别联合，删/改一类需要额外状态：确认卡自己的落地进度。

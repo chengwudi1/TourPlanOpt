@@ -1,16 +1,18 @@
 <script setup lang="ts">
 /**
- * 虚拟精灵「游游」—— 对话式操作的入口（M27）。
+ * 虚拟精灵 —— 对话式操作的入口（M27，形象可换 M29c）。
  *
  * 它只做三件事：露出一个会动的角色、把未落地的条数标出来、在没人理它 25 秒之后探头
  * 提醒一句「还差什么」。所有解析与落地都在 `stores/assistant.ts` 与后端，这里没有一行
  * 写数据的代码 —— 这也是它敢常驻右下角的原因。
  *
- * 表情由 `data-mood` 驱动，全部是 CSS：不引动效库（`UI-REDESIGN.md §6`），
- * 描边一律走 `--ink`，画身色走 `--pet-*`（插画配色，深色态刻意不反色）。
+ * 画法与配色搬进了 `pet/PetArt.vue` + `pet/skins.ts`：这一个文件只管**位置**
+ * （右下角、让位 dock、气泡、角标），不管长什么样。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
+import PetArt from '@/components/pet/PetArt.vue'
+import { petSkin, petSkinVars } from '@/components/pet/skins'
 import { useAssistantStore } from '@/stores/assistant'
 import { useTripStore } from '@/stores/trip'
 
@@ -22,7 +24,7 @@ const speaking = ref(false)
 let idleTimer: number | undefined
 let talkTimer: number | undefined
 
-/** 游游每说一句就合扇喙部 900ms：让「它在说话」是一件看得见的事，而不是气泡在闪。 */
+/** 每说一句就合嘴 900ms：让「它在说话」是一件看得见的事，而不是气泡在闪。 */
 watch(
   () => assistant.lines.length,
   () => {
@@ -60,6 +62,19 @@ function armIdleTimer(): void {
   }, 25_000)
 }
 
+/** 滚动时把自己淡下去：手机上这颗常驻右下角，正好压在「第 N 天 · X 个地点」那一行的尾巴上，
+ *  停手后 700ms 再回来。监听挂在 document 的捕获阶段，因为列表滚的是它自己的容器。 */
+const tucked = ref(false)
+let tuckTimer: number | undefined
+
+function onScroll() {
+  tucked.value = true
+  window.clearTimeout(tuckTimer)
+  tuckTimer = window.setTimeout(() => {
+    tucked.value = false
+  }, 700)
+}
+
 watch(
   () => assistant.open,
   (isOpen) => {
@@ -70,10 +85,15 @@ watch(
   },
 )
 
-onMounted(armIdleTimer)
+onMounted(() => {
+  armIdleTimer()
+  document.addEventListener('scroll', onScroll, { passive: true, capture: true })
+})
 onBeforeUnmount(() => {
+  document.removeEventListener('scroll', onScroll, true)
   window.clearTimeout(idleTimer)
   window.clearTimeout(talkTimer)
+  window.clearTimeout(tuckTimer)
 })
 
 const mood = computed(() => (speaking.value ? 'talk' : assistant.mood))
@@ -81,86 +101,19 @@ const mood = computed(() => (speaking.value ? 'talk' : assistant.mood))
 
 <template>
   <Teleport to="body">
-    <div class="sprite" :data-mood="mood">
+    <div class="sprite" :class="{ 'sprite--tucked': tucked }">
       <p v-if="bubbleText" class="bubble">{{ bubbleText }}</p>
       <button
         class="sprite__avatar"
         type="button"
         :class="{ 'sprite__avatar--nudge': nudged && !assistant.open }"
         :aria-expanded="assistant.open"
-        aria-label="唤起助手游游"
+        :aria-label="`唤起助手${petSkin.name}`"
         @pointerdown="void assistant.loadStatus()"
         @click="assistant.toggle(); armIdleTimer()"
       >
         <span v-if="assistant.pendingCount" class="badge">{{ assistant.pendingCount }}</span>
-        <svg class="pet" viewBox="0 0 100 100" aria-hidden="true">
-          <ellipse class="shadow" cx="50" cy="94" rx="24" ry="4.5" fill="var(--ink)" />
-          <g class="bob">
-            <path
-              class="tuft"
-              d="M48 22 C 45 11 52 4 61 7 C 55 8 52 13 53 22Z"
-              fill="var(--pet-shade)"
-              stroke="var(--ink)"
-              stroke-width="2.4"
-              stroke-linejoin="round"
-            />
-            <path
-              d="M50 20 C 72 20 86 40 86 60 C 86 81 70 92 50 92 C 30 92 14 81 14 60 C 14 40 28 20 50 20Z"
-              fill="var(--pet-body)"
-              stroke="var(--ink)"
-              stroke-width="3"
-            />
-            <path
-              d="M50 20 C 68 20 80 34 83 49 C 70 40 60 38 50 38 C 40 38 30 40 17 49 C 20 34 32 20 50 20Z"
-              fill="var(--surface)"
-              opacity=".34"
-            />
-            <path
-              class="wing"
-              d="M22 58 C 22 50 30 47 36 50 C 33 60 27 64 22 58Z"
-              fill="var(--pet-shade)"
-              stroke="var(--ink)"
-              stroke-width="2.4"
-            />
-            <path class="brow brow-l" d="M30 41 L45 44.5" stroke="var(--ink)" stroke-width="3.4" stroke-linecap="round" />
-            <path class="brow brow-r" d="M70 41 L55 44.5" stroke="var(--ink)" stroke-width="3.4" stroke-linecap="round" />
-            <g class="eye">
-              <ellipse cx="38" cy="52" rx="6.6" ry="7" fill="var(--surface)" stroke="var(--ink)" stroke-width="2.2" />
-              <circle cx="39.4" cy="53.4" r="3.1" fill="var(--ink)" />
-              <circle cx="40.6" cy="51.6" r="1.1" fill="var(--surface)" />
-            </g>
-            <g class="eye">
-              <ellipse cx="62" cy="52" rx="6.6" ry="7" fill="var(--surface)" stroke="var(--ink)" stroke-width="2.2" />
-              <circle cx="63.4" cy="53.4" r="3.1" fill="var(--ink)" />
-              <circle cx="64.6" cy="51.6" r="1.1" fill="var(--surface)" />
-            </g>
-            <g class="beak">
-              <path
-                d="M42 63 Q50 58.5 58 63 Q50 67 42 63Z"
-                fill="var(--pet-beak)"
-                stroke="var(--ink)"
-                stroke-width="2.2"
-                stroke-linejoin="round"
-              />
-              <path
-                class="beak-lo"
-                d="M44 65 Q50 70 56 65 Q50 67.5 44 65Z"
-                fill="var(--pet-beak-deep)"
-                stroke="var(--ink)"
-                stroke-width="1.8"
-                stroke-linejoin="round"
-              />
-            </g>
-            <circle cx="26" cy="63" r="5" fill="var(--pet-blush)" opacity=".45" />
-            <circle cx="74" cy="63" r="5" fill="var(--pet-blush)" opacity=".45" />
-            <path d="M46 84 L54 84 L50 90Z" fill="var(--pet-shade)" stroke="var(--ink)" stroke-width="2" />
-          </g>
-          <g class="think">
-            <circle cx="76" cy="20" r="3.2" fill="var(--accent)" />
-            <circle cx="85" cy="14" r="3.2" fill="var(--accent)" />
-            <circle cx="93" cy="8" r="3.2" fill="var(--accent)" />
-          </g>
-        </svg>
+        <PetArt class="pet" :skin="petSkin.id" :mood="mood" :style="petSkinVars(petSkin)" />
       </button>
     </div>
   </Teleport>
@@ -186,6 +139,13 @@ const mood = computed(() => (speaking.value ? 'talk' : assistant.mood))
 @media (max-width: 860px) {
   .sprite {
     bottom: calc(var(--dock-h) + env(safe-area-inset-bottom, 0px) + var(--s4));
+    transition: opacity var(--dur) var(--ease-out), transform var(--dur) var(--ease-out);
+  }
+
+  /* 只在手机上收：桌面右下角压在地图上，不挡任何文字。 */
+  .sprite--tucked {
+    opacity: 0.3;
+    transform: translateY(8px);
   }
 }
 
@@ -268,145 +228,6 @@ const mood = computed(() => (speaking.value ? 'talk' : assistant.mood))
 .pet {
   width: 74px;
   height: 74px;
-  overflow: visible;
-}
-
-.pet .shadow {
-  opacity: 0.16;
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: pet-shadow 3.4s ease-in-out infinite;
-}
-
-.pet .bob {
-  transform-box: fill-box;
-  transform-origin: center bottom;
-  animation: pet-bob 3.4s ease-in-out infinite;
-}
-
-.pet .eye {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: pet-blink 5.4s infinite;
-}
-
-.pet .tuft {
-  transform-box: fill-box;
-  transform-origin: bottom center;
-  animation: pet-sway 2.6s ease-in-out infinite;
-}
-
-.pet .wing {
-  transform-box: fill-box;
-  transform-origin: top center;
-  animation: pet-flap 3.4s ease-in-out infinite;
-}
-
-.pet .brow {
-  transform-box: fill-box;
-  transition: transform var(--dur) var(--ease-pop);
-}
-
-.pet .beak-lo {
-  transform-box: fill-box;
-  transform-origin: top center;
-}
-
-.pet .think {
-  opacity: 0;
-  transition: opacity var(--dur);
-}
-
-.pet .think circle {
-  transform-box: fill-box;
-}
-
-@keyframes pet-bob {
-  0%,
-  100% {
-    transform: translateY(0) scaleY(1);
-  }
-  50% {
-    transform: translateY(-4px) scaleY(1.03);
-  }
-}
-
-@keyframes pet-shadow {
-  0%,
-  100% {
-    transform: scaleX(1);
-    opacity: 0.16;
-  }
-  50% {
-    transform: scaleX(0.82);
-    opacity: 0.1;
-  }
-}
-
-@keyframes pet-blink {
-  0%,
-  93%,
-  100% {
-    transform: scaleY(1);
-  }
-  96% {
-    transform: scaleY(0.08);
-  }
-}
-
-@keyframes pet-sway {
-  0%,
-  100% {
-    transform: rotate(-7deg);
-  }
-  50% {
-    transform: rotate(9deg);
-  }
-}
-
-@keyframes pet-flap {
-  0%,
-  100% {
-    transform: rotate(0);
-  }
-  50% {
-    transform: rotate(-9deg);
-  }
-}
-
-@keyframes pet-orb {
-  0%,
-  100% {
-    opacity: 0.25;
-    transform: translateY(0);
-  }
-  50% {
-    opacity: 1;
-    transform: translateY(-4px);
-  }
-}
-
-@keyframes pet-say {
-  0%,
-  100% {
-    transform: scaleY(0.35);
-  }
-  50% {
-    transform: scaleY(1.5);
-  }
-}
-
-@keyframes pet-jitter {
-  0%,
-  100% {
-    transform: translateX(0);
-  }
-  25% {
-    transform: translateX(-2.5px);
-  }
-  75% {
-    transform: translateX(2.5px);
-  }
 }
 
 @keyframes pet-spin {
@@ -422,66 +243,22 @@ const mood = computed(() => (speaking.value ? 'talk' : assistant.mood))
   }
 }
 
-[data-mood='thinking'] .think {
-  opacity: 1;
-}
-
-[data-mood='thinking'] .think circle {
-  animation: pet-orb 1.1s ease-in-out infinite;
-}
-
-[data-mood='thinking'] .think circle:nth-child(2) {
-  animation-delay: 0.18s;
-}
-
-[data-mood='thinking'] .think circle:nth-child(3) {
-  animation-delay: 0.36s;
-}
-
-[data-mood='thinking'] .brow-l {
-  transform: rotate(-16deg) translateY(-3px);
-}
-
-[data-mood='thinking'] .brow-r {
-  transform: rotate(12deg) translateY(-2px);
-}
-
-[data-mood='talk'] .beak-lo {
-  animation: pet-say 0.28s ease-in-out infinite;
-}
-
-[data-mood='happy'] .brow-l {
-  transform: rotate(9deg) translateY(1px);
-}
-
-[data-mood='happy'] .brow-r {
-  transform: rotate(-9deg) translateY(1px);
-}
-
-[data-mood='happy'] .bob {
-  animation-duration: 0.9s;
-}
-
-[data-mood='asking'] .brow-l {
-  transform: rotate(-10deg) translateY(-2px);
-}
-
-[data-mood='warn'] .brow-l {
-  transform: rotate(-24deg) translateY(-4px);
-}
-
-[data-mood='warn'] .brow-r {
-  transform: rotate(24deg) translateY(-4px);
-}
-
-[data-mood='warn'] .bob {
-  animation: pet-jitter 0.42s ease-in-out infinite;
-}
-
 @media (max-width: 640px) {
   .sprite {
     /* bottom 只由上面那条 ≤860 的规则负责：这里再写一遍等于把精灵按回 dock 上。 */
     right: var(--s4);
+  }
+
+  /* 88px 在手机上正好盖住一整行日期头（列表是通栏的，躲不开）。缩到 56px 后它还是一个
+     清楚的入口，只是不再替列表内容占位；触控目标仍远高于 28px 的下限。 */
+  .sprite__avatar {
+    width: 56px;
+    height: 56px;
+  }
+
+  .pet {
+    width: 46px;
+    height: 46px;
   }
 
   .bubble {

@@ -439,28 +439,54 @@ onMounted(() => {
           @finish="setStatus(hero.id, 'finished')"
         />
 
-        <section v-else-if="!loading && !trips.length" class="welcome card reveal reveal--lg" :style="{ '--base': '60ms' }">
-          <div class="welcome__text">
-            <h1>把想去的地方，<br />变成走得完的行程</h1>
-            <p class="muted">建一个行程，把链接发给朋友。大家同时往里丢地点，路线我们算。</p>
-            <button class="btn btn--primary" type="button" @click="showCreate = true">
-              <Plus class="ic" :size="14" /> 新建第一段行程
-            </button>
-          </div>
-          <svg class="welcome__art" viewBox="0 0 220 120" aria-hidden="true">
-            <path
-              d="M14 104C46 104 50 34 86 34s40 62 74 62 30-44 46-44"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.5"
-              stroke-linecap="round"
-              stroke-dasharray="2 9"
-            />
-            <circle cx="14" cy="104" r="5" fill="currentColor" />
-            <circle cx="160" cy="96" r="5" fill="currentColor" />
-            <circle cx="206" cy="52" r="5" fill="currentColor" />
-          </svg>
-        </section>
+        <template v-else-if="!loading && !trips.length">
+          <section class="welcome card reveal reveal--lg" :style="{ '--base': '60ms' }">
+            <div class="welcome__text">
+              <h1>把想去的地方，<br />变成走得完的行程</h1>
+              <p class="muted">创建一个行程，把链接分享给同行的人。多人可同时添加地点，路线自动计算。</p>
+              <button class="btn btn--primary" type="button" @click="showCreate = true">
+                <Plus class="ic" :size="14" /> 新建第一段行程
+              </button>
+            </div>
+            <svg class="welcome__art" viewBox="0 0 220 120" aria-hidden="true">
+              <path
+                d="M14 104C46 104 50 34 86 34s40 62 74 62 30-44 46-44"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-dasharray="2 9"
+              />
+              <circle cx="14" cy="104" r="5" fill="currentColor" />
+              <circle cx="160" cy="96" r="5" fill="currentColor" />
+              <circle cx="206" cy="52" r="5" fill="currentColor" />
+            </svg>
+          </section>
+
+          <section class="steps reveal reveal--fade" :style="{ '--base': '150ms' }">
+            <div class="steps__item">
+              <span class="steps__no">1</span>
+              <div>
+                <h3 class="steps__title">创建行程</h3>
+                <p class="steps__desc">只需填写标题，城市与天数可后续补充。</p>
+              </div>
+            </div>
+            <div class="steps__item">
+              <span class="steps__no">2</span>
+              <div>
+                <h3 class="steps__title">分享链接</h3>
+                <p class="steps__desc">同行者打开链接即可加入，无需注册账号。</p>
+              </div>
+            </div>
+            <div class="steps__item">
+              <span class="steps__no">3</span>
+              <div>
+                <h3 class="steps__title">协同排线</h3>
+                <p class="steps__desc">地点汇总后生成时间线，顺序可一键优化。</p>
+              </div>
+            </div>
+          </section>
+        </template>
 
         <section v-if="trips.length" class="sec">
           <div v-if="grid.length" class="sec__head reveal reveal--fade" :style="{ '--base': '220ms' }">
@@ -817,6 +843,57 @@ onMounted(() => {
   opacity: 0.55;
 }
 
+/* 夜航图是蓝灰的，暖棕块落在首屏会显脏：深色态欢迎卡跟着强调蓝走。 */
+@media (prefers-color-scheme: dark) {
+  .welcome {
+    background: linear-gradient(140deg, var(--accent-soft), var(--surface) 58%);
+  }
+  .welcome__art {
+    color: var(--accent);
+    opacity: 0.5;
+  }
+}
+
+.steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 16px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
+}
+.steps__item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.steps__no {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+.steps__title {
+  margin: 0 0 3px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.steps__desc {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-2);
+}
+
 /* ---------- 侧栏 ---------- */
 .side {
   padding: 14px;
@@ -960,6 +1037,14 @@ onMounted(() => {
   transform: scale(0.97);
 }
 
+/* 桌面右上角的栏里本来就有同一颗「新建行程」，再挂一枚常驻浮标只是把同一个动作说两遍，
+   还常年占着右下角。手机上顶栏挤，才需要它。 */
+@media (min-width: 861px) {
+  .fab {
+    display: none;
+  }
+}
+
 @media (max-width: 1000px) {
   .home__wrap {
     grid-template-columns: minmax(0, 1fr);
@@ -970,6 +1055,10 @@ onMounted(() => {
   }
   .welcome__art {
     display: none;
+  }
+  .steps {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
   }
 }
 

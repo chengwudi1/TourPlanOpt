@@ -280,6 +280,46 @@ def test_three_silent_misreads_from_the_live_probe() -> None:
     assert out.day == ""
 
 
+def test_spoken_shapes_the_word_table_missed() -> None:
+    """这一批是「精灵有点笨」加上语音输入之后一起暴露出来的。
+
+    说话和打字不一样：报价不会先说「元」，删除说的是「删了」「不去了」，
+    时长说的是「半小时」「一个半小时」。共同的下场是整句话被当成地点名塞进行程，
+    所以每条都连**值**钉住。
+    """
+    known = ["鸡鸣寺", "明城墙", "玄武湖公园"]
+
+    def first(text: str):
+        intents = parse_rules(text, known)
+        return intents[0] if intents else None
+
+    # 「半小时」以前不在时长词表里：不剥修饰 → 地名连时长一起进名字。
+    half = first("玄武湖玩半小时")
+    assert half is not None and half.kind == "place_update", "半小时不能算进地名"
+    assert half.place == "玄武湖公园" and half.duration_min == 30
+    one_half = first("玄武湖玩一个半小时")
+    assert one_half.kind == "place_update" and one_half.duration_min == 90
+
+    # 否定式删除以前不认：「明天不去中山陵了」被听成新增一个叫「不中山陵」的地点。
+    gone = first("明天不去中山陵了")
+    assert gone is not None and gone.kind == "place_delete", "否定句绝不能变成 place_add"
+    assert gone.place == "中山陵"
+    assert first("把中山陵删了").kind == "place_delete"
+    assert first("把中山陵删了").place == "中山陵"
+
+    # 中文数字金额：语音里没人会补一个「元」字。
+    assert first("门票花了三百八").amount_yuan == 380
+    lunch = first("午饭吃了一百二")
+    assert lunch.kind == "expense_add" and lunch.amount_yuan == 120
+    assert lunch.title == "午饭"  # 动词不能留在账目行里
+    assert first("住宿一千二").amount_yuan == 1200
+    assert first("预算三千八").budget_yuan == 3800
+
+    # 但数量不是钱。「买3张门票」以前返回空，加了裸数字金额之后必须还是空——
+    # 把它记成一笔 3 元的账，比不认糟糕得多。
+    assert first("买3张门票") is None
+
+
 # -- 兑现器：模型说什么都不直信 --------------------------------------------------------------
 
 

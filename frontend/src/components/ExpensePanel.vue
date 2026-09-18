@@ -385,25 +385,29 @@ async function drop(expense: Expense) {
 }
 
 .exp__bar {
-  height: 4px;
+  height: 8px;
   overflow: hidden;
   background: var(--surface-3);
   border-radius: var(--radius-pill);
+  /* 空槽要看得见：一条 4px 的实心线在「已经花满」时和一条分隔线没有区别。 */
+  box-shadow: inset 0 0 0 1px var(--hairline);
 }
 
 .exp__bar i {
   display: block;
   height: 100%;
-  background: var(--ember-deep);
+  background: var(--accent);
   border-radius: var(--radius-pill);
   transition: width var(--dur-slow) var(--ease-out);
 }
 
-.exp__bar--warn {
+/* 状态类挂在 <i> 上，所以选择器也要带上 i：`.exp__bar i` 是「类+元素」，
+   只写一个类的状态规则压不过它，超预算的条会一直停在底色上。 */
+.exp__bar i.exp__bar--warn {
   background: var(--warn);
 }
 
-.exp__bar--over {
+.exp__bar i.exp__bar--over {
   background: var(--danger);
 }
 

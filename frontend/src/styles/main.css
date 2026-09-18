@@ -1,80 +1,85 @@
 :root {
-  /* ---------- 中性阶：纸中性、墨冷 ----------
-     「土」的根因不是色相选错，是六档中性色的 hue 全挤在 30–35°：纸是黄的、线是黄的、
-     阴影也是黄的，任何彩色压上来都像贴在同一张牛皮纸上。这里纸面回到近中性，
-     墨换成冷的绿黑，彩色才有地方站。 */
-  --bg: #f7f5f1;
-  --surface: #ffffff;
-  --surface-2: #f1eee7;
-  --surface-3: #e5e0d5;
-  --surface-hover: #efece4;
-  --surface-selected: #dfeee9;
-  --border: #e6e1d7;
-  --border-faint: rgba(22, 33, 31, 0.08);
+  /* ---------- 中性阶与强调色：全部取自高德瓦片本身（M29a 方向 A「同瓦片」） ----------
+     取色不是估的：抓了 z12 的四片真实瓦片，按精确直方图统计出各语义色——陆地米白、
+     道路近白、公园绿、水系蔚蓝、POI 角标蓝。界面因此和地图是同一套料子，
+     侧栏卡片不会再像贴在牛皮纸上的另一张图。
+     文字分三层，只有前两层许给正文：--text-2 是 AA 底线（≥7:1 压在 surface-2 上），
+     --text-3 在三种底面上都过 4.5，--text-faint 永远只做装饰（它到不了 4.5，别拿它写句子）。 */
+  --bg: #fcf9f2;
+  --surface: #fdfdfd;
+  --surface-2: #f4f1e8;
+  --surface-3: #e6e1d6;
+  --surface-hover: #f8f5ed;
+  --surface-selected: #dceafb;
+  --border: #e6e1d6;
+  --border-faint: rgba(46, 49, 50, 0.08);
   /* 1px 结构线（轨道刻度、票券虚线、行间细分割）走这个：不随主题反色，
      永远是一条「有但不出声」的线。 */
-  --hairline: rgba(22, 33, 31, 0.14);
+  --hairline: rgba(46, 49, 50, 0.14);
   /* 描边即结构色：贴纸风不靠模糊投影撑层次，靠一条看得见的墨线 + 它的硬偏移阴影。
      深色态下这条线翻成亮墨，所以组件写 --ink 而不是写 --text。 */
-  --ink: #16211f;
-  --text: #16211f;
-  --text-2: #4b5650;
-  --text-3: #646d66;
-  --text-faint: #8d968f;
+  --ink: #2e3132;
+  --text: #26282a;
+  --text-2: #4f5053;
+  --text-3: #616265;
+  --text-faint: #7e8085;
   /* 顶光：页面最上方 340px 蒙一层白，屏幕不再是均匀的一块涂料。 */
   --page-art: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0) 340px),
     var(--bg);
 
   /* ---------- 强调色：三条线各管一件事 ----------
-     --accent 海蓝＝可交互（按钮、选中、链接、焦点）；
-     --ember 陶土＝氛围与费用，绝不上到可点控件上，否则两个强调色抢同一层注意力；
+     --accent 水系蓝＝可交互（按钮、选中、链接、焦点）；
+     --ember 主干道橙＝氛围与费用，绝不上到可点控件上，否则两个强调色抢同一层注意力；
      六个 ramp 色相＝信息编码（第几天、费用分类），不承担「能点」的暗示。 */
-  --accent: #0f5c8c;
-  --accent-strong: #0a3f61;
-  --accent-soft: #d9eaf5;
-  /* 压在 --accent 实心上的字色：亮色是白字（7.17:1 AAA），深色主题下 accent 变亮蓝，
+  --accent: #1670c2;
+  --accent-strong: #0b4f8f;
+  --accent-soft: #dceafb;
+  /* 压在 --accent 实心上的字色：亮色是白字（5.08:1 AA），深色主题下 accent 变亮蓝，
      白字不够，所以那边换成近黑的墨。 */
   --accent-ink: #ffffff;
-  /* 陶土：实心/图标用 --ember，正文用 --ember-deep。这条分界是算出来的——
-     #d1663f 直接当正文不合格。实心块上的字必须用深墨 --ember-ink，白字只有 3.69:1。 */
-  --ember: #d1663f;
-  --ember-deep: #9c421f;
-  --ember-soft: #f7e2d7;
-  --ember-ink: #2a0f04;
-  /* 压在 --ember-deep（更深的实心陶土）上的字：这里必须用白，不能复用 --ember-ink，
-     那个是给亮陶土块配的深墨，压到 #9c421f 上只剩 1.4:1。 */
+  /* 陶土让位给高德的主干道橙。亮橙（#e08a2a）当正文只有 2.6:1，所以正文一律走深档
+     --ember-deep（6.73:1）；实心亮橙块上的字用近黑墨 --ember-ink（6.10:1），白字压不住。 */
+  --ember: #e08a2a;
+  --ember-deep: #8a4a0c;
+  /* 浅档必须和 --warn-soft 分开：两个都是 #f8d291 时，费用氛围的渐变（空态 hero 卡）
+     和真告警长得一模一样，截图里第一屏就像一横幅警告。沙色而不是琥珀色。 */
+  --ember-soft: #fbe6cd;
+  --ember-ink: #2a1e02;
+  /* 压在 --ember-deep（更深的实心橙）上的字：这里必须用白，不能复用 --ember-ink，
+     那个是给亮橙块配的墨，压到 #8a4a0c 上只有 2.4:1。 */
   --ember-deep-ink: #ffffff;
 
   /* ---------- 六色 ramp：天数与费用分类共用这一套 ----------
+     六个色相一档一个地图语义：水系蓝 / 公园绿 / 主干道橙 / 沙金 / 铁路紫 / POI 红。
      每档三个成员，谁用谁查表，不许现场发明：
        --ramp-N      实心色（色块、徽标、轨道带）
        --ramp-N-soft 浅底（tinted 卡片背景）
-       --ramp-N-deep 正文色（压在白底或浅底上的字）
-       --ramp-N-ink  实心块上的字色——这条是硬规矩：海蓝/苔绿/藕紫/玫红用白字，
-                     陶土与沙金用近黑墨字（#fff on #e3b23c 实测只有 1.96:1）。 */
-  --ramp-1: #0f5c8c;
-  --ramp-1-soft: #dceaf4;
-  --ramp-1-deep: #0b4a70;
+       --ramp-N-deep 正文色（压在白底或浅底上的字，全部 ≥4.5:1）
+       --ramp-N-ink  实心块上的字色——这条是硬规矩，按实测分：海蓝/公园绿/藕紫/玫红
+                     四档白字过 5.3:1，主干道橙与沙金只到 2.6 左右，必须用近黑墨字。 */
+  --ramp-1: #2e6eae;
+  --ramp-1-soft: #dceafb;
+  --ramp-1-deep: #1b5e93;
   --ramp-1-ink: #ffffff;
-  --ramp-2: #3f7d5a;
-  --ramp-2-soft: #e2efe6;
-  --ramp-2-deep: #2c5c41;
+  --ramp-2: #1d770e;
+  --ramp-2-soft: #ddeec3;
+  --ramp-2-deep: #165c0a;
   --ramp-2-ink: #ffffff;
-  --ramp-3: #d1663f;
-  --ramp-3-soft: #f8e3d8;
-  --ramp-3-deep: #9c421f;
-  --ramp-3-ink: #2a0f04;
-  --ramp-4: #e3b23c;
-  --ramp-4-soft: #f8eecf;
-  --ramp-4-deep: #7d5512;
+  --ramp-3: #e08a2a;
+  --ramp-3-soft: #f8d291;
+  --ramp-3-deep: #8a4a0c;
+  --ramp-3-ink: #2a1e02;
+  --ramp-4: #c89a12;
+  --ramp-4-soft: #f6e3a3;
+  --ramp-4-deep: #7d5f08;
   --ramp-4-ink: #2a1e02;
-  --ramp-5: #6f5293;
-  --ramp-5-soft: #eae3f3;
-  --ramp-5-deep: #5a3f7d;
+  --ramp-5: #6b4e96;
+  --ramp-5-soft: #e7dff2;
+  --ramp-5-deep: #4e3a6e;
   --ramp-5-ink: #ffffff;
-  --ramp-6: #a8385f;
-  --ramp-6-soft: #f7e2e9;
-  --ramp-6-deep: #8a2748;
+  --ramp-6: #b23a32;
+  --ramp-6-soft: #f7ddd9;
+  --ramp-6-deep: #8a2a24;
   --ramp-6-ink: #ffffff;
   /* 游游的画身色。这是插画配色而不是界面配色，所以深色态刻意不反色（同 --photo-scrim 的
      理由：一张会眨眼的图在两种主题下是同一张图）。唯一跟着主题走的是描边，它用 --ink——
@@ -87,14 +92,15 @@
   /* 参与者 8 色盘：地图群像与协作标记的唯一来源，收编自 useClientIdentity 的硬编码。
      这一档深色块里「故意不覆写」：它是身份色，跟查看者的主题走会让同一个人被两个人看成两种颜色，
      而地图标记压在永远偏亮的高德瓦片上、白字实心角标，只有这一组暗度够。
-     八色都按「白字压得上去 ≥4.5:1」配过，所以头像/角标只用 --warp-ink 一个反色。 */
-  --warp-1: #0f5c8c;
-  --warp-2: #b4552a;
-  --warp-3: #3f7d5a;
-  --warp-4: #9a6b12;
-  --warp-5: #6f5293;
-  --warp-6: #0e7490;
-  --warp-7: #a8385f;
+     八色都按「白字压得上去 ≥4.5:1」重新配过（实测最低 5.05:1，全部够），
+     所以头像/角标只用 --warp-ink 一个反色。 */
+  --warp-1: #2e6eae;
+  --warp-2: #a04a12;
+  --warp-3: #1d770e;
+  --warp-4: #8a6a08;
+  --warp-5: #6b4e96;
+  --warp-6: #1670a8;
+  --warp-7: #a03a55;
   --warp-8: #4f7a2f;
   --warp-ink: #ffffff;
   /* 头像那圈环负责画「这颗色盘的边界」。亮色下它等于卡片色，看起来是无边的；
@@ -103,21 +109,21 @@
 
   /* 压在照片上的实心色：照片在两种主题下都是照片，所以这一档刻意不跟主题反色。
      HomeHero 与 TripCard 的倒计时/状态胶囊共用，深色态里也不能换成亮色。 */
-  --photo-scrim: rgba(12, 20, 19, 0.74);
-  --photo-soon: #8a5f10;
-  --photo-live: #2c5c41;
+  --photo-scrim: rgba(24, 28, 30, 0.74);
+  --photo-soon: #8a4a0c;
+  --photo-live: #165c0a;
 
-  --ok: #3f7d5a;
-  --ok-soft: #e2efe6;
-  --ok-border: #bfe0cb;
-  /* warn 降权：琥珀只留给「真告警」。从亮黄改成深琥珀，面积再大也不刺眼。 */
-  --warn: #8a5f10;
-  --warn-soft: #f7ecd6;
-  --warn-border: #e3cd9f;
-  --danger: #b3392f;
-  --danger-soft: #f8e2df;
-  --danger-border: #eec5be;
-  --code-bg: rgba(22, 33, 31, 0.06);
+  --ok: #1d770e;
+  --ok-soft: #ddeec3;
+  --ok-border: #c8e49d;
+  /* warn 降权：琥珀只留给「真告警」。压在 --warn-soft 上是 4.77:1，够正文。 */
+  --warn: #8a4a0c;
+  --warn-soft: #f8d291;
+  --warn-border: #f2ca4b;
+  --danger: #b23a32;
+  --danger-soft: #f7ddd9;
+  --danger-border: #e47979;
+  --code-bg: rgba(46, 49, 50, 0.06);
 
   /* ---------- 阶：半径 ----------
      控件 / 卡片 / 浮层 / 贴边大浮层 / 芯片，五档封顶，不许发明中间值。
@@ -159,11 +165,11 @@
   /* ---------- 阶：阴影 ----------
      两段式：第一段的 0 模糊是「贴纸的厚度」，第二段负责散开。
      色调从暖棕翻到冷墨——压在冷纸上的棕阴影会发脏。 */
-  --shadow-sm: 0 1px 0 rgba(22, 33, 31, 0.08);
-  --shadow-md: 0 2px 0 rgba(22, 33, 31, 0.06), 0 8px 18px -12px rgba(22, 33, 31, 0.3);
-  --shadow-lg: 0 3px 0 rgba(22, 33, 31, 0.08), 0 18px 32px -16px rgba(22, 33, 31, 0.36);
-  --shadow-pop: 0 5px 0 rgba(22, 33, 31, 0.1), 0 26px 48px -22px rgba(22, 33, 31, 0.44);
-  --shadow-modal: 0 8px 0 rgba(22, 33, 31, 0.1), 0 40px 80px -28px rgba(22, 33, 31, 0.5);
+  --shadow-sm: 0 1px 0 rgba(46, 49, 50, 0.08);
+  --shadow-md: 0 2px 0 rgba(46, 49, 50, 0.06), 0 8px 18px -12px rgba(46, 49, 50, 0.3);
+  --shadow-lg: 0 3px 0 rgba(46, 49, 50, 0.08), 0 18px 32px -16px rgba(46, 49, 50, 0.36);
+  --shadow-pop: 0 5px 0 rgba(46, 49, 50, 0.1), 0 26px 48px -22px rgba(46, 49, 50, 0.44);
+  --shadow-modal: 0 8px 0 rgba(46, 49, 50, 0.1), 0 40px 80px -28px rgba(46, 49, 50, 0.5);
   /* 硬偏移：lift 是 hover 的一档，sticker 是选中与 hero 的一档——「贴上去」而不是「浮起来」。 */
   --shadow-lift: 2px 2px 0 var(--ink);
   --shadow-sticker: 3px 3px 0 var(--ink);
@@ -214,75 +220,77 @@
 }
 
 /* 深色模式：跟随系统。地图瓦片仍是亮色（行业惯例，叠加层已用 token），
-   其余界面全部走这里的变量。中性阶从暖棕翻到冷板岩，描边墨 --ink 反过来是亮墨——
-   贴纸风在深底上靠的是「比界面更亮的轮廓」，不是阴影。 */
+   其余界面全部走这里的变量。中性阶从亮纸翻成「夜航图」的蓝板岩（跟亮色同一批色相，
+   只是明度倒过来），描边墨 --ink 反过来是亮墨——贴纸风在深底上靠的是「比界面更亮的轮廓」，
+   不是阴影。 */
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --bg: #0f1416;
-    --surface: #171d20;
-    --surface-2: #1f272a;
-    --surface-3: #283235;
-    --surface-hover: #232c30;
-    --surface-selected: #11333a;
-    --border: #2a3437;
+    --bg: #101418;
+    --surface: #171c21;
+    --surface-2: #1e252b;
+    --surface-3: #273038;
+    --surface-hover: #222a31;
+    --surface-selected: #12314a;
+    --border: #2b3540;
     --border-faint: rgba(255, 255, 255, 0.07);
     --hairline: rgba(255, 255, 255, 0.16);
-    --ink: #dceae5;
-    --text: #e9f0ec;
-    --text-2: #b4c0bb;
-    --text-3: #93a09b;
-    --text-faint: #75827d;
+    --ink: #dbe6ef;
+    --text: #e9eef3;
+    --text-2: #b0bcc6;
+    --text-3: #8f9ba5;
+    --text-faint: #74818c;
     --page-art: linear-gradient(180deg, rgba(255, 255, 255, 0.045),
         rgba(255, 255, 255, 0) 340px), var(--bg);
-    /* 深色下 accent 走亮蓝，实心上的字必须是近黑的墨（白字只有 3.1:1）。 */
-    --accent: #3f97cc;
-    --accent-strong: #6fb7e3;
-    --accent-soft: #10303f;
-    --accent-ink: #05202e;
-    --ember: #e08a5f;
-    --ember-deep: #f0ab80;
-    --ember-soft: #3a2117;
-    --ember-ink: #2a0f04;
-    /* 深色态 --ember-deep 反成浅桃（那是正文色），压它就得换回近黑的墨。 */
-    --ember-deep-ink: #2a0f04;
-    /* 六色 ramp 在深底上整体提亮、降饱和，soft 档换成「深色 tint」。
-       deep 直接回指实心色——深色态下实心色本身就够亮，可以当正文用；
+    /* 深色下 accent 走亮蓝（水系在夜航图上的那档蓝），实心上的字必须是近黑的墨：
+       白字压 #348ac9 只有 3.1:1，近黑墨是 4.85:1。正文级的蓝用 --accent-strong。 */
+    --accent: #348ac9;
+    --accent-strong: #72b0f4;
+    --accent-soft: #10293c;
+    --accent-ink: #041823;
+    --ember: #f0a35c;
+    --ember-deep: var(--ember);
+    --ember-soft: #3a2314;
+    --ember-ink: #2a1206;
+    /* 深色态 --ember-deep 反成浅橙（那是正文色），压它就得换回近黑的墨。 */
+    --ember-deep-ink: #2a1206;
+    /* 六色 ramp 在深底上换成瓦线的亮档，soft 档换成深色 tint。
+       deep 直接回指实心色——深色态下实心色本身就够亮，可以当正文用（实测最低 5.17:1）；
        ink 反过来全部走近黑：中亮度的色块压在深底上，白字只有 2~3:1。 */
-    --ramp-1: #4d9ccb;
-    --ramp-1-soft: #10293a;
+    --ramp-1: #5591ce;
+    --ramp-1-soft: #10293c;
     --ramp-1-deep: var(--ramp-1);
     --ramp-1-ink: #06202e;
-    --ramp-2: #5aa87b;
+    --ramp-2: #58b45a;
     --ramp-2-soft: #10291d;
     --ramp-2-deep: var(--ramp-2);
     --ramp-2-ink: #06210f;
-    --ramp-3: #e08a5f;
-    --ramp-3-soft: #3a2116;
+    --ramp-3: #f0a35c;
+    --ramp-3-soft: #3a2314;
     --ramp-3-deep: var(--ramp-3);
     --ramp-3-ink: #2a1206;
-    --ramp-4: #e3b23c;
+    --ramp-4: #e3c04a;
     --ramp-4-soft: #33290f;
     --ramp-4-deep: var(--ramp-4);
     --ramp-4-ink: #2a1e02;
-    --ramp-5: #9d80c2;
+    --ramp-5: #a99df0;
     --ramp-5-soft: #241b32;
     --ramp-5-deep: var(--ramp-5);
     --ramp-5-ink: #180e24;
-    --ramp-6: #d4708f;
-    --ramp-6-soft: #351522;
+    --ramp-6: #ef7466;
+    --ramp-6-soft: #351512;
     --ramp-6-deep: var(--ramp-6);
     --ramp-6-ink: #26070f;
     /* 深色态八色都是暗身份盘，边界只能由这圈亮环画出来（环本身算过 ≥3:1）。 */
-    --avatar-ring: #5b6a6f;
-    --ok: #56ab77;
+    --avatar-ring: #5b6a76;
+    --ok: #5cb85c;
     --ok-soft: #10291d;
-    --ok-border: #24503a;
-    --warn: #d8a53a;
-    --warn-soft: #33290f;
+    --ok-border: #245033;
+    --warn: #e0a53a;
+    --warn-soft: #33260f;
     --warn-border: #4d3d1d;
-    --danger: #e0655a;
-    --danger-soft: #351512;
+    --danger: #ef7466;
+    --danger-soft: #351815;
     --danger-border: #5a2a25;
     --code-bg: rgba(255, 255, 255, 0.08);
     /* 深底上第一段硬边要更实（黑），第二段负责把重量推开。 */
@@ -438,7 +446,8 @@ textarea {
 }
 /* 会丢数据的确认按钮：整块染 --accent 会把「accent = 可逆交互」这条信号用废，
    所以描边与硬偏移换成 danger，底色停在 danger-soft；hover 反相成实心。
-   两套主题下前景/底色都比对都是 AA（#b3392f on #f8e2df、#351512 on #e0655a）。 */
+   两套主题下前景/底色都是 AA（亮色 #b23a32 on #f7ddd9 = 4.60:1，深色 #ef7466 on #351815 = 5.69:1，
+   hover 反相同一个数——对比度是对称的）。 */
 .btn--danger {
   border-color: var(--danger);
   background: var(--danger-soft);
