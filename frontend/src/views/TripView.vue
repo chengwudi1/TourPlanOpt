@@ -20,7 +20,7 @@ import {
   ArrowRight,
   ArrowUp,
   BedDouble,
-  Check,
+  ChevronDown,
   Compass,
   ExternalLink,
   Flag,
@@ -29,12 +29,13 @@ import {
   LockOpen,
   Map as MapIcon,
   Package,
+  Pencil,
   Plus,
   Receipt,
-  Search,
 } from '@/components/icons'
 import { getClientId, setClientName } from '@/composables/useClientIdentity'
 import { useCopy } from '@/composables/useCopy'
+import { useNarrowView } from '@/composables/useNarrowView'
 import { recordRecentTrip } from '@/composables/useRecentTrips'
 import { useAuthStore } from '@/stores/auth'
 import { useDialogStore } from '@/stores/dialog'
@@ -64,6 +65,36 @@ const selfId = getClientId()
 
 /** Mobile: the two panes become full-screen contexts; this picks which one shows. */
 const mobileView = ref<'list' | 'map'>('list')
+
+/**
+ * 窄屏的地点编辑器开在底部抽屉里（PlaceCard 的 `active && narrow`），一开就盖住屏幕下面
+ * 72dvh。地图按半个抽屉的高度把自己往上抬：`panTo` 只会把这一站放到全屏正中，而正中
+ * 恰恰在抽屉背后——改了停留时长、点了优化，屏幕上什么都不会动。
+ */
+const narrow = useNarrowView()
+const sheetOpen = computed(() => narrow.value && !!store.selectedPlaceId)
+
+/**
+ * 整栏空白时上屏的那一句：REST 没读到（loadError）优先，它带着具体原因；
+ * 读到过、但连接被服务端判了死刑（同伴把行程删了）走 socket 的 fatalError。
+ * 两条都走同一个兜底块——一栏什么都没有而不说话，用户只能猜。
+ */
+const loadFail = computed(() => store.loadError ?? socket.fatalError)
+
+/**
+ * 抽屉背后是地图，不是列表：列表那一屏被抽屉盖掉 72%，留在上面等于什么也看不见，
+ * 而这一站长在哪儿恰好是改停留时长、看排程结果时最想知道的一件事。
+ * 关掉抽屉把视图还给用户原来那一侧，不是无条件回列表。
+ */
+let viewBeforeSheet: 'list' | 'map' = 'list'
+watch(sheetOpen, (open) => {
+  if (open) {
+    viewBeforeSheet = mobileView.value
+    mobileView.value = 'map'
+    return
+  }
+  if (mobileView.value === 'map') mobileView.value = viewBeforeSheet
+})
 
 // -- 分栏（M24b）-----------------------------------------------------------------------
 // 行程 / 出行清单 / 费用是三块各自完整的界面，不再从上到下堆在同一条侧栏里。
@@ -104,6 +135,12 @@ watch(
 function showMobileView(view: 'list' | 'map') {
   mobileView.value = view
   pane.value = 'trip'
+}
+
+/** dock 的清单 / 费用：从地图全屏切过去时顺带收回列表那侧，不然换回行程页还停在地图上。 */
+function showPane(p: Pane) {
+  pane.value = p
+  mobileView.value = 'list'
 }
 
 // -- 写入失败的反馈（M26a）----------------------------------------------------------------
@@ -208,15 +245,44 @@ async function renameDay(dayId: string) {
   store.updateDay(dayId, { title: name.trim() })
 }
 
+/**
+ * 卡片菜单里的「重命名」：就地改名（展开态下那行地名就是输入框）是快路，这一条是保底——
+ * 名字很长、手指在触屏上要点准输入框、或者从地图上点开又没展开列表时，它都得能改。
+ */
+async function renamePlace(place: Place) {
+  closeCardMenu()
+  const name = await dialog.prompt({
+    title: '地点名称',
+    value: place.name,
+    confirmLabel: '保存',
+    emptyMessage: '请输入地点名称',
+  })
+  if (name === null) return
+  const next = name.trim()
+  if (next && next !== place.name) store.updatePlace(place.id, { name: next })
+}
+
 const searchEl = ref<InstanceType<typeof PlaceSearch> | null>(null)
 const recoEl = ref<InstanceType<typeof RecommendPanel> | null>(null)
 
-function startFromSearch() {
-  searchEl.value?.focus()
-}
+/** 「发现」的开关长在添加地点那一行上，展开态由面板自己按行程记住；这里只留一份镜像，
+    用来画箭头与 `aria-expanded`。 */
+const recoOpen = ref(false)
+const cityText = computed(() => store.trip?.city?.trim() ?? '')
 
-function startFromDiscover() {
-  recoEl.value?.show()
+/**
+ * 空天那一行点进来：先选中这一天（新地点会落在这里），再把焦点送到搜索框。
+ * 亮那一下不能省——点的是列表中段的一行，视线不在上方，没有回声就像点了没反应。
+ */
+let flashTimer: ReturnType<typeof setTimeout> | null = null
+const flash = ref(false)
+
+function askAddHere(dayId: string) {
+  selectDay(dayId)
+  searchEl.value?.focus()
+  if (flashTimer) clearTimeout(flashTimer)
+  flash.value = true
+  flashTimer = setTimeout(() => (flash.value = false), 900)
 }
 
 async function setTripCity() {
@@ -243,20 +309,15 @@ async function renameTrip(current: string) {
   store.updateTripFields({ title: name.trim() })
 }
 
-/** 文字版行程：贴群聊用。 */
-const copied = ref(false)
-
 async function copyShareLink() {
   const url = `${window.location.origin}/trip/${props.tripId}`
-  const ok = await copy(url, {
+  await copy(url, {
     receipt: '分享链接已复制，同行者打开即可共同编辑',
     fallbackTitle: '分享链接',
   })
-  if (!ok) return
-  copied.value = true
-  setTimeout(() => (copied.value = false), 1500)
 }
 
+/** 文字版行程：贴群聊用。入口在顶栏「更多」菜单里。 */
 async function copyTextItinerary() {
   const lines: string[] = []
   const title = store.trip?.title || '未命名行程'
@@ -266,25 +327,32 @@ async function copyTextItinerary() {
       .filter((p) => p.day_id === day.id)
       .sort((a, b) => a.sort_index - b.sort_index)
     lines.push('')
-    lines.push(`DAY ${day.day_index + 1}${day.title ? ` · ${day.title}` : ''}`)
+    lines.push(`第 ${day.day_index + 1} 天${day.title ? ` · ${day.title}` : ''}`)
     for (const place of list) {
       const time = place.start_min !== null ? `${formatMin(place.start_min)} ` : ''
       lines.push(`${time}${place.name}${place.address ? `（${place.address}）` : ''}`)
     }
   }
   const text = lines.join('\n')
-  const ok = await copy(text, {
+  await copy(text, {
     receipt: '文字版行程已复制，可直接贴进群聊',
     fallbackTitle: '文字版行程',
   })
-  if (!ok) return
-  copied.value = true
-  setTimeout(() => (copied.value = false), 1500)
 }
 
 function onJoin() {
   joined.value = true
   sessionStorage.setItem('tourplanopt.joined', '1')
+  socket.connect(props.tripId)
+}
+
+/** 兜底块上的「再试一次」：后端可能只是慢了一拍，不该逼用户刷新整页。 */
+async function retryLoad() {
+  try {
+    await store.load(props.tripId)
+  } catch {
+    /* loadError 已经写好，兜底块自己会换文案 */
+  }
   socket.connect(props.tripId)
 }
 
@@ -312,6 +380,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  if (flashTimer) clearTimeout(flashTimer)
   socket.disconnect()
 })
 
@@ -422,6 +491,12 @@ function stashMapPick() {
   mapPick.value = null
 }
 
+/** 加入的就是当前选中的那一天：按钮上写清是哪一天，别让用户回头核对页签。 */
+const mapPickDayLabel = computed(() => {
+  const day = store.currentDay
+  return day ? `第 ${day.day_index + 1} 天` : '行程'
+})
+
 /** 卡片操作菜单（右键/长按/⋯呼出）。 */
 const cardMenu = ref<{ place: Place; x: number; y: number } | null>(null)
 const cardMenuEl = ref<HTMLElement | null>(null)
@@ -496,6 +571,7 @@ if (typeof window !== 'undefined') {
 // (deep-compare both windows' day order after a concurrent-drag storm).
 if (import.meta.env.DEV) {
   ;(window as unknown as Record<string, unknown>).__trip = store
+  ;(window as unknown as Record<string, unknown>).__socket = socket
   ;(window as unknown as Record<string, unknown>).__client_id = selfId
 }
 </script>
@@ -511,17 +587,21 @@ if (import.meta.env.DEV) {
       @share="copyShareLink"
       @rename="renameTrip(store.trip?.title ?? '')"
       @set-city="setTripCity"
+      @copy-text="copyTextItinerary"
     />
 
     <AmapKeyCheck />
 
-    <div v-if="store.loadError" class="shell__loadfail">
+    <div v-if="loadFail" class="shell__loadfail">
       <div class="banner banner--danger">
         <div class="banner__body">
-          <div class="banner__title">{{ store.loadError.message }}</div>
-          <div v-if="store.loadError.hint" class="banner__hint tiny">{{ store.loadError.hint }}</div>
+          <div class="banner__title">{{ loadFail.message }}</div>
+          <div v-if="loadFail.hint" class="banner__hint tiny">{{ loadFail.hint }}</div>
           <div class="banner__hint tiny">
             检查链接是否完整，或回<a href="/">首页</a>重新打开。
+            <button class="chip chip--action" type="button" @click="void retryLoad()">
+              再试一次
+            </button>
           </div>
         </div>
       </div>
@@ -530,7 +610,11 @@ if (import.meta.env.DEV) {
     <div
       v-else
       class="shell__body"
-      :class="{ 'map-open': mobileView === 'map', 'doc-open': docOpen }"
+      :class="{
+        'map-open': mobileView === 'map',
+        'doc-open': docOpen,
+        'sheet-lift': sheetOpen,
+      }"
     >
       <div class="panel">
         <nav class="panebar" role="tablist" aria-label="行程内的页面">
@@ -585,21 +669,38 @@ if (import.meta.env.DEV) {
           </div>
 
           <template v-else-if="store.trip">
-            <!-- v-show 不用 v-if：发现面板的缓存按 key 存在组件里，卸载一次就白烧一次配额。 -->
-            <PlaceSearch
-              v-show="pane === 'trip'"
-              ref="searchEl"
-              :city="store.trip.city"
-              @select="onPoiPicked"
-              @stash="onStash"
-            />
+            <!-- 一个描边块：搜索框与「发现」开关并排一行，发现就地往下展开。
+                 v-show 不用 v-if：发现面板的缓存按 key 存在组件里，卸载一次就白烧一次配额。 -->
+            <div v-show="pane === 'trip'" class="addbar card" :class="{ 'addbar--flash': flash }">
+              <div class="addbar__row">
+                <PlaceSearch
+                  class="addbar__search"
+                  bare
+                  ref="searchEl"
+                  :city="store.trip.city"
+                  @select="onPoiPicked"
+                  @stash="onStash"
+                />
+                <span class="addbar__div" aria-hidden="true" />
+                <button
+                  class="addbar__reco"
+                  type="button"
+                  :aria-expanded="recoOpen"
+                  :title="cityText ? `${cityText}的景点、美食与夜市` : '先设置目的地城市，此处才会展示推荐结果'"
+                  @click="recoEl?.toggle()"
+                >
+                  <Compass class="ic" :size="14" /> 发现
+                  <ChevronDown class="addbar__caret" :class="{ 'addbar__caret--on': recoOpen }" :size="14" />
+                </button>
+              </div>
 
-            <RecommendPanel
-              v-show="pane === 'trip'"
-              ref="recoEl"
-              :city="store.trip.city"
-              :trip-id="tripId"
-            />
+              <RecommendPanel
+                ref="recoEl"
+                :city="store.trip.city"
+                :trip-id="tripId"
+                @update:open="recoOpen = $event"
+              />
+            </div>
 
             <StashPanel v-show="pane === 'trip'" />
 
@@ -616,55 +717,12 @@ if (import.meta.env.DEV) {
                 @rename="renameDay(day.id)"
                 @remove="removeDay(day.id)"
                 @menu="openCardMenu"
+                @add-here="askAddHere(day.id)"
               />
-              <div class="daylist__foot">
-                <button class="btn btn--sm btn--ghost" type="button" @click="store.addDay()">
-                  <Plus class="ic" :size="13" /> 添加一天
-                </button>
-                <button class="btn btn--sm btn--ghost" type="button" @click="copyTextItinerary">
-                  <Check v-if="copied" class="ic" :size="12" />
-                  {{ copied ? '已复制' : '复制文字版' }}
-                </button>
-              </div>
-            </div>
-
-            <!-- 天块自己会说「这一天还没有安排」，所以这里只回答「那我从哪儿开始」。 -->
-            <div v-if="!store.places.length" v-show="pane === 'trip'" class="start card">
-              <div class="start__head">
-                <strong>如何开始</strong>
-                <span class="tiny muted">添加首个地点后，时间线将自动排定</span>
-              </div>
-
-              <div class="start__actions">
-                <button class="btn btn--sm btn--primary" type="button" @click="startFromSearch">
-                  <Search class="ic" :size="13" /> 搜索地点
-                </button>
-                <button class="btn btn--sm" type="button" @click="startFromDiscover">
-                  <Compass class="ic" :size="13" /> 打开发现
-                </button>
-                <span class="tiny muted start__hint">
-                  在地图空白处右键或长按，可直接添加该位置
-                </span>
-              </div>
-
-              <svg class="start__art" viewBox="0 0 200 96" aria-hidden="true">
-                <path
-                  d="M18 74 C 52 74, 58 30, 96 30 S 148 66, 182 66"
-                  fill="none"
-                  stroke="var(--accent)"
-                  stroke-width="2.5"
-                  stroke-dasharray="5 6"
-                  stroke-linecap="round"
-                />
-                <g fill="var(--accent)">
-                  <circle cx="18" cy="74" r="6" />
-                  <circle cx="96" cy="30" r="7" />
-                  <circle cx="182" cy="66" r="6" />
-                </g>
-                <g fill="var(--surface)">
-                  <circle cx="96" cy="30" r="2.5" />
-                </g>
-              </svg>
+              <!-- 添加一天留在末尾，但改成通栏虚线行：它不是又一张卡，是这一列的收口。 -->
+              <button class="addday" type="button" @click="store.addDay()">
+                <Plus class="ic" :size="14" /> 添加一天
+              </button>
             </div>
 
             <section v-if="pane === 'checklist'" class="page">
@@ -684,7 +742,9 @@ if (import.meta.env.DEV) {
       </div>
     </div>
 
-    <nav class="mobile-switch" aria-label="切换视图">
+    <!-- 窄屏：页签与视图切换合成一条 dock。上面一条 .panebar、下面一条两入口的 dock，
+         等于把「这是哪一页」在屏幕两头各说一遍。 -->
+    <nav class="mobile-switch" aria-label="切换页面">
       <button
         class="mobile-switch__btn"
         :class="{ 'mobile-switch__btn--on': pane === 'trip' && mobileView === 'list' }"
@@ -701,6 +761,22 @@ if (import.meta.env.DEV) {
       >
         <MapIcon class="ic" :size="15" /> 地图
       </button>
+      <button
+        class="mobile-switch__btn"
+        :class="{ 'mobile-switch__btn--on': pane === 'checklist' }"
+        type="button"
+        @click="showPane('checklist')"
+      >
+        <Package class="ic" :size="15" /> 清单
+      </button>
+      <button
+        class="mobile-switch__btn"
+        :class="{ 'mobile-switch__btn--on': pane === 'cost' }"
+        type="button"
+        @click="showPane('cost')"
+      >
+        <Receipt class="ic" :size="15" /> 费用
+      </button>
     </nav>
 
     <JoinGate v-if="!joined" @join="onJoin" />
@@ -716,6 +792,9 @@ if (import.meta.env.DEV) {
       class="cardmenu card"
       :style="{ left: `${cardMenuPos.left}px`, top: `${cardMenuPos.top}px` }"
     >
+      <button class="cardmenu__item" type="button" @click="renamePlace(cardMenu.place)">
+        <Pencil class="ic" :size="13" /> 重命名
+      </button>
       <button
         v-if="cardMenu.place.address"
         class="cardmenu__item"
@@ -738,14 +817,14 @@ if (import.meta.env.DEV) {
         type="button"
         :title="
           cardMenu.place.locked
-            ? '取消后本站重新参与优化排程'
-            : '固定后，优化排程不会调整本站的顺序与开始时间'
+            ? '取消后这一站重新参与一键优化；手填的时刻也会一并取消'
+            : '不参与后，一键优化会把它留在原位，只重排它前后的站'
         "
         @click="store.setPlaceLocked(cardMenu.place.id, !cardMenu.place.locked); closeCardMenu()"
       >
         <LockOpen v-if="cardMenu.place.locked" class="ic" :size="13" />
         <Lock v-else class="ic" :size="13" />
-        {{ cardMenu.place.locked ? '取消固定' : '固定本站' }}
+        {{ cardMenu.place.locked ? '恢复参与优化' : '不参与优化' }}
       </button>
       <button
         v-if="menuDay && menuDay.id && menuDay.start_place_id !== cardMenu.place.id"
@@ -786,12 +865,14 @@ if (import.meta.env.DEV) {
         type="button"
         @click="store.movePlaceToDay(cardMenu.place.id, d.id); closeCardMenu()"
       >
-        <ArrowRight class="ic" :size="13" /> 移到 D{{ d.day_index + 1 }}{{ d.title ? ` · ${d.title}` : '' }}
+        <ArrowRight class="ic" :size="13" /> 移到第 {{ d.day_index + 1 }} 天{{
+          d.title ? ` · ${d.title}` : ''
+        }}
       </button>
     </div>
 
     <div v-if="mapPick" class="mappick card" role="dialog" aria-label="将地图所选位置加入行程">
-      <strong>{{ mapPick.loading ? '正在解析该位置…' : '添加该位置到行程？' }}</strong>
+      <strong>{{ mapPick.loading ? '正在读取这个位置的名称…' : '把这个位置加入行程？' }}</strong>
       <input
         v-model="mapPick.name"
         class="mappick__name"
@@ -807,7 +888,7 @@ if (import.meta.env.DEV) {
           :disabled="!mapPick.name.trim()"
           @click="confirmMapPick"
         >
-          <ArrowRight class="ic" :size="13" /> 加入所选日期
+          <ArrowRight class="ic" :size="13" /> 加入{{ mapPickDayLabel }}
         </button>
         <button
           class="btn btn--sm btn--ghost"
@@ -815,7 +896,7 @@ if (import.meta.env.DEV) {
           :disabled="!mapPick.name.trim()"
           @click="stashMapPick"
         >
-          暂存至想去清单
+          加入想去
         </button>
         <button class="btn btn--sm btn--ghost" type="button" @click="mapPick = null">取消</button>
       </div>
@@ -903,10 +984,52 @@ if (import.meta.env.DEV) {
   }
 }
 
+/* 这个容器既是定高的滚动区、又是列向 flex——两条身份凑在一起时，flex 的默认
+   `flex-shrink: 1` 会先动手把子项压扁，压根不滚。被压的永远是唯一能缩到 0 的那条
+   （发现面板带内层滚动，min-content 是 0，实测高 2px）。所以每条子项都钉住自然高度，
+   容器只负责滚动。 */
 .panel__content {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+  /* 实测 padding 为 0 时卡片顶到面板边线，右边那条 1px 墨线被 border-right 切掉一半。
+     描边风最怕边线糊在一起：留一圈，让每张卡的轮廓是完整的一条。 */
+  padding: 10px 10px 0;
+}
+
+/* 收尾这一圈不敢写回容器自己的 padding-bottom：sticky 钉的是「滚动视口扣掉 padding」
+   那一条线，写在容器上就等于把地点编辑器的吸底栏永久抬离面板下缘（实测差 20px）。
+   垫在最后一项之后，吸底栏才真的贴住边线。连同 10px 的 gap，仍是 20px 的收口气。 */
+.panel__content::after {
+  flex: 0 0 auto;
+  height: 10px;
+  content: "";
+}
+
+.panel__content > * {
+  flex: 0 0 auto;
+}
+
+/* ---------- 窄屏：地点抽屉与地图抬起（见上面 sheetOpen） ---------- */
+
+/* 位移写在 .map-host 上，不去动 AMap 的投影：panTo 之后这一站就在容器正中，容器整体上
+   移半个抽屉，落点自然停在抽屉上方那条可见带的中间。抽屉开着的时候点击全被它的遮罩接住，
+   所以这段位移不会让地图的命中测试错位；关掉抽屉，地图自己落回去。 */
+.shell__body.sheet-lift .map-host {
+  transform: translateY(calc(var(--place-sheet-h) * -0.5));
+}
+
+/* 抬起的部分总得有个边界：不裁的话地图会盖到顶栏上去。用 clip 不用 hidden——
+   hidden 会在这里开出一个滚动容器，编辑器的吸底栏就不再钉在 `.panel__scroll` 上，
+   那一格的出口又会跟着滚走（见 PlaceEditor 里 `.edit__foot` 的前提）。 */
+.shell__body {
+  overflow: clip;
+}
+
+@media (max-width: 860px) {
+  .map-host {
+    transition: transform var(--dur-slow) var(--ease-out);
+  }
 }
 
 /* ---------- 分栏（M24b）：行程 / 出行清单 / 费用 ---------- */
@@ -968,6 +1091,13 @@ if (import.meta.env.DEV) {
   background: var(--accent-soft);
 }
 
+/* 窄屏这三个入口整条搬进底部 dock，这里再留一条就是同一件事说两遍。 */
+@media (max-width: 860px) {
+  .panebar {
+    display: none;
+  }
+}
+
 .page {
   display: flex;
   flex-direction: column;
@@ -975,7 +1105,8 @@ if (import.meta.env.DEV) {
   width: 100%;
   max-width: 760px;
   margin: 0 auto;
-  padding: 14px 12px 24px;
+  /* 左右交给 `.panel__content` 那一圈，这里只管上下。 */
+  padding: 6px 0 24px;
 }
 
 /* 文档页铺页面底色：面板卡靠底色差浮出来，而不是贴边铺满。
@@ -1003,14 +1134,31 @@ if (import.meta.env.DEV) {
 .daylist {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
-.daylist__foot {
+/* 添加一天：通栏虚线一行，读作「这一列的收口」，不是又一张卡。 */
+.addday {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
-  padding: 2px 2px 6px;
+  justify-content: center;
+  min-height: 38px;
+  padding: 8px;
+  color: var(--text-2);
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.addday:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 
 .skeletongroup {
@@ -1019,35 +1167,79 @@ if (import.meta.env.DEV) {
   gap: 10px;
 }
 
-.start {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px;
+/* ---------- 添加地点：搜索框与「发现」共用一个描边 ---------- */
+
+.addbar {
+  border: 1px solid var(--ink);
+  border-radius: var(--radius);
+  transition: border-color var(--dur) var(--ease-out);
 }
 
-.start__head {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
+.addbar:focus-within,
+.addbar--flash {
+  border-color: var(--accent);
 }
 
-.start__actions {
+/* 空天那一行点进来时的回声：整条栏亮一下。动画被 reduced-motion 掐掉时停在自然态
+   （不亮），不影响任何人点到搜索框。 */
+.addbar--flash {
+  animation: addbar-flash 900ms var(--ease-out);
+}
+
+@keyframes addbar-flash {
+  from {
+    box-shadow: 0 0 0 4px var(--accent-soft);
+  }
+}
+
+.addbar__row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
+  min-height: 44px;
+  padding: 0 10px;
 }
 
-.start__hint {
-  flex: 1 0 100%;
+.addbar__search {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
-/* 插图退成装饰：结构已经由上面的天块表达了，这里只留一点旅程感。 */
-.start__art {
-  width: 150px;
-  height: auto;
-  margin: 0 auto;
-  opacity: 0.45;
+.addbar__div {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+}
+
+.addbar__reco {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 5px;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 6px;
+  color: var(--text-2);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.addbar__reco:hover {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.addbar__caret {
+  color: var(--text-3);
+  transition: transform var(--dur) var(--ease-inout);
+}
+.addbar__caret--on {
+  transform: rotate(180deg);
 }
 </style>

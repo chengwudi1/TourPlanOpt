@@ -198,16 +198,9 @@ async function copySettlement() {
   setTimeout(() => (copied.value = false), 1500)
 }
 
-/** 删一笔账直接改的是 AA 的结算结果，得先问一句（S2 那把尺子）。
- * 不走「删了再撤销」：重新记一笔会把付款人记成我自己，那才是把账改错。 */
-async function drop(expense: Expense) {
-  const ok = await dialog.confirm({
-    title: '删除这笔开销？',
-    message: `${expense.title} ${formatMoney(expense.amount_cents)} 将从账本移除，分摊与结算跟着变。`,
-    confirmLabel: '删除',
-    danger: true,
-  })
-  if (ok) store.removeExpense(expense.id)
+/** 一律立即删 + 5 秒可撤销：付款人与分摊名单跟着快照走，撤销的人改不了这笔账是谁付的。 */
+function drop(expense: Expense) {
+  store.deleteExpenseWithUndo(expense.id)
 }
 </script>
 
@@ -314,12 +307,12 @@ async function drop(expense: Expense) {
         <button class="entry__sum mono" type="button" title="点击改金额" @click="editAmount(e)">
           {{ formatMoney(e.amount_cents) }}
         </button>
-        <button class="iconbtn entry__drop" type="button" title="删除这笔记录" @click="void drop(e)">
+        <button class="iconbtn entry__drop" type="button" title="删除这笔开销" @click="void drop(e)">
           <Trash2 class="ic" :size="14" />
         </button>
       </li>
     </ul>
-    <p v-else class="tiny muted exp__empty">暂无记录。首笔通常为交通费用，记账后 AA 分摊将自动结算。</p>
+    <p v-else class="tiny muted exp__empty">暂无开销。首笔通常为交通费用，记账后 AA 分摊将自动结算。</p>
 
     <div v-if="shares.length > 1" class="exp__aa">
       <div class="exp__aa-head">
@@ -623,6 +616,13 @@ async function drop(expense: Expense) {
 .entry:hover .entry__drop,
 .entry:focus-within .entry__drop {
   opacity: 1;
+}
+
+/* 触屏没有 hover：删除键常驻，否则一笔账记错了在手机上删不掉。 */
+@media (hover: none) {
+  .entry__drop {
+    opacity: 1;
+  }
 }
 
 .exp__empty {

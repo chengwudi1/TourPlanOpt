@@ -1,12 +1,12 @@
 <script setup lang="ts">
 /**
- * 高德 Key 的诊断面板（M1 建的，M26d 收敛）。
+ * 地图服务的诊断面板（M1 建的，M26d 收敛，评审 M30 把口径改成「先人话、细节进详情」）。
  *
  * 状态不在这里，在 `composables/useAmapHealth.ts`：健康时这个组件一个字都不渲染，
  * 健康度由顶栏那颗小点代劳，面板只在「有问题且没被忽略」或用户主动展开时出现。
  *
- * 两半都要报：后端只能验 Web服务 Key（那个 Key 从不出现在前端），浏览器只能验 JS Key
- * （域名白名单在浏览器侧才生效）。
+ * 两半都要报：后端只能验服务侧 Key（那个 Key 从不出现在前端），浏览器只能验页面侧 Key
+ * （域名白名单在浏览器侧才生效）。界面上按「本机服务 / 网页里」称呼这两半。
  */
 import { onMounted } from 'vue'
 
@@ -43,10 +43,13 @@ async function recheck() {
     <div v-if="health === 'good'" class="banner banner--ok">
       <span class="dot dot--ok" />
       <div class="banner__body">
-        <div class="banner__title">高德 Key 自检通过</div>
-        <div class="banner__hint tiny">
-          Web服务 Key 探活 {{ webKey?.latency_ms }}ms · JS API {{ status }}
-        </div>
+        <div class="banner__title">地图服务正常</div>
+        <details class="banner__tech">
+          <summary class="tiny">详情</summary>
+          <p class="banner__techline tiny mono">
+            后端耗时 {{ webKey?.latency_ms }}ms · 页面侧状态 {{ status }}
+          </p>
+        </details>
       </div>
       <button class="btn btn--sm btn--ghost" type="button" @click="toggle">收起</button>
     </div>
@@ -55,8 +58,12 @@ async function recheck() {
       <div v-if="backendError" class="banner banner--danger">
         <span class="dot dot--danger" />
         <div class="banner__body">
-          <div class="banner__title">无法读取后端自检结果</div>
-          <div class="banner__hint tiny mono">{{ backendError }}</div>
+          <div class="banner__title">问不到地图服务的状态</div>
+          <div class="banner__hint tiny">本机服务没有应答。等它启动完成后再点一次「重新检查」。</div>
+          <details class="banner__tech">
+            <summary class="tiny">详情</summary>
+            <p class="banner__techline tiny mono">{{ backendError }}</p>
+          </details>
         </div>
       </div>
 
@@ -68,12 +75,19 @@ async function recheck() {
         <span class="dot dot--danger" />
         <div class="banner__body">
           <div class="banner__title">
-            后端 <code>{{ webKey.name }}</code>：{{ webKey.detail }}
+            {{ webKey.present ? '本机服务的地图访问用不了' : '本机服务还没配上地图访问' }}
           </div>
-          <div v-if="webKey.infocode" class="banner__hint tiny mono">
-            infocode {{ webKey.infocode }}
+          <div class="banner__hint tiny">
+            {{ webKey.present ? '按详情里的说明核对一次，再点「重新检查」。' : '填好后点「重新检查」。' }}
           </div>
-          <div class="banner__hint">{{ webKey.hint }}</div>
+          <details class="banner__tech">
+            <summary class="tiny">详情</summary>
+            <p class="banner__techline tiny">{{ webKey.hint }}</p>
+            <p class="banner__techline tiny mono">{{ webKey.name }}：{{ webKey.detail }}</p>
+            <p v-if="webKey.infocode" class="banner__techline tiny mono">
+              返回码 {{ webKey.infocode }}
+            </p>
+          </details>
         </div>
       </div>
 
@@ -85,9 +99,16 @@ async function recheck() {
         <span class="dot dot--danger" />
         <div class="banner__body">
           <div class="banner__title">
-            前端 <code>{{ jsKey.name }}</code>：{{ jsKey.detail }}
+            {{ jsKey.present ? '网页里的地图访问用不了' : '网页还没配上地图访问' }}
           </div>
-          <div class="banner__hint">{{ jsKey.hint }}</div>
+          <div class="banner__hint tiny">
+            {{ jsKey.present ? '按详情里的说明核对一次，再点「重新检查」。' : '填好后点「重新检查」。' }}
+          </div>
+          <details class="banner__tech">
+            <summary class="tiny">详情</summary>
+            <p class="banner__techline tiny">{{ jsKey.hint }}</p>
+            <p class="banner__techline tiny mono">{{ jsKey.name }}：{{ jsKey.detail }}</p>
+          </details>
         </div>
       </div>
 
@@ -111,13 +132,16 @@ async function recheck() {
         />
         <div class="banner__body">
           <div class="banner__title">{{ d.title }}</div>
-          <div v-if="d.hint" class="banner__hint">{{ d.hint }}</div>
+          <details v-if="d.hint" class="banner__tech">
+            <summary class="tiny">详情</summary>
+            <p class="banner__techline tiny">{{ d.hint }}</p>
+          </details>
         </div>
       </div>
 
       <div v-if="loading" class="banner banner--warn">
         <div class="banner__body">
-          <div class="banner__title">正在检查高德 Key…</div>
+          <div class="banner__title">正在检查地图服务…</div>
         </div>
       </div>
 
@@ -143,12 +167,15 @@ async function recheck() {
         </button>
       </div>
 
-      <p class="keycheck__note tiny muted">
-        高德需要<strong>两个不同类型</strong>的 Key：<code>AMAP_WEB_KEY</code> 选「Web服务」，
-        <code>AMAP_JS_KEY</code> + <code>AMAP_JS_SCODE</code> 选「Web端(JS API)」。
-        两者不能互换 —— 填反了后端会报 <code>10009</code>，前端会报
-        <code>INVALID_USER_SCODE</code>。都写在 <code>backend/.env</code>。
-      </p>
+      <details class="keycheck__more">
+        <summary class="tiny">地图访问是怎么配的</summary>
+        <p class="keycheck__note tiny muted">
+          地图服务需要<strong>两个不同类型</strong>的 Key：<code>AMAP_WEB_KEY</code> 选「Web服务」，
+          <code>AMAP_JS_KEY</code> + <code>AMAP_JS_SCODE</code> 选「Web端(JS API)」。
+          两者不能互换 —— 填反了后端会报 <code>10009</code>，前端会报
+          <code>INVALID_USER_SCODE</code>。都写在 <code>backend/.env</code>。
+        </p>
+      </details>
     </template>
   </div>
 </template>
@@ -177,5 +204,33 @@ async function recheck() {
 }
 .keycheck__note {
   margin: 0;
+}
+
+/* 细节折叠：收起时只是横幅底下一行安静灰字，不许抢横幅标题的注意力。 */
+.banner__tech {
+  margin-top: 3px;
+}
+
+.keycheck__more {
+  margin-top: 2px;
+}
+
+.banner__tech summary,
+.keycheck__more summary {
+  width: fit-content;
+  color: var(--text-faint);
+  cursor: pointer;
+  list-style: none;
+}
+
+.banner__tech summary::-webkit-details-marker,
+.keycheck__more summary::-webkit-details-marker {
+  display: none;
+}
+
+.banner__techline {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--text-3);
 }
 </style>

@@ -60,24 +60,32 @@ const SUGGESTIONS = computed(() => {
   // 示例里不能出现别的城市的地名：成都的行程演示「加个玄武湖」，第一观感就是没读懂这趟。
   // 每座城市都有博物馆，所以它既是真会去的地方，也在本机词表能接住的句式里。
   const city = store.trip?.city?.trim()
-  const add = store.days.length >= 2 ? `第2天加个${city ? `${city}博物馆` : '景点'}玩两小时` : `加个${city ? `${city}博物馆` : '景点'}玩两小时`
-  const base = [add, '记得带雨伞和充电宝', '门票花了240', '优化一下今天的顺序']
+  // 「今天」在这趟旅行还没开始时根本不存在，示例就不能用它；点名当前那一天才不会撞反问。
+  const dayWord =
+    store.days.length >= 2 && store.currentDay
+      ? `第${store.currentDay.day_index + 1}天`
+      : '这天'
+  const add =
+    store.days.length >= 2 && store.currentDay
+      ? `第${store.currentDay.day_index + 1}天加个${city ? `${city}博物馆` : '景点'}玩两小时`
+      : `加个${city ? `${city}博物馆` : '景点'}玩两小时`
+  const base = [add, '记得带雨伞和充电宝', '门票花了240', `优化一下${dayWord}的顺序`]
   return assistant.status?.llm_ready ? [...base, '最后一天别排太满'] : base
 })
 
 /**
  * 「规则 / 模型」「本机 / 云端」都是开发者词汇（M29b）。用户要读的是这一套现在听得懂
- * 多随意的话，所以名字按能力给：基础理解=要带明确句式，自然理解=可以说得含糊。
+ * 多随意的话，所以名字按能力给：基础理解=要带明确句式，在线理解=可以说得含糊。
  *
  * 原来它是一枚带 title 的 `<span>`：状态贴图。没人能对着一枚徽章问「那我能说什么」，
  * 而 title 在触屏上根本不存在。现在它是一个按钮，点开就是这件事的答案。
  */
-const engineLabel = computed(() => (assistant.status?.llm_ready ? '自然理解' : '基础理解'))
+const engineLabel = computed(() => (assistant.status?.llm_ready ? '在线理解' : '基础理解'))
 
 const engineLead = computed(() =>
   assistant.status?.llm_ready
-    ? '已配置云端模型，说法可以含糊一些（如「最后一天别排太满」）。识别失败时自动退回基础理解，行程不会被改动。'
-    : '未配置云端模型，在本机按固定句式识别：需要「哪天、哪个地点、多少钱」这类明确信息。理解这一步不出本机（检索地点仍会调用地图服务）。',
+    ? '已启用在线理解：说法可以含糊一些，例如「最后一天别排太满」。听不懂时会退回基础理解，行程不会被改动。'
+    : '当前是基础理解：需要说清「哪天、哪个地点、多少钱」这类明确信息。理解这一步不出本机（检索地点仍会调用地图服务）。',
 )
 
 /** 面板头部两个可展开的说明位；同时只开一个，避免叠出第三种高度。 */
@@ -119,19 +127,18 @@ function detail(action: AssistantAction): string {
         action.after_place_id ? ' · 排在指定地点之后' : ' · 排在末尾'
       }`
     case 'place_update':
-      return Object.entries(action.patch)
-        .map(([k, v]) => `${k} → ${typeof v === 'number' ? formatDuration(v) : String(v)}`)
-        .join('，')
+      // 服务端 label 已经把改了什么写在标题里（「时长 2小时」「更新备注」），不再复述字段名。
+      return ''
     case 'expense_add':
       return `${formatMoney(action.amount_cents)} · ${categoryLabel(action.category)}`
     case 'checklist_add':
       return action.texts.join('、')
     case 'day_add':
-      return action.date ? `日期 ${action.date}` : '接在最后，日期由服务端续排'
+      return action.date ? `日期 ${action.date}` : '接在最后，日期自动往后排'
     case 'trip_update':
-      return Object.keys(action.patch).join('、')
+      return ''
     case 'place_lock':
-      return action.clears_time ? '解锁会同时清掉手填时刻' : ''
+      return action.clears_time ? '这一站重新参与优化，手填的时刻一并清掉' : ''
     default:
       return ''
   }
@@ -277,7 +284,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
         </button>
       </header>
 
-      <div v-if="about === 'engine'" class="about">
+      <div v-if="about === 'engine'" class="about" data-tech="1">
         <p class="about__lead">{{ engineLead }}</p>
         <dl class="about__rows">
           <div>
@@ -307,7 +314,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
         </dl>
         <p v-if="assistant.status?.llm_ready" class="about__note tiny">{{ sentToLlm }}</p>
         <p v-else class="about__note tiny">
-          配置 LLM_BASE_URL（本地 Ollama 免密钥）或 LLM_API_KEY 后自动转为自然理解。
+          配置 LLM_BASE_URL（本地 Ollama 免密钥）或 LLM_API_KEY 后自动转为在线理解。
         </p>
         <p v-if="!assistant.status?.speech_ready" class="about__note tiny">
           浏览器识别要把音频发到境外服务，端点改不了。配置 ASR_BASE_URL（本地 whisper.cpp
@@ -318,7 +325,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
         </p>
       </div>
 
-      <div v-else-if="about === 'skin'" class="about">
+      <div v-else-if="about === 'skin'" class="about" data-tech="1">
         <p class="about__lead">
           换的是右下角这位以及面板上的署名。形象只记在本机，不写入行程、不同步给同伴。
         </p>
@@ -367,13 +374,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             <div class="act__hd">
               <component :is="meta(card.action).icon" class="ic" :size="14" />
               <strong>{{ card.action.label }}</strong>
-              <em class="mono">{{ meta(card.action).op }}</em>
             </div>
             <p v-if="detail(card.action)" class="act__detail tiny">{{ detail(card.action) }}</p>
             <p v-if="destructive(card.action)" class="act__warn tiny">
               删除类不会自动执行，点「执行」才生效
             </p>
             <p v-if="card.error" class="act__warn tiny">{{ card.error }}</p>
+            <details v-if="meta(card.action).op" class="act__tech">
+              <summary class="tiny">详情</summary>
+              <p class="tiny mono">指令 {{ meta(card.action).op }}</p>
+            </details>
             <div class="act__ft">
               <span v-if="card.state !== 'pending'" class="tiny muted">{{ stateText[card.state] }}</span>
               <button
@@ -756,12 +766,20 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   font-size: var(--t-meta);
 }
 
-.act__hd em {
-  font-style: normal;
-  margin-left: auto;
-  flex: none;
+.act__tech {
+  margin: 0 var(--s3) var(--s2);
+}
+
+.act__tech summary {
+  width: fit-content;
   font-size: var(--t-micro);
   color: var(--text-faint);
+  cursor: pointer;
+}
+
+.act__tech p {
+  margin: 4px 0 0;
+  color: var(--text-3);
 }
 
 .act__detail {

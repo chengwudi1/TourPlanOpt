@@ -26,8 +26,17 @@ import { useFeedbackStore } from '@/stores/feedback'
 type PendingOp =
   | { kind: 'place_add'; tempId: string; restore?: PlaceRestore; cancelled?: boolean }
   /** 一批清单条目共用一条 op：整批的临时行要在回广播时一起清掉。 */
-  | { kind: 'checklist_add'; tempIds: string[] }
-  | { kind: 'expense_add'; tempId: string }
+  | {
+      kind: 'checklist_add'
+      tempIds: string[]
+      /** 与 tempIds 同序的文本：回执只带服务端新行，文本是唯一能把两边对上的键。 */
+      texts: string[]
+      /** 撤销删除时补的那一笔：新行 id 是服务端给的，只能在回执到达后照它补发。 */
+      restore?: ChecklistRestore
+      /** 等回执期间被删掉的行（一批里可以只删其中一条）。 */
+      cancelled?: string[]
+    }
+  | { kind: 'expense_add'; tempId: string; cancelled?: boolean }
   /** 删除是本地先移除再发 op，回广播时那一行已经查不到了：名字只能暂存在这里。 */
   | { kind: 'deleted'; name: string }
 
@@ -53,6 +62,46 @@ export interface DeletedPlace {
   row: Place
   /** 删的那一刻这一行还没有服务端身份（PLACE_ADD 的回执还在路上）。 */
   wasTemp: boolean
+}
+
+/**
+ * 撤销一次清单删除时要补的第二笔（同 PlaceRestore：新行只认服务端给的 id）。
+ *
+ * `text` 用来在回执的 items 里认回那一行——服务端按文本去重，回执可能根本没有新增行。
+ */
+export interface ChecklistRestore {
+  /** 这一条自己的临时 id：回执期间它又被删了一次的话，就不再恢复。 */
+  tempId: string
+  text: string
+  /** 删掉时已勾上的，放回去不该变回没备。 */
+  done: boolean
+  /** 原本排在第几位：新行默认长在末尾，撤销要回到原位。 */
+  insertAt: number
+}
+
+/** 删除清单项前拍下的快照（与 DeletedPlace 一个套路）。 */
+export interface DeletedChecklist {
+  row: ChecklistItem
+  wasTemp: boolean
+  /** 删的那一刻它显示在第几位：撤销要回到原位，而不是长在末尾。 */
+  insertAt: number
+}
+
+/** 删除一笔开销前拍下的快照。 */
+export interface DeletedExpense {
+  row: Expense
+  wasTemp: boolean
+}
+
+/**
+ * 撤销一次开销删除。
+ *
+ * 只带付款人：一笔账的付款人是「谁付的钱」，不能让「谁手快点了撤销」把它改成自己——
+ * 那等于把账改错，比删掉更糟。
+ */
+export interface ExpenseRestore {
+  paidBy: string
+  paidByName: string
 }
 
 /** 删除回执里「撤销」能按多久。够读完一句话再抬手点一下，长过这个就该让屏幕安静下来。 */
@@ -372,22 +421,44 @@ export const useTripStore = defineStore('trip', () => {
     return { row, wasTemp }
   }
 
-  /** 给还在等回执的那笔 place_add 立墓碑；找不到（早落地了）就不立。 */
+  /** 给还在等回执的那笔新增立墓碑；找不到（早落地了）就不立。 */
   function cancelPendingAdd(tempId: string): boolean {
     for (const pending of pendingOps.values()) {
       if (pending.kind === 'place_add' && pending.tempId === tempId) {
         pending.cancelled = true
         return true
       }
+      if (pending.kind === 'expense_add' && pending.tempId === tempId) {
+        pending.cancelled = true
+        return true
+      }
+      // 一批清单共用一条 op：删掉其中一条不能把整批撤掉，墓碑记的是临时 id。
+      if (pending.kind === 'checklist_add' && pending.tempIds.includes(tempId)) {
+        pending.cancelled = [...(pending.cancelled ?? []), tempId]
+        return true
+      }
     }
     return false
   }
 
+  /** 撤销「还没落地就删掉」的那一行：把墓碑撤了，落地时照常收下这一行。 */
   function erasePendingAddTombstone(tempId: string): boolean {
     for (const pending of pendingOps.values()) {
       if (pending.kind === 'place_add' && pending.tempId === tempId) {
         if (!pending.cancelled) return false
         pending.cancelled = false
+        return true
+      }
+      if (pending.kind === 'expense_add' && pending.tempId === tempId) {
+        if (!pending.cancelled) return false
+        pending.cancelled = false
+        return true
+      }
+      if (pending.kind === 'checklist_add' && pending.tempIds.includes(tempId)) {
+        const cancelled = pending.cancelled
+        const at = cancelled ? cancelled.indexOf(tempId) : -1
+        if (!cancelled || at < 0) return false
+        cancelled.splice(at, 1)
         return true
       }
     }
@@ -586,8 +657,10 @@ export const useTripStore = defineStore('trip', () => {
   /**
    * 一次加一条或一批。整批走一条 op：一条一条发会把 seq 打成一串，别人端上看着像
    * 有人连点了十几次「添加」。去重由服务端负责，被它丢掉的临时行在回广播时一起清掉。
+   *
+   * `restoreFor` 只服务撤销：单条补回时把原来的勾选与位次记在回执里，落地后补发。
    */
-  function checklistAdd(texts: string[]) {
+  function checklistAdd(texts: string[], restoreFor?: Omit<ChecklistRestore, 'tempId'>) {
     if (!trip.value) return
     const tripId = trip.value.id
     const clean = texts.map((t) => t.trim().slice(0, 120)).filter(Boolean)
@@ -596,9 +669,11 @@ export const useTripStore = defineStore('trip', () => {
     const maxIndex = checklist.value.reduce((max, i) => Math.max(max, i.sort_index), -1)
     const now = new Date().toISOString()
     const tempIds: string[] = []
+    let restore: ChecklistRestore | undefined
     for (const [offset, text] of clean.entries()) {
       const tempId = `tmp-${crypto.randomUUID()}`
       tempIds.push(tempId)
+      if (restoreFor && clean.length === 1) restore = { ...restoreFor, tempId }
       checklist.value.push({
         id: tempId,
         trip_id: tripId,
@@ -612,7 +687,8 @@ export const useTripStore = defineStore('trip', () => {
       })
     }
     const opId = useSocketStore().sendOp(Ops.CHECKLIST_ADD, { texts: clean, added_by: me.name })
-    pendingOps.set(opId, { kind: 'checklist_add', tempIds })
+    // 回执只带服务端新行，认不回临时 id：文本是两边唯一的共同键。
+    pendingOps.set(opId, { kind: 'checklist_add', tempIds, texts: clean, restore })
   }
 
   /** 改名 / 打勾共用一条 patch 通道（服务端白名单只认 text 与 done）。 */
@@ -631,6 +707,66 @@ export const useTripStore = defineStore('trip', () => {
     if (item) pendingOps.set(opId, { kind: 'deleted', name: item.text })
   }
 
+  /**
+   * 删一项清单，并回一份够把它原样放回去的快照。
+   *
+   * 与 deletePlace 同一道坎：临时 id 的行服务端还不认，发 checklist_delete 只会收到
+   * rejection，而还在路上的 checklist_add 落地时又把行送回来——所以给它立墓碑。
+   */
+  function deleteChecklist(id: string): DeletedChecklist | null {
+    const item = checklist.value.find((i) => i.id === id)
+    if (!item) return null
+    const row = { ...item }
+    const insertAt = checklistSorted.value.findIndex((i) => i.id === id)
+    const wasTemp = id.startsWith('tmp-')
+    checklist.value = checklist.value.filter((i) => i.id !== id)
+    if (wasTemp) {
+      cancelPendingAdd(id)
+    } else {
+      const opId = useSocketStore().sendOp(Ops.CHECKLIST_DELETE, { id })
+      pendingOps.set(opId, { kind: 'deleted', name: row.text })
+    }
+    return { row, wasTemp, insertAt }
+  }
+
+  function restoreChecklist(snap: DeletedChecklist) {
+    const row = snap.row
+    if (snap.wasTemp && erasePendingAddTombstone(row.id)) {
+      checklist.value = [...checklist.value, row]
+      return
+    }
+    // 服务端按文本去重：撤销窗口里同伴把同一条又加回来的话，这里再发一次只会多一行噪声。
+    if (checklist.value.some((i) => i.text === row.text)) return
+    checklistAdd([row.text], { text: row.text, done: row.done, insertAt: snap.insertAt })
+  }
+
+  /**
+   * 撤销清单删除的第二笔：新行有了服务端 id 之后才能补。
+   *
+   * 位次只能用整条有序数组说话（与 reorderChecklist 同一套规矩：发送全量，不发送位移）。
+   */
+  function restoreChecklistLanded(restore: ChecklistRestore, itemIds: string[]) {
+    const row = checklist.value.find((i) => i.text === restore.text)
+    if (!row) return
+    if (restore.done) updateChecklist(row.id, { done: true })
+    if (row.sort_index === restore.insertAt) return
+    const ordered = itemIds.filter((id) => id !== row.id)
+    const at = Math.min(Math.max(restore.insertAt, 0), ordered.length)
+    ordered.splice(at, 0, row.id)
+    reorderChecklist(ordered)
+  }
+
+  /** 清单项删除的界面入口：立即删 + 一条带「撤销」的回执（S2 同一把尺子）。 */
+  function deleteChecklistWithUndo(id: string) {
+    const snap = deleteChecklist(id)
+    if (!snap) return
+    useFeedbackStore().show({
+      message: `已从清单移除「${snap.row.text}」`,
+      durationMs: UNDO_MS,
+      action: { label: '撤销', run: () => restoreChecklist(snap) },
+    })
+  }
+
   /** 拖动结果：发整条有序 id 数组，与 day_reorder 同一套规矩（不发送增量）。 */
   function reorderChecklist(orderedIds: string[]) {
     applyChecklistOrder(orderedIds)
@@ -647,12 +783,15 @@ export const useTripStore = defineStore('trip', () => {
     split_ids?: string[]
   }
 
-  function addExpense(input: ExpenseAddInput) {
+  /** `restore` 只服务撤销：付款人是「谁付的钱」，不能跟着点撤销的人走。 */
+  function addExpense(input: ExpenseAddInput, restore?: ExpenseRestore) {
     if (!trip.value) return
     const title = input.title.trim().slice(0, 80)
     if (!title || input.amount_cents <= 0) return
     const me = useClientIdentity()
-    const splits = input.split_ids?.length ? input.split_ids : [me.client_id]
+    const payer = restore?.paidBy ?? me.client_id
+    const payerName = restore?.paidByName ?? me.name
+    const splits = input.split_ids?.length ? input.split_ids : [payer]
     const now = new Date().toISOString()
     const tempId = `tmp-${crypto.randomUUID()}`
     expenses.value.push({
@@ -661,8 +800,8 @@ export const useTripStore = defineStore('trip', () => {
       title,
       amount_cents: input.amount_cents,
       category: input.category ?? 'other',
-      paid_by: me.client_id,
-      paid_by_name: me.name,
+      paid_by: payer,
+      paid_by_name: payerName,
       split_ids: splits,
       created_at: now,
       updated_at: now,
@@ -672,8 +811,8 @@ export const useTripStore = defineStore('trip', () => {
       title,
       amount_cents: input.amount_cents,
       category: input.category ?? 'other',
-      paid_by: me.client_id,
-      paid_by_name: me.name,
+      paid_by: payer,
+      paid_by_name: payerName,
       split_ids: splits,
     })
     pendingOps.set(opId, { kind: 'expense_add', tempId })
@@ -694,6 +833,58 @@ export const useTripStore = defineStore('trip', () => {
     expenses.value = expenses.value.filter((e) => e.id !== id)
     const opId = useSocketStore().sendOp(Ops.EXPENSE_DELETE, { id })
     if (expense) pendingOps.set(opId, { kind: 'deleted', name: expense.title })
+  }
+
+  /** 删一笔账，并回一份够原样放回去的快照（同 deletePlace：临时行只能立墓碑）。 */
+  function deleteExpense(id: string): DeletedExpense | null {
+    const expense = expenses.value.find((e) => e.id === id)
+    if (!expense) return null
+    const row = { ...expense, split_ids: [...expense.split_ids] }
+    const wasTemp = id.startsWith('tmp-')
+    expenses.value = expenses.value.filter((e) => e.id !== id)
+    if (wasTemp) {
+      cancelPendingAdd(id)
+    } else {
+      const opId = useSocketStore().sendOp(Ops.EXPENSE_DELETE, { id })
+      pendingOps.set(opId, { kind: 'deleted', name: row.title })
+    }
+    return { row, wasTemp }
+  }
+
+  /**
+   * 撤销一次删账。
+   *
+   * 放回去的是**新的一笔**：标题、金额、分类、付款人、分摊名单都照原样，只有 id 和记账
+   * 时刻是新的——所以它按「最新一笔」排在账本最上面。付款人不能跟着点撤销的人走，
+   * 那才是真的把账改错。
+   */
+  function restoreExpense(snap: DeletedExpense) {
+    const row = snap.row
+    if (snap.wasTemp && erasePendingAddTombstone(row.id)) {
+      expenses.value = [...expenses.value, row]
+      return
+    }
+    addExpense(
+      {
+        title: row.title,
+        amount_cents: row.amount_cents,
+        category: row.category,
+        split_ids: row.split_ids,
+      },
+      { paidBy: row.paid_by, paidByName: row.paid_by_name },
+    )
+  }
+
+  /** 开销删除的界面入口：立即删 + 一条带「撤销」的回执（S2 同一把尺子）。 */
+  function deleteExpenseWithUndo(id: string) {
+    const snap = deleteExpense(id)
+    if (!snap) return
+    const { row } = snap
+    useFeedbackStore().show({
+      message: `已删除「${row.title} ${formatMoney(row.amount_cents)}」`,
+      durationMs: UNDO_MS,
+      action: { label: '撤销', run: () => restoreExpense(snap) },
+    })
   }
 
 
@@ -766,23 +957,23 @@ export const useTripStore = defineStore('trip', () => {
   const OP_LABELS: Record<string, string> = {
     place_added: '添加地点',
     place_updated: '修改地点',
-    place_locked: '改固定状态',
+    place_locked: '改是否参与优化',
     place_deleted: '删除地点',
     place_moved: '移动地点',
-    day_reordered: '重排顺序',
+    day_reordered: '调整顺序',
     day_added: '新增一天',
     day_deleted: '删除一天',
-    day_updated: '修改这一天',
+    day_updated: '改标题或日期',
     trip_updated: '修改行程',
-    stash_added: '收进想去',
+    stash_added: '加入想去',
     stash_removed: '移出想去',
-    checklist_added: '添加待办',
-    checklist_updated: '修改待办',
-    checklist_deleted: '删除待办',
-    checklist_reordered: '重排清单',
-    expense_added: '记一笔',
-    expense_updated: '修改一笔',
-    expense_deleted: '删除一笔',
+    checklist_added: '添加清单项',
+    checklist_updated: '修改清单项',
+    checklist_deleted: '删除清单项',
+    checklist_reordered: '调整清单顺序',
+    expense_added: '添加开销',
+    expense_updated: '修改开销',
+    expense_deleted: '删除开销',
     route_optimized: '优化排程',
   }
 
@@ -792,7 +983,7 @@ export const useTripStore = defineStore('trip', () => {
     const day = days.value.find((d) => d.id === dayId)
     const index = day?.day_index ?? fallbackIndex
     if (index === undefined) return ''
-    return `D${index + 1}`
+    return `第 ${index + 1} 天`
   }
 
   /** 摘要里的对象名：能从 payload 拿就从它拿，拿不到才回本地行查（删除类只有这一条路）。
@@ -855,7 +1046,7 @@ export const useTripStore = defineStore('trip', () => {
         op: frame.op,
         origin: frame.origin,
         ts: frame.ts,
-        text: subject ? `${label} ${subject}` : label,
+        text: subject ? `${label} · ${subject}` : label,
       },
       ...opLog.value,
     ].slice(0, OP_LOG_MAX)
@@ -954,11 +1145,28 @@ export const useTripStore = defineStore('trip', () => {
       case 'checklist_added': {
         const pending = pendingOps.get(frame.op_id)
         pendingOps.delete(frame.op_id)
-        if (pending?.kind === 'checklist_add') {
-          dropChecklist(pending.tempIds)
+        const items = (data.items ?? []) as ChecklistItem[]
+        const batch = pending?.kind === 'checklist_add' ? pending : undefined
+        dropChecklist(batch ? batch.tempIds : [])
+        const doomed = new Set(batch?.cancelled ?? [])
+        const suppressed = new Set<string>()
+        if (batch) {
+          batch.tempIds.forEach((tempId, i) => {
+            if (!doomed.has(tempId)) return
+            const row = items.find((it) => it.text === batch.texts[i])
+            if (!row) return
+            // 这一条在等回执期间被删掉了：服务端刚把它种下去，反过来补一发删除收掉。
+            suppressed.add(row.id)
+            useSocketStore().sendOp(Ops.CHECKLIST_DELETE, { id: row.id })
+          })
         }
-        for (const item of (data.items ?? []) as ChecklistItem[]) upsertChecklistIfNewer(item)
+        for (const item of items) {
+          if (!suppressed.has(item.id)) upsertChecklistIfNewer(item)
+        }
         applyChecklistOrder((data.item_ids ?? []) as string[])
+        if (batch?.restore && !doomed.has(batch.restore.tempId)) {
+          restoreChecklistLanded(batch.restore, (data.item_ids ?? []) as string[])
+        }
         break
       }
       case 'checklist_updated': {
@@ -979,7 +1187,15 @@ export const useTripStore = defineStore('trip', () => {
       case 'expense_added': {
         const pending = pendingOps.get(frame.op_id)
         pendingOps.delete(frame.op_id)
-        if (pending?.kind === 'expense_add') dropExpense(pending.tempId)
+        if (pending?.kind === 'expense_add') {
+          dropExpense(pending.tempId)
+          if (pending.cancelled) {
+            // 这一笔在等回执期间被删掉了：服务端刚记下账，反过来补一发删除把它收掉。
+            const row = data.expense as Expense
+            useSocketStore().sendOp(Ops.EXPENSE_DELETE, { id: row.id })
+            break
+          }
+        }
         upsertExpenseIfNewer(data.expense as Expense)
         break
       }
@@ -1066,11 +1282,13 @@ export const useTripStore = defineStore('trip', () => {
     places.value = places.value.filter((p) => !p.id.startsWith('tmp-'))
     checklist.value = checklist.value.filter((i) => !i.id.startsWith('tmp-'))
     expenses.value = expenses.value.filter((e) => !e.id.startsWith('tmp-'))
-    // 例外：等回执期间被删掉的那笔 place_add。它还排在 socket 的离线队列里，重连之后
-    // 照样会落地——墓碑跟着一起清，删掉的地点就会在重连后自己长回来。
-    const tombstones = [...pendingOps].filter(
-      ([, p]) => p.kind === 'place_add' && p.cancelled,
-    )
+    // 例外：等回执期间被删掉的那几笔新增。它们还排在 socket 的离线队列里，重连之后
+    // 照样会落地——墓碑跟着一起清，删掉的行就会在重连后自己长回来。
+    const tombstones = [...pendingOps].filter(([, p]) => {
+      if (p.kind === 'checklist_add') return !!p.cancelled?.length
+      if (p.kind === 'place_add' || p.kind === 'expense_add') return !!p.cancelled
+      return false
+    })
     pendingOps.clear()
     for (const [opId, pending] of tombstones) pendingOps.set(opId, pending)
   }
@@ -1083,6 +1301,20 @@ export const useTripStore = defineStore('trip', () => {
     for (const p of presence.value) {
       if (p.client_id === getClientId() || !p.dragging_day_id) continue
       map.set(p.dragging_day_id, { name: p.name, color: p.color })
+    }
+    return map
+  })
+
+  /**
+   * 谁（非自己）停在哪一个地点上：place_id -> 提示信息，卡片的光环与「在这张卡上」都读这里。
+   * 服务端把自己那份 presence 也广播回来了，所以按 client_id 摘掉自己不是可选项：
+   * 否则我一选中一张卡，界面就自称「有人在这张卡上」，那圈颜色还正好是我自己的色。
+   */
+  const viewersByPlace = computed(() => {
+    const map = new Map<string, { name: string; color: string }>()
+    for (const p of presence.value) {
+      if (p.client_id === getClientId() || !p.focusing_place_id) continue
+      map.set(p.focusing_place_id, { name: p.name, color: p.color })
     }
     return map
   })
@@ -1227,10 +1459,12 @@ export const useTripStore = defineStore('trip', () => {
     checklistAdd,
     updateChecklist,
     removeChecklist,
+    deleteChecklistWithUndo,
     reorderChecklist,
     addExpense,
     updateExpense,
     removeExpense,
+    deleteExpenseWithUndo,
     optimize,
     undoOptimize,
     dismissOptimizeResult,
@@ -1240,6 +1474,7 @@ export const useTripStore = defineStore('trip', () => {
     applyPresence,
     removePresence,
     draggersByDay,
+    viewersByPlace,
     creatorColorOf,
     clearPendingOps,
     applyOrder,

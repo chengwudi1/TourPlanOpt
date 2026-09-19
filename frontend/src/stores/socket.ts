@@ -4,6 +4,7 @@ import { ref } from 'vue'
 import type { ClientFrame, OpSendFrame, PresenceSendFrame, ServerFrame } from '@/types/protocol'
 import { ClientMsg, PROTOCOL_VERSION, ServerMsg } from '@/types/protocol'
 import { colorForClient, useClientIdentity } from '@/composables/useClientIdentity'
+import { useFeedbackStore } from '@/stores/feedback'
 import { useTripStore } from '@/stores/trip'
 
 export type SocketStatus = 'idle' | 'connecting' | 'online' | 'reconnecting'
@@ -19,7 +20,10 @@ const MAX_QUEUE = 50
  */
 export const useSocketStore = defineStore('socket', () => {
   const status = ref<SocketStatus>('idle')
+  /** 连接被服务端拒了一次：可以重试，走回执那条 danger toast。 */
   const lastError = ref<{ message: string; hint: string } | null>(null)
+  /** 这一屏已经没有归宿了（行程不存在）：整栏给人话兜底，不是九秒后就消失的 toast。 */
+  const fatalError = ref<{ message: string; hint: string } | null>(null)
 
   let ws: WebSocket | null = null
   let tripId = ''
@@ -38,6 +42,7 @@ export const useSocketStore = defineStore('socket', () => {
     }
     tripId = id
     closedByUs = false
+    fatalError.value = null
     openSocket()
   }
 
@@ -80,8 +85,10 @@ export const useSocketStore = defineStore('socket', () => {
         return
       }
       if (event.code === 4404) {
+        // 重连一个不存在的房间只会一圈圈转下去：这一屏到此为止，交给整页兜底。
+        closedByUs = true
         status.value = 'idle'
-        lastError.value = { message: '行程不存在', hint: '检查链接里的行程 ID。' }
+        tripGone()
         return
       }
       scheduleReconnect()
@@ -109,6 +116,73 @@ export const useSocketStore = defineStore('socket', () => {
     if (ws && ws.readyState === WebSocket.OPEN) return
     teardownTimers()
     openSocket()
+  }
+
+  /** 「行程不存在」：这一屏没有归宿了，重连也连不出一个房间来。 */
+  function tripGone() {
+    teardownTimers()
+    const sock = ws
+    ws = null
+    if (sock) {
+      sock.onclose = null
+      sock.onmessage = null
+      sock.onerror = null
+      sock.onopen = null
+      try {
+        sock.close()
+      } catch {
+        /* 已经关了 */
+      }
+    }
+    fatalError.value = {
+      message: '这份行程已经打不开了',
+      hint: '它可能刚被同伴删掉，或链接里的行程编号不对。',
+    }
+  }
+
+  /** 回执上的「重试」：拆掉当前这条连接重来一次。reconnectSoon 在 OPEN 状态下原地不动，所以不复用它。 */
+  function reconnectForce() {
+    if (!tripId) return
+    closedByUs = false
+    lastError.value = null
+    const sock = ws
+    ws = null
+    if (sock) {
+      sock.onclose = null
+      sock.onmessage = null
+      sock.onerror = null
+      sock.onopen = null
+      try {
+        sock.close()
+      } catch {
+        /* 已经关了 */
+      }
+    }
+    attempt = 0
+    openSocket()
+  }
+
+  /**
+   * 服务端在连接里报的问题：过去它写进 `lastError` 就没人读，用户只看到屏幕悄悄不可信。
+   *
+   * 原始那句是协议层的自述（「请先发送 hello」一类），上屏只会成谜——它进控制台，
+   * 界面留一句人话和一次重来的机会。
+   */
+  function reportServerError(message: string, hint: string) {
+    if (message.includes('这份行程不存在')) {
+      closedByUs = true
+      status.value = 'idle'
+      tripGone()
+      return
+    }
+    lastError.value = { message, hint }
+    console.warn('[socket] 服务端报错：', message, hint)
+    useFeedbackStore().show({
+      kind: 'danger',
+      message: '这一步没有同步出去',
+      hint: '与房间的对接出了岔子，可以立刻重来一次。',
+      action: { label: '重试', run: reconnectForce },
+    })
   }
 
   if (typeof document !== 'undefined') {
@@ -206,6 +280,7 @@ export const useSocketStore = defineStore('socket', () => {
         attempt = 0
         status.value = 'online'
         lastError.value = null
+        fatalError.value = null
         trip.applySnapshot(frame.data.snapshot as never)
         trip.clearPendingOps()
         flushQueue()
@@ -229,7 +304,7 @@ export const useSocketStore = defineStore('socket', () => {
         break
       }
       case ServerMsg.ERROR: {
-        lastError.value = { message: frame.message, hint: frame.hint ?? '' }
+        reportServerError(String(frame.message ?? ''), String(frame.hint ?? ''))
         break
       }
       case 'pong':
@@ -242,6 +317,7 @@ export const useSocketStore = defineStore('socket', () => {
   return {
     status,
     lastError,
+    fatalError,
     connect,
     disconnect,
     sendOp,

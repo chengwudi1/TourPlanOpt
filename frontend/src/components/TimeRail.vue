@@ -377,14 +377,14 @@ const bubble = computed(() => dragging.value || hovered.value || focused.value)
         :aria-valuemin="0"
         :aria-valuemax="ceil"
         :aria-valuenow="shown ?? undefined"
-        :aria-valuetext="shown === null ? '自动排程' : formatMin(shown)"
+        :aria-valuetext="shown === null ? '跟随排程' : formatMin(shown)"
         :style="{ left: `${shown === null ? 0 : pct(shown)}%` }"
         @keydown="onKeydown"
         @focus="focused = true"
         @blur="focused = false"
       >
         <span v-if="bubble" class="rail__bubble">{{
-          shown === null ? '自动' : formatMin(shown)
+          shown === null ? '跟随排程' : formatMin(shown)
         }}</span>
       </button>
     </div>

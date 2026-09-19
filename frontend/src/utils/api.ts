@@ -58,7 +58,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     res = await fetch(path, init)
   } catch {
     // fetch itself threw: the backend is down or the dev proxy is not running.
-    throw new ApiError(0, '连不上后端', '确认 uvicorn 正在 8000 端口运行，然后重试。')
+    throw new ApiError(0, '连不上本机服务', '它没有响应。确认服务已经启动，然后重试。')
   }
 
   const text = await res.text()

@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 
 import PlaceCard from '@/components/PlaceCard.vue'
 import type { RailMark } from '@/components/TimeRail.vue'
-import { BedDouble, Car, ChevronDown, Flag, Footprints, Navigation, Ruler, X, Zap } from '@/components/icons'
+import { BedDouble, Car, ChevronDown, Flag, Footprints, Navigation, Plus, Ruler, X, Zap } from '@/components/icons'
 import { useDragSort } from '@/composables/useDragSort'
 import { useFlipList } from '@/composables/useFlipList'
 import { usePlaceDrag } from '@/composables/usePlaceDrag'
@@ -30,6 +30,7 @@ const emit = defineEmits<{
   rename: []
   remove: []
   menu: [place: Place, pos: { x: number; y: number }]
+  addHere: []
 }>()
 
 const store = useTripStore()
@@ -143,9 +144,9 @@ useDragSort(
   },
   {
     group: 'trip-places',
-    // 整行是把手之后，行内那三颗按钮必须从拖拽源里摘出去：手一抖就把卡片拖走，
-    // 而这一次点击也不会发生。编辑面板不在正文行里，本来就不参与。
-    filter: 'button',
+    // 整行是把手之后，行内那三颗按钮与就地改名的输入框必须从拖拽源里摘出去：手一抖就把
+    // 卡片拖走了，而这一次点击（或选字）也不会发生。编辑面板不在正文行里，本来就不参与。
+    filter: 'button, input, textarea, select',
     onTransfer: (placeId, _fromDay, toDay, beforeId) =>
       store.movePlaceToDay(placeId, toDay, beforeId),
     onHoverList: (dayId) => {
@@ -158,18 +159,6 @@ useFlipList(
   listEl,
   () => places.value.map((p) => p.id),
 )
-
-/** 别人正在编辑哪张卡（光环），只关心本天内的。 */
-const editorsByPlace = computed(() => {
-  const map = new Map<string, { name: string; color: string }>()
-  for (const p of store.presence) {
-    if (!p.focusing_place_id) continue
-    const place = store.places.find((x) => x.id === p.focusing_place_id)
-    if (place?.day_id !== props.day.id) continue
-    map.set(p.focusing_place_id, { name: p.name, color: p.color })
-  }
-  return map
-})
 
 // -- 控件排挂 -------------------------------------------------------------------------
 
@@ -205,9 +194,9 @@ function runOptimize() {
       >
         <ChevronDown :size="15" />
       </button>
-      <span class="daysec__badge">D{{ day.day_index + 1 }}</span>
+      <span class="daysec__badge">第 {{ day.day_index + 1 }} 天</span>
       <span class="daysec__title">
-        {{ day.title || `第 ${day.day_index + 1} 天` }}
+        <template v-if="day.title">{{ day.title }}</template>
         <span v-if="warnings.length && !expanded" class="daysec__warnbit" title="这一天有排程提醒">
           !
         </span>
@@ -255,7 +244,7 @@ function runOptimize() {
                 :place="place"
                 :index="index"
                 :active="place.id === store.selectedPlaceId"
-                :editing-by="editorsByPlace.get(place.id) ?? null"
+                :editing-by="store.viewersByPlace.get(place.id) ?? null"
                 :nav-href="navHref(place, index)"
                 :creator-color="store.creatorColorOf(place.added_by)"
                 :marks="railMarks(place.id)"
@@ -268,9 +257,15 @@ function runOptimize() {
               />
             </template>
             <!-- 空天也得是个接收方：这一行不能换成 v-else 的 <p>，否则 listEl 不存在，
-                 别天的地点就拖不进来了。 -->
+                 别天的地点就拖不进来了。里面那颗按钮才是「往这一天加地点」的入口。 -->
             <li v-if="!places.length" class="daysec__empty tiny">
-              {{ isDropTarget ? '松手即移到本天' : '这一天暂无安排。选中后可通过搜索或「发现」添加地点。' }}
+              <template v-if="isDropTarget">松手即移到本天</template>
+              <button v-else class="daysec__add" type="button" @click.stop="emit('addHere')">
+                <Plus class="ic" :size="13" /> 添加地点到这一天
+              </button>
+              <span v-if="!isDropTarget" class="daysec__emptyhint">
+                也可在地图空白处右键或长按直接添加该位置
+              </span>
             </li>
           </ul>
 
@@ -291,7 +286,7 @@ function runOptimize() {
                 <template v-if="result.summary.saved_min > 0">
                   · 节省 {{ formatDuration(result.summary.saved_min) }}
                 </template>
-                <template v-if="!result.exact">（启发式解）</template>
+                <template v-if="!result.exact">（近似结果）</template>
               </span>
               <button class="btn btn--sm" type="button" @click="store.undoOptimize()">撤销优化</button>
               <button class="btn btn--sm btn--ghost" type="button" @click="store.dismissOptimizeResult()">
@@ -307,7 +302,7 @@ function runOptimize() {
               >
                 <Zap class="ic" :size="13" /> {{ store.optimizing ? '优化中…' : '一键优化顺序' }}
               </button>
-              <label class="daysec__precise tiny muted" title="使用高德真实路况构建距离矩阵，会消耗配额；默认使用直线距离，即时完成且不消耗配额">
+              <label class="daysec__precise tiny muted" title="按高德真实路况算站间距离，会占用地图服务的调用额度；默认按直线距离，即时完成、不占额度">
                 <input v-model="precise" type="checkbox" :disabled="store.optimizing" />
                 精确优化
               </label>
@@ -335,7 +330,10 @@ function runOptimize() {
 <style scoped>
 .daysec {
   position: relative;
-  overflow: hidden;
+  /* clip 而不是 hidden：hidden 会造出一个滚动容器，卡片里那条 `position: sticky` 的吸底
+     栏就会以这一层为参照——它永远不滚，于是吸底栏永远吸不住。clip 裁得一样干净，
+     但不接管滚动，也不产生层叠上下文之外的新参照系。 */
+  overflow: clip;
 }
 
 /* 顶边色带：这一天的天色从左边实心起、往右淡出。用 ::before 而不是 border-top，
@@ -405,6 +403,7 @@ function runOptimize() {
   display: inline-flex;
   gap: 5px;
   align-items: center;
+  min-width: 0;
   overflow: hidden;
   font-weight: 600;
   text-overflow: ellipsis;
@@ -481,10 +480,12 @@ function runOptimize() {
 }
 
 /* 裁剪交给这层不带 padding 与边框的壳：0fr 时它的盒高才是真的 0。让带留白和分隔线的 body
-   自己缩，它最低也有 13px，收起态就是一条永远消不掉的残影。 */
+   自己缩，它最低也有 13px，收起态就是一条永远消不掉的残影。
+   同样是 clip：这一层要是滚动容器，卡片里的吸底栏就以它为参照，而它的高度由内容撑开、
+   永远不滚——出口就会跟着面板一起滚出屏幕，正是这一轮要修掉的那件事。 */
 .daysec__foldclip {
   min-height: 0;
-  overflow: hidden;
+  overflow: clip;
   visibility: hidden;
   transition: visibility 0s linear var(--dur-slow);
 }
@@ -633,11 +634,40 @@ function runOptimize() {
   font-variant-numeric: tabular-nums;
 }
 
+/* 空着的一天用虚线读出来：实心描边是「有内容的卡」，虚线是「这里还等东西」。
+   入口是那颗文字级按钮，不再是一枚实心 btn——一列里到处都在喊「点我」就等于没人喊。 */
 .daysec__empty {
-  padding: 10px 12px;
-  background: var(--surface-2);
-  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
   color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.daysec__add {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  align-self: flex-start;
+  min-height: 26px;
+  padding: 0;
+  color: var(--accent-strong);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.daysec__add:hover {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+
+.daysec__emptyhint {
+  color: var(--text-3);
 }
 
 .daysec__warnings {

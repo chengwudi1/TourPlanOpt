@@ -2,7 +2,6 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import AppModal from '@/components/AppModal.vue'
 import CreateTripDialog from '@/components/CreateTripDialog.vue'
 import HomeHero from '@/components/HomeHero.vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
@@ -74,7 +73,6 @@ const loading = ref(true)
 const tab = ref<TripStatus>('planning')
 
 const showCreate = ref(false)
-const showAuth = ref(false)
 
 const backend = ref<{ ok: boolean; detail: string }>({ ok: false, detail: '正在连接后端…' })
 
@@ -335,23 +333,7 @@ function finishAllWrapUps() {
   if (rows.length) say(`已将 ${rows.length} 段行程标记为完成`)
 }
 
-/* ---------- 账号（可选）：顶栏一个入口，表单只在这里出现一次 ---------- */
-
-const authMode = ref<'login' | 'register'>('login')
-const authName = ref('')
-const authPassword = ref('')
-
-async function submitAuth() {
-  try {
-    if (authMode.value === 'login') await auth.login(authName.value.trim(), authPassword.value)
-    else await auth.register(authName.value.trim(), authPassword.value)
-    authPassword.value = ''
-    showAuth.value = false
-    await refresh()
-  } catch {
-    /* auth.error 已经带着服务端的话，交给对话框里那行红字 */
-  }
-}
+/* ---------- 账号（可选）：登录入口是整页 /login，这里只管退出 ---------- */
 
 async function logout() {
   await auth.logout()
@@ -381,9 +363,9 @@ onMounted(() => {
           </span>
           <button class="iconbtn" type="button" title="退出登录" @click="logout"><X :size="15" /></button>
         </template>
-        <button v-else class="btn btn--sm" type="button" @click="showAuth = true">
+        <RouterLink v-else class="btn btn--sm homebar__auth" :to="{ name: 'login' }">
           <LogIn class="ic" :size="13" /> 登录
-        </button>
+        </RouterLink>
         <button class="btn btn--sm btn--primary" type="button" @click="showCreate = true">
           <Plus class="ic" :size="13" /> 新建行程
         </button>
@@ -549,11 +531,16 @@ onMounted(() => {
 
     <footer class="home__foot reveal reveal--fade" :style="{ '--base': '420ms' }">
       <span class="dot dot--pulse" :class="backend.ok ? 'dot--ok' : 'dot--warn'" />
-      <span class="tiny muted">{{ backend.ok ? `服务正常 ${backend.detail}` : '后端未连接' }}</span>
+      <span class="tiny muted">{{ backend.ok ? '本机服务正常' : '本机服务没有连接上' }}</span>
       <button v-if="!backend.ok" class="btn btn--sm btn--ghost" type="button" @click="checkBackend">重试</button>
-      <span v-if="!backend.ok" class="tiny muted home__foot-hint">
-        在 backend/ 下运行 uv run uvicorn app.main:app --reload
-      </span>
+      <details v-if="!backend.ok" class="home__foot-tech">
+        <summary class="tiny muted">详情</summary>
+        <p class="tiny home__foot-hint">
+          在 backend/ 目录执行
+          <code>uv run uvicorn app.main:app --reload</code>
+        </p>
+        <p class="tiny home__foot-hint mono">原始错误：{{ backend.detail }}</p>
+      </details>
     </footer>
 
     <button class="fab reveal reveal--pop" type="button" :style="{ '--base': '520ms' }" @click="showCreate = true">
@@ -561,41 +548,6 @@ onMounted(() => {
     </button>
 
     <CreateTripDialog v-if="showCreate" @created="onTripCreated" @done="onCreated" @cancel="showCreate = false" />
-
-    <AppModal v-if="showAuth" title="登录或注册" sub="不登录也可创建行程；登录用于保存「我的行程」" @close="showAuth = false">
-      <form class="authdlg" @submit.prevent="submitAuth">
-        <div class="authdlg__tabs">
-          <button
-            class="authdlg__tab"
-            :class="{ 'authdlg__tab--on': authMode === 'login' }"
-            type="button"
-            @click="authMode = 'login'"
-          >
-            登录
-          </button>
-          <button
-            class="authdlg__tab"
-            :class="{ 'authdlg__tab--on': authMode === 'register' }"
-            type="button"
-            @click="authMode = 'register'"
-          >
-            注册
-          </button>
-        </div>
-        <input v-model="authName" class="input" type="text" maxlength="20" placeholder="昵称" autocomplete="username" />
-        <input
-          v-model="authPassword"
-          class="input"
-          type="password"
-          :placeholder="authMode === 'register' ? '密码（至少 6 位）' : '密码'"
-          autocomplete="current-password"
-        />
-        <p v-if="auth.error" class="tiny authdlg__err">{{ auth.error.message }}</p>
-        <button class="btn btn--primary" type="submit" :disabled="auth.busy || !authName.trim() || authPassword.length < 6">
-          {{ auth.busy ? '请稍候…' : authMode === 'login' ? '登录' : '注册并登录' }}
-        </button>
-      </form>
-    </AppModal>
   </div>
 </template>
 
@@ -640,6 +592,13 @@ onMounted(() => {
   gap: 8px;
   align-items: center;
   margin-left: auto;
+}
+
+/* 登录入口是个链接（跳到整页 /login），但读起来要跟旁边的按钮一样是贴纸：
+   .btn 那套描边与字色是写给 button 的，链接得自己把下划线和链接蓝抹掉。 */
+.homebar__auth {
+  color: inherit;
+  text-decoration: none;
 }
 
 .homebar__who {
@@ -1000,7 +959,20 @@ onMounted(() => {
   border-top: 1px solid var(--border-faint);
 }
 .home__foot-hint {
+  margin: 2px 0 0;
   color: var(--text-3);
+}
+.home__foot-tech {
+  flex: 1 0 100%;
+}
+.home__foot-tech summary {
+  width: fit-content;
+  color: var(--text-3);
+  cursor: pointer;
+  list-style: none;
+}
+.home__foot-tech summary::-webkit-details-marker {
+  display: none;
 }
 .home__note {
   padding: 8px 10px;

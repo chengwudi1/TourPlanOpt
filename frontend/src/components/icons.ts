@@ -24,6 +24,8 @@ export {
   Copy,
   Ellipsis,
   ExternalLink,
+  Eye,
+  EyeOff,
   Flag,
   Footprints,
   GripVertical,

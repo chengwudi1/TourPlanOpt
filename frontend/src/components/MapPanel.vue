@@ -89,7 +89,7 @@ onMounted(async () => {
     AMap = await ensureAmap()
   } catch {
     // ensureAmap already recorded a diagnostic; AmapKeyCheck.vue explains it.
-    initError.value = '高德JS API 未就绪'
+    initError.value = '地图没能加载出来'
     return
   }
   if (!host.value) return
@@ -434,8 +434,8 @@ defineExpose({
       <div class="card map-panel__box">
         <strong>地图未加载</strong>
         <p class="muted tiny">
-          {{ initError || '正在初始化高德地图…' }}<br />
-          若长时间未加载，请查看上方的 Key 自检提示。
+          {{ initError || '正在加载地图…' }}<br />
+          若长时间未加载，请查看上方的地图服务提示。
         </p>
       </div>
     </div>

@@ -2,8 +2,6 @@
 import { computed, onMounted, ref, watch } from 'vue'
 
 import {
-  ChevronDown,
-  Compass,
   ExternalLink,
   Landmark,
   MoonStar,
@@ -17,11 +15,13 @@ import type { Poi } from '@/types/domain'
 import { apiFetch } from '@/utils/api'
 
 const props = defineProps<{ city: string; tripId: string }>()
+const emit = defineEmits<{ 'update:open': [value: boolean] }>()
 
 const store = useTripStore()
 
 type Sort = 'composite' | 'hot' | 'distance'
 
+/** 开关本身长在「添加地点」栏那一行上（父组件），这里只报状态、只接指令。 */
 const open = ref(false)
 const category = ref<'scenic' | 'food' | 'night'>('scenic')
 const sort = ref<Sort>('composite')
@@ -90,7 +90,7 @@ const origin = computed<[number, number] | null>(() =>
 const originGroups = computed(() =>
   store.days
     .map((day) => ({
-      label: `D${day.day_index + 1}${day.title ? ` · ${day.title}` : ''}`,
+      label: `第 ${day.day_index + 1} 天${day.title ? ` · ${day.title}` : ''}`,
       items: store.places
         .filter((p) => p.day_id === day.id)
         .sort((a, b) => a.sort_index - b.sort_index)
@@ -115,22 +115,12 @@ const originNote = computed(() => {
   if (originGroups.value.length || originStash.value.length) {
     return '未选择基准点：请选择一个地点后按距离重排'
   }
-  return '行程中暂无可作为基准的地点：请先添加地点，或将其加入想去清单'
+  return '行程中还没有可作基准的地点：先添加地点，或把它加入想去'
 })
 
-/* ---------- 列表高度与排序：按行程记住 ---------- */
+/* ---------- 排序、基准点与展开态：按行程记住 ---------- */
 
-const DEFAULT_H = 300
-const MIN_H = 140
-const listH = ref(DEFAULT_H)
 const prefsKey = computed(() => `tourplanopt.reco-${props.tripId}`)
-
-function maxH() {
-  return Math.max(MIN_H, Math.min(Math.round(window.innerHeight * 0.7), 760))
-}
-function clampH(px: number) {
-  return Math.min(maxH(), Math.max(MIN_H, Math.round(px)))
-}
 
 function loadPrefs() {
   let raw: unknown = null
@@ -140,13 +130,12 @@ function loadPrefs() {
     return // 脏数据与无痕模式一样：回到默认，不连带面板一起坏
   }
   if (!raw || typeof raw !== 'object') return
-  const { h, sort: saved, origin: savedOrigin, originAt: savedAt } = raw as {
-    h?: unknown
+  const { sort: saved, origin: savedOrigin, originAt: savedAt, open: savedOpen } = raw as {
     sort?: unknown
     origin?: unknown
     originAt?: unknown
+    open?: unknown
   }
-  if (typeof h === 'number' && Number.isFinite(h)) listH.value = clampH(h)
   if (saved === 'composite' || saved === 'hot' || saved === 'distance') sort.value = saved
   if (typeof savedOrigin === 'string') originId.value = savedOrigin
   if (
@@ -156,6 +145,7 @@ function loadPrefs() {
   ) {
     originAt.value = [savedAt[0] as number, savedAt[1] as number]
   }
+  if (typeof savedOpen === 'boolean') open.value = savedOpen
 }
 
 function persistPrefs() {
@@ -165,10 +155,10 @@ function persistPrefs() {
     localStorage.setItem(
       prefsKey.value,
       JSON.stringify({
-        h: listH.value,
         sort: sort.value,
         origin: originId.value,
         originAt: originAt.value,
+        open: open.value,
       }),
     )
   } catch {
@@ -176,8 +166,9 @@ function persistPrefs() {
   }
 }
 
-// 切档和换基准都得记住：只有拖拽写 storage 的话，「刷新后排序没回来」会被当成没保存的 bug。
-watch([sort, originId], persistPrefs)
+// 切档、换基准、开合都得记住：只写一部分的话，「刷新后展开态没回来」会被当成没保存的 bug。
+watch([sort, originId, open], persistPrefs)
+watch(open, (v) => emit('update:open', v), { immediate: true })
 
 /** 上次选的基准点可能早就被删了。等行程确实加载完再判失效——挂载那一刻 places 还是空的，
     抢着清会把「快照先到、偏好在后」的正常路径误杀成没选过。 */
@@ -191,37 +182,6 @@ watch(
   },
   { immediate: true },
 )
-
-/* ---------- 无把手拖拽改高度 ---------- */
-
-const dragging = ref(false)
-let dragPointer = 0
-let dragStartY = 0
-let dragStartH = 0
-
-function onGrabDown(e: PointerEvent) {
-  dragPointer = e.pointerId
-  dragStartY = e.clientY
-  dragStartH = listH.value
-  dragging.value = true
-  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-}
-
-function onGrabMove(e: PointerEvent) {
-  if (!dragging.value || e.pointerId !== dragPointer) return
-  listH.value = clampH(dragStartH + (e.clientY - dragStartY))
-}
-
-function onGrabUp(e: PointerEvent) {
-  if (!dragging.value || e.pointerId !== dragPointer) return
-  dragging.value = false
-  persistPrefs()
-}
-
-function nudge(delta: number) {
-  listH.value = clampH(listH.value + delta)
-  persistPrefs()
-}
 
 /** 键用发给服务端的那串坐标：基准点是用户明确挑的，只有真把它挪走才该重排。掺行 id 的话，
     「放进某一天」换个 id、坐标一分不动，也会白重排一次。 */
@@ -336,22 +296,19 @@ function added(poi: Poi): boolean {
 
 onMounted(loadPrefs)
 
-defineExpose({ show: () => (open.value = true) })
+defineExpose({
+  show: () => (open.value = true),
+  toggle: () => (open.value = !open.value),
+})
 </script>
 
 <template>
-  <div class="reco card" :class="{ 'reco--dragging': dragging }" :style="{ '--reco-h': `${listH}px` }">
-    <button class="reco__head" type="button" @click="open = !open">
-      <strong class="reco__label"><Compass class="ic" :size="14" /> 发现</strong>
-      <span class="tiny muted">
+  <div v-show="open" class="reco">
+    <div class="reco__body">
+      <p class="reco__lead tiny muted">
         {{ city ? `${city}的景点、美食与夜市，点击即可加入行程` : '请先设置目的地城市，此处才会展示推荐结果' }}
-      </span>
-      <span class="reco__chevron" :class="{ 'reco__chevron--open': open }">
-        <ChevronDown :size="15" />
-      </span>
-    </button>
+      </p>
 
-    <div v-if="open" class="reco__body">
       <div class="reco__tabs">
         <button
           v-for="c in CATEGORIES"
@@ -439,79 +396,22 @@ defineExpose({ show: () => (open.value = true) })
         <ExternalLink class="ic" :size="12" /> 在高德地图中查看更多
       </a>
     </div>
-
-    <!-- 底部这条既是「还有得拖」的提示，也是把手本身：整条 14px 都是热区。 -->
-    <div
-      v-if="open"
-      class="reco__resize"
-      role="separator"
-      tabindex="0"
-      aria-orientation="horizontal"
-      aria-label="调整发现列表的高度"
-      :aria-valuenow="listH"
-      :aria-valuemin="MIN_H"
-      :aria-valuemax="maxH()"
-      title="拖动或按上下方向键调整列表高度"
-      @pointerdown="onGrabDown"
-      @pointermove="onGrabMove"
-      @pointerup="onGrabUp"
-      @pointercancel="onGrabUp"
-      @keydown.arrow-up.prevent="nudge(-24)"
-      @keydown.arrow-down.prevent="nudge(24)"
-    />
   </div>
 </template>
 
 <style scoped>
-.reco {
-  overflow: hidden;
-}
-
-/* 拖高度时列表里的文字会被顺手选成一片蓝，整块关掉。 */
-.reco--dragging {
-  user-select: none;
-}
-
-.reco__head {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  width: 100%;
-  padding: 11px 12px;
-  text-align: left;
-  background: none;
-  border: 0;
-}
-
-.reco__label {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
-
-.reco__head span:not(.reco__chevron) {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.reco__chevron {
-  color: var(--text-3);
-  transition: transform var(--dur) var(--ease-inout);
-}
-.reco__chevron--open {
-  transform: rotate(180deg);
-}
-
 .reco__body {
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 0 12px 12px;
+}
+
+/* 说明行原来长在开关那一行上，现在开关并进了「添加地点」栏，它只能待在展开体里。
+   上边距归它自己：head 没了，没人再替这段撑出呼吸。 */
+.reco__lead {
+  margin: 0;
+  padding-top: 10px;
 }
 
 .reco__tabs {
@@ -553,14 +453,17 @@ defineExpose({ show: () => (open.value = true) })
   margin: 0;
 }
 
+/* 与「添加地点」栏第一行之间的界线：整块只有一个描边，内部靠这条细线分层。 */
+.reco {
+  border-top: 1px solid var(--border);
+}
+
 .reco__list {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-height: var(--reco-h, 300px);
   padding: 0;
   margin: 0;
-  overflow-y: auto;
   list-style: none;
 }
 
@@ -613,30 +516,5 @@ defineExpose({ show: () => (open.value = true) })
 }
 .reco__amap:hover {
   text-decoration: underline;
-}
-
-/* 把手：整条 14px 都是热区，中间那条小药丸只是提示。touch-action 只给这一条，
-   不与列表滚动和 sortablejs 的拖拽抢手势。 */
-.reco__resize {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 14px;
-  cursor: row-resize;
-  touch-action: none;
-}
-
-.reco__resize::before {
-  width: 40px;
-  height: 4px;
-  content: '';
-  background: var(--border);
-  border-radius: var(--radius-pill);
-  transition: background var(--dur-fast) var(--ease-out);
-}
-
-.reco__resize:hover::before,
-.reco__resize:focus-visible::before {
-  background: var(--accent);
 }
 </style>

@@ -25,9 +25,12 @@ const props = withDefaults(
 
 const emit = defineEmits<{ close: [] }>()
 
+/** 根是 Teleport，默认透传会把调用方的 class/style 整批丢掉（开发态只给一条警告）；
+ *  这块板是屏幕上真正被指认的对象，所以由它自己接 `$attrs`。 */
+defineOptions({ inheritAttrs: false })
+
 /** 叠放时键盘归属的凭据，见 utils/modalStack。挂载时领取，卸载时归还。 */
 let modalLayer = 0
-
 const panel = ref<HTMLElement | null>(null)
 const backdrop = ref<HTMLElement | null>(null)
 const dragging = ref(false)
@@ -154,6 +157,7 @@ defineExpose({ close: requestClose })
     <div ref="backdrop" class="modal" :class="`modal--${variant}`" @click.self="requestClose">
       <div
         ref="panel"
+        v-bind="$attrs"
         class="modal__panel card"
         :class="{ 'modal__panel--dragging': dragging }"
         tabindex="-1"
@@ -317,6 +321,8 @@ defineExpose({ close: requestClose })
     /* 键盘弹起时 dvh 会跟着缩，vh 不会——先写 vh 兜老浏览器，再让 dvh 覆盖。 */
     max-height: 88vh;
     max-height: 88dvh;
+    /* 高度默认随内容长；调用方给一个 --sheet-h 就钉住它（地点抽屉要拿这个数抬地图）。 */
+    height: var(--sheet-h, auto);
     border: 0;
     border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     border-bottom: 0;

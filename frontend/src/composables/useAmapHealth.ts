@@ -86,7 +86,7 @@ const dismissedSignature = ref(readStored('local', DISMISS_KEY))
 const frontendDiagnostics = computed(() => {
   const backendCoveredMissingKey = jsKey.value !== null && !jsKey.value.present
   return diagnostics.value.filter(
-    (d) => !(backendCoveredMissingKey && d.title.includes('AMAP_JS_KEY')),
+    (d) => !(backendCoveredMissingKey && `${d.title}${d.hint}`.includes('AMAP_JS_KEY')),
   )
 })
 
@@ -137,7 +137,7 @@ async function probe(force = false): Promise<void> {
     webKey.value = data.web_key
     jsKey.value = data.js_key
   } catch (err) {
-    backendError.value = `${err}（后端没起来？在 backend/ 下运行 uv run uvicorn app.main:app --reload）`
+    backendError.value = `本机服务没有应答。请确认后端已启动（在 backend/ 目录执行 uv run uvicorn app.main:app --reload）。原始错误：${err}`
   } finally {
     loading.value = false
     probed.value = true

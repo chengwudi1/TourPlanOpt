@@ -103,7 +103,7 @@ export const useAssistantStore = defineStore('assistant', () => {
   }
 
   const GREETING =
-    '说一句话就能改行程：加地点、补清单、记一笔、优化顺序都行。动手前会先列出要做的事，逐条确认。'
+    '说一句话就能改行程：加地点、补清单、记开销、优化顺序都行。动手前会先列出要做的事，逐条确认。'
 
   function greeting(): string {
     // 没配模型时也要说清这次是谁在出力——把兜底说成故障，用户就再也不点这里了。

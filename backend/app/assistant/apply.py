@@ -51,6 +51,18 @@ _CATEGORY_LABELS = {
     "other": "其他",
 }
 
+# 确认卡上不许出现 planning / walking 这类枚举值，所以解析层与库里的写法都收在这里。
+_TRIP_STATUS_LABELS = {
+    "planning": "规划中",
+    "booked": "已订妥",
+    "ongoing": "进行中",
+    "done": "已完成",
+    "finished": "已完成",
+    "archived": "已归档",
+}
+
+_TRAVEL_MODE_LABELS = {"driving": "驾车", "walking": "步行"}
+
 
 def _clean(value: str, limit: int) -> str:
     return re.sub(r"\s+", " ", (value or "").strip())[:limit]
@@ -227,7 +239,7 @@ async def _update_place(resolver: Resolver, intent: Intent, st: _State) -> None:
 
     patch = {k: v for k, v in patch.items() if k in PLACE_PATCH_KEYS}
     if not patch:
-        st.out.warnings.append(f"「{place.name}」没有要改的字段")
+        st.out.warnings.append(f"「{place.name}」没有要改的内容")
         return
     bits = []
     if "duration_min" in patch:
@@ -255,7 +267,7 @@ async def _delete_place(resolver: Resolver, intent: Intent, st: _State) -> None:
         if item is not None:
             st.push(
                 ChecklistDelete(
-                    item_id=item.id, text=item.text, label=f"删除待办 {item.text}"
+                    item_id=item.id, text=item.text, label=f"删除清单项 {item.text}"
                 )
             )
             return
@@ -276,14 +288,14 @@ async def _lock_place(resolver: Resolver, intent: Intent, st: _State) -> None:
     query = intent.place or intent.name
     place, why = resolver.find_place(query)
     if place is None:
-        st.out.warnings.append(why or f"没找到要钉住的地点「{_clean(query, 30)}」")
+        st.out.warnings.append(why or f"没找到要改优化的地点「{_clean(query, 30)}」")
         return
     locked = True if intent.locked is None else bool(intent.locked)
     st.push(
         PlaceLock(
             place_id=place.id, name=place.name, locked=locked,
             clears_time=not locked and place.user_start_min is not None,
-            label=f"{place.name} · {'钉住，不参与优化' if locked else '解锁，交回自动排程'}",
+            label=f"{place.name} · {'不参与优化' if locked else '重新参与优化，时刻跟随排程'}",
         )
     )
 
@@ -319,7 +331,7 @@ async def _add_checklist(resolver: Resolver, intent: Intent, st: _State) -> None
     st.push(
         ChecklistAdd(
             texts=fresh,
-            label=f"待办 +{len(fresh)}：" + "、".join(fresh[:3]) + tail,
+            label=f"添加清单项 {len(fresh)} 项：" + "、".join(fresh[:3]) + tail,
         )
     )
 
@@ -335,7 +347,7 @@ async def _update_checklist(resolver: Resolver, intent: Intent, st: _State) -> N
     st.push(
         ChecklistUpdate(
             item_id=item.id, text=item.text, patch={"done": done},
-            label=f"待办 {item.text} · {'标记完成' if done else '取消完成'}",
+            label=f"清单项 {item.text} · {'标记完成' if done else '取消完成'}",
         )
     )
 
@@ -345,7 +357,7 @@ async def _delete_checklist(resolver: Resolver, intent: Intent, st: _State) -> N
     if item is None:
         st.out.warnings.append(why or f"没找到待办「{_clean(intent.item, 30)}」")
         return
-    st.push(ChecklistDelete(item_id=item.id, text=item.text, label=f"删除待办 {item.text}"))
+    st.push(ChecklistDelete(item_id=item.id, text=item.text, label=f"删除清单项 {item.text}"))
 
 
 async def _add_expense(resolver: Resolver, intent: Intent, st: _State) -> None:
@@ -361,7 +373,7 @@ async def _add_expense(resolver: Resolver, intent: Intent, st: _State) -> None:
     st.push(
         ExpenseAdd(
             title=title, amount_cents=cents, category=category,
-            label=f"记一笔 {title} ¥{cents / 100:g}",
+            label=f"添加开销 {title} ¥{cents / 100:g}",
         )
     )
 
@@ -369,28 +381,35 @@ async def _add_expense(resolver: Resolver, intent: Intent, st: _State) -> None:
 async def _update_trip(resolver: Resolver, intent: Intent, st: _State) -> None:
     trip = resolver.snapshot.trip
     patch: dict[str, object] = {}
+    bits: list[str] = []
     if intent.title:
         patch["title"] = _clean(intent.title, 80)
+        bits.append("标题")
     if intent.city:
         patch["city"] = _clean(intent.city, 40)
+        bits.append("城市")
     if intent.status in TRIP_STATUSES and intent.status != trip.status.value:
         patch["status"] = intent.status
+        bits.append(f"状态改为{_TRIP_STATUS_LABELS.get(intent.status, '已改')}")
     if intent.travel_mode in TRAVEL_MODES and intent.travel_mode != trip.travel_mode.value:
         patch["travel_mode"] = intent.travel_mode
+        bits.append(f"交通方式改为{_TRAVEL_MODE_LABELS.get(intent.travel_mode, '已改')}")
     if intent.day_start_min is not None:
         minutes = max(0, min(24 * 60 - 1, int(intent.day_start_min)))
         if minutes != trip.day_start_min:
             patch["day_start_min"] = minutes
+            bits.append(f"每天 {fmt_clock(minutes)} 出发")
     if intent.budget_yuan is not None:
         cents = int(round(float(intent.budget_yuan) * 100))
         if cents < 0 or cents > 1_000_000_000:
             st.out.warnings.append("预算超出可记录范围，这条没有改")
         else:
             patch["budget_cents"] = cents
+            bits.append(f"预算 ¥{cents / 100:g}")
     if not patch:
-        st.out.warnings.append("行程没有要改的字段")
+        st.out.warnings.append("行程没有要改的内容")
         return
-    st.push(TripUpdate(patch=patch, label="改行程设置 · " + "、".join(sorted(patch))))
+    st.push(TripUpdate(patch=patch, label="修改行程 · " + "、".join(bits)))
 
 
 async def _run_optimize(resolver: Resolver, intent: Intent, st: _State) -> None:
@@ -404,7 +423,7 @@ async def _run_optimize(resolver: Resolver, intent: Intent, st: _State) -> None:
     st.push(
         RunOptimize(
             day_id=day_id, day_title=_day_title(resolver.snapshot, day_id),
-            label=f"{resolver.day_label(day_id)} · 重排路线",
+            label=f"{resolver.day_label(day_id)} · 一键优化",
         )
     )
 

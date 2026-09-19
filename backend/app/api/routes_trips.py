@@ -112,7 +112,7 @@ async def read_trip(trip_id: str, request: Request) -> Snapshot:
     debug path and the fallback if the WebSocket never comes up."""
     snapshot = await get_snapshot(get_db(), trip_id)
     if snapshot is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"行程 {trip_id} 不存在")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "这份行程不存在，可能已被删除")
     # 历史足迹: opening a trip while logged in records the visit for 我的活动 feed.
     user = await current_user(request)
     if user is not None:
@@ -134,10 +134,10 @@ async def patch_trip(trip_id: str, body: TripPatch) -> TripOut:
     """
     patch = body.model_dump(exclude_unset=True)
     if not patch:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "没有要修改的字段")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "没有要修改的内容")
     db = get_db()
     if await db.fetch_one("SELECT id FROM trips WHERE id = ?", (trip_id,)) is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"行程 {trip_id} 不存在")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "这份行程不存在，可能已被删除")
     updated = await update_trip(db, trip_id, patch)
     if updated is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "提交的内容无效")
@@ -163,7 +163,7 @@ async def patch_trip(trip_id: str, body: TripPatch) -> TripOut:
 @router.post("/{trip_id}/participants", response_model=ParticipantOut)
 async def register_participant(trip_id: str, body: ParticipantUpsert) -> ParticipantOut:
     if await get_snapshot(get_db(), trip_id) is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"行程 {trip_id} 不存在")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "这份行程不存在，可能已被删除")
     return await upsert_participant(
         get_db(), trip_id, body.client_id, body.name.strip(), body.color
     )
@@ -182,7 +182,7 @@ async def add_place_endpoint(trip_id: str, day_id: str, body: PlaceCreate) -> Pl
         )
     place = await add_place(get_db(), day_id, body)
     if place is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"第 {day_id} 天不存在")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "这一天不存在，可能已被删除")
     return place
 
 
@@ -190,6 +190,6 @@ async def add_place_endpoint(trip_id: str, day_id: str, body: PlaceCreate) -> Pl
 async def delete_place_endpoint(trip_id: str, place_id: str) -> dict:
     result = await delete_place(get_db(), place_id)
     if result is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"地点 {place_id} 不存在")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "这个地点不存在，可能已被删除")
     day_id, place_ids = result
     return {"place_id": place_id, "day_id": day_id, "place_ids": place_ids}

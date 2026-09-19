@@ -5,13 +5,14 @@ import { LoaderCircle, Search, ShoppingBasket } from '@/components/icons'
 import type { Poi } from '@/types/domain'
 import { ApiError, apiFetch } from '@/utils/api'
 
-const props = defineProps<{ city?: string }>()
+const props = defineProps<{ city?: string; bare?: boolean }>()
 const emit = defineEmits<{ select: [poi: Poi]; stash: [poi: Poi] }>()
 
 // 示例地名跟着行程城市走：成都的行程里提示「外滩」会被当成串城的 bug。
+// 只留城市、不留示例：侧栏 440px，带引号的示例一定被截成半句。
 const placeholder = computed(() => {
   const city = props.city?.trim()
-  return city ? `搜索${city}的地点，例如「${city}博物馆」` : '搜索地点，例如「博物馆」'
+  return city ? `搜索${city}的地点` : '搜索地点'
 })
 
 const keyword = ref('')
@@ -93,7 +94,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="search">
+  <div class="search" :class="{ 'search--bare': bare }">
     <div class="search__bar">
       <Search class="ic search__icon" :size="15" />
       <input
@@ -133,7 +134,7 @@ onBeforeUnmount(() => {
         <button
           class="search__stash"
           type="button"
-          title="暂存至想去清单，不加入当前日期"
+          title="加入想去，不排进这一天"
           @mousedown.stop.prevent="emit('stash', poi)"
         >
           <ShoppingBasket :size="14" />
@@ -167,6 +168,21 @@ onBeforeUnmount(() => {
   background: var(--surface);
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* 并条模式：外层那条「添加地点」栏自带描边与焦点环，这里再描一次就是两层框、亮两次。
+   一个受焦面只留一层框，视线才知道焦点落在整条栏上而不是那个输入框上。 */
+.search--bare .search__bar {
+  height: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+}
+
+.search--bare .search__bar:focus-within {
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .search__icon {

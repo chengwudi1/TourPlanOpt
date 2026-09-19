@@ -8,8 +8,8 @@ const store = useTripStore()
 <template>
   <div v-if="store.stash.length" class="stash">
     <div class="stash__head">
-      <strong class="stash__title"><ShoppingBasket class="ic" :size="14" /> 想去清单</strong>
-      <span class="tiny muted">暂存候选地点，确认后加入指定日期</span>
+      <strong class="stash__title"><ShoppingBasket class="ic" :size="14" /> 想去</strong>
+      <span class="tiny muted">还没排进某一天的地点，随时可以排</span>
     </div>
 
     <ul class="stash__list">
@@ -33,12 +33,12 @@ const store = useTripStore()
             :title="`加入 ${store.currentDay?.title || '第 1 天'}`"
             @click="store.promoteFromStash(item)"
           >
-            <ArrowRight class="ic" :size="13" /> 今天
+            <ArrowRight class="ic" :size="13" /> 排进这一天
           </button>
           <button
             class="btn btn--sm btn--ghost stash__drop"
             type="button"
-            title="从想去清单移除"
+            title="从想去移除"
             @click="store.stashRemove(item.id)"
           >
             <X :size="14" />

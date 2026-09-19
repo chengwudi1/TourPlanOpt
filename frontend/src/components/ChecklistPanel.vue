@@ -81,18 +81,9 @@ async function rename(item: ChecklistItem) {
   store.updateChecklist(item.id, { text: trimmed })
 }
 
-async function remove(item: ChecklistItem) {
-  // 已勾掉的项随时能再加回来，不必拦；未完成的才是真丢了东西。
-  if (!item.done) {
-    const ok = await dialog.confirm({
-      title: '删除这一项？',
-      message: `「${item.text}」将从出行清单移除，同伴的清单同步变化。`,
-      confirmLabel: '删除',
-      danger: true,
-    })
-    if (!ok) return
-  }
-  store.removeChecklist(item.id)
+/** 一律立即删 + 5 秒可撤销：确认框会被肌肉记忆按下去，挡不住手快，只会拖慢手快的人。 */
+function remove(item: ChecklistItem) {
+  store.deleteChecklistWithUndo(item.id)
 }
 </script>
 
@@ -163,7 +154,7 @@ async function remove(item: ChecklistItem) {
         <button class="iconbtn chk__drag" type="button" title="拖动排序">
           <GripVertical class="ic" :size="14" />
         </button>
-        <button class="iconbtn chk__drop" type="button" title="删除" @click="void remove(item)">
+        <button class="iconbtn chk__drop" type="button" title="删除这一项" @click="void remove(item)">
           <Trash2 class="ic" :size="14" />
         </button>
       </li>
@@ -352,6 +343,14 @@ async function remove(item: ChecklistItem) {
 .chk:hover .chk__drop,
 .chk:focus-within .chk__drop {
   opacity: 1;
+}
+
+/* 触屏没有 hover：删除与拖动把手常驻，否则这一项既删不掉也挪不动。 */
+@media (hover: none) {
+  .chk__drag,
+  .chk__drop {
+    opacity: 1;
+  }
 }
 
 .check__empty {

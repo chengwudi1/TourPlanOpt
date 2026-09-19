@@ -71,7 +71,7 @@ async def _hello(conn: ClientConnection, frame: dict) -> Dispatch:
     db = get_db()
     snapshot = await get_snapshot(db, conn.trip_id)
     if snapshot is None:
-        conn.send_json(error_frame(f"行程 {conn.trip_id} 不存在"))
+        conn.send_json(error_frame("这份行程不存在，可能已被删除"))
         return Dispatch.CLOSED
 
     conn.client_id = client_id
@@ -198,7 +198,7 @@ async def _resync(conn: ClientConnection) -> Dispatch:
     db = get_db()
     snapshot = await get_snapshot(db, conn.trip_id)
     if snapshot is None:
-        conn.send_json(error_frame(f"行程 {conn.trip_id} 不存在"))
+        conn.send_json(error_frame("这份行程不存在，可能已被删除"))
         return Dispatch.CLOSED
     seq = await next_seq(db, conn.trip_id)
     conn.send_json(

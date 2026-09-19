@@ -6,6 +6,7 @@ import type { Presence } from '@/types/domain'
 import type { SocketStatus } from '@/stores/socket'
 import {
   ArrowLeft,
+  Copy,
   Ellipsis,
   ImageDown,
   Link2,
@@ -29,11 +30,17 @@ const props = defineProps<{
   status: SocketStatus
 }>()
 
-const emit = defineEmits<{ share: []; rename: []; setCity: [] }>()
+const emit = defineEmits<{ share: []; rename: []; setCity: []; copyText: [] }>()
 
 const auth = useAuthStore()
 const store = useTripStore()
 const router = useRouter()
+
+/** 登录页是整页路由：带上 next，登录成功后回到当前这段行程。 */
+const loginTo = computed(() => ({
+  name: 'login' as const,
+  query: store.trip ? { next: `/trip/${store.trip.id}` } : {},
+}))
 const feedback = useFeedbackStore()
 const {
   health: amapHealth,
@@ -121,7 +128,7 @@ const healthLabel = computed(() =>
       : '检查中',
 )
 /** 顶栏那颗点：健康时不渲染横幅了，总得有个地方回答「到底正常不正常」。 */
-const healthTitle = computed(() => `高德服务${healthLabel.value} · 展开自检详情`)
+const healthTitle = computed(() => `地图服务${healthLabel.value} · 点开看详情`)
 const healthDot = computed(() =>
   amapHealth.value === 'good' ? 'dot--ok' : amapHealth.value === 'bad' ? 'dot--danger' : '',
 )
@@ -239,9 +246,9 @@ onBeforeUnmount(() => {
       {{ auth.user.name }}
       <button class="btn btn--sm btn--ghost" type="button" @click="auth.logout()">退出</button>
     </span>
-    <a v-else class="triphead__login tiny" href="/">
+    <RouterLink v-else class="triphead__login tiny" :to="loginTo">
       <User :size="13" /> 登录
-    </a>
+    </RouterLink>
 
     <div v-if="initials.length" class="avatars" title="此刻在线">
       <span
@@ -308,6 +315,9 @@ onBeforeUnmount(() => {
         <button class="tripmenu__item" type="button" role="menuitem" @click="run(() => emit('share'))">
           <Link2 class="ic" :size="14" /> 复制协作链接
         </button>
+        <button class="tripmenu__item" type="button" role="menuitem" @click="run(() => emit('copyText'))">
+          <Copy class="ic" :size="14" /> 复制文字版行程
+        </button>
         <button
           class="tripmenu__item"
           type="button"
@@ -318,11 +328,11 @@ onBeforeUnmount(() => {
           <ImageDown class="ic" :size="14" /> {{ sharing ? '正在生成分享图…' : '生成分享图' }}
         </button>
         <button class="tripmenu__item" type="button" role="menuitem" @click="run(toggleHealthPanel)">
-          <ShieldCheck class="ic" :size="14" /> 高德服务自检 · {{ healthLabel }}
+          <ShieldCheck class="ic" :size="14" /> 地图服务 · {{ healthLabel }}
         </button>
-        <a v-if="!auth.user" class="tripmenu__item" href="/" role="menuitem">
+        <RouterLink v-if="!auth.user" class="tripmenu__item" :to="loginTo" role="menuitem">
           <User class="ic" :size="14" /> 登录账号（可选）
-        </a>
+        </RouterLink>
         <button v-else class="tripmenu__item" type="button" role="menuitem" @click="run(() => auth.logout())">
           <User class="ic" :size="14" /> 退出 {{ auth.user.name }}
         </button>
@@ -583,8 +593,9 @@ onBeforeUnmount(() => {
   }
 }
 
+/* 「更多」两档都在：复制文字版行程这类低频动作只住在这里，桌面端把它藏掉就等于没做。
+   手机上「几个人在线」那句是头像的替代读数，宽屏有头像就不用它了。 */
 @media (min-width: 861px) {
-  .triphead__more,
   .triphead__people {
     display: none;
   }

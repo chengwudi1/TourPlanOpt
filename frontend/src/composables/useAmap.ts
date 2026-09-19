@@ -92,8 +92,8 @@ function warnAboutHostname() {
   if (host === 'localhost' || host === '127.0.0.1') return
   push(
     'warn',
-    `当前通过 ${host} 访问`,
-    '如果高德控制台里给这个 JS Key 设了域名白名单且不包含该地址，地图会显示为灰色。开发期建议把白名单留空。'
+    '换别的地址访问时地图可能变灰',
+    `当前地址是 ${host}。如果高德控制台里给这个 Key 设了域名白名单且不包含该地址，地图会显示为灰色；开发期建议把白名单留空。`
   )
 }
 
@@ -110,7 +110,7 @@ export function ensureAmap(): Promise<AMapNS> {
       cfg = await fetchBootConfig()
     } catch (err) {
       status.value = 'error'
-      push('danger', '无法读取前端配置', `${err}。请确认后端已启动（uv run uvicorn app.main:app）`)
+      push('danger', '地图服务连不上：没读到本机配置', `请确认后端已启动（在 backend/ 目录执行 uv run uvicorn app.main:app）。原始错误：${err}`)
       throw err
     }
     bootConfig.value = cfg
@@ -119,16 +119,16 @@ export function ensureAmap(): Promise<AMapNS> {
       status.value = 'error'
       push(
         'danger',
-        'backend/.env 缺少 AMAP_JS_KEY',
-        '请到 https://console.amap.com 添加一个「Web端(JS API)」类型的 Key。注意它与后端用的「Web服务」Key 是两个不同的 Key。'
+        '网页里的地图 Key 还没填',
+        'backend/.env 缺少 AMAP_JS_KEY。请到 https://console.amap.com 添加一个「Web端(JS API)」类型的 Key。注意它与后端用的「Web服务」Key 是两个不同的 Key。'
       )
       throw new Error('AMAP_JS_KEY 未配置')
     }
     if (!cfg.scode) {
       push(
         'warn',
-        'backend/.env 缺少 AMAP_JS_SCODE',
-        '2021-12-02 之后创建的 JS API Key 必须配套安全密钥，否则下一步大概率报 INVALID_USER_SCODE。'
+        '网页地图缺少配套的安全密钥',
+        'backend/.env 缺少 AMAP_JS_SCODE。2021-12-02 之后创建的 JS API Key 必须配套安全密钥，否则下一步大概率报 INVALID_USER_SCODE。'
       )
     }
 
@@ -144,7 +144,7 @@ export function ensureAmap(): Promise<AMapNS> {
       })
     } catch (err) {
       status.value = 'error'
-      push('danger', '高德 JS API 加载失败', String(err))
+      push('danger', '地图没能加载出来', String(err))
       throw err
     }
 
@@ -152,14 +152,14 @@ export function ensureAmap(): Promise<AMapNS> {
       await probeWithAutocomplete(AMap)
     } catch (err) {
       status.value = 'error'
-      push('danger', 'JS Key 校验未通过', String(err instanceof Error ? err.message : err))
+      push('danger', '网页里的地图 Key 用不了', String(err instanceof Error ? err.message : err))
       throw err
     }
 
     warnAboutHostname()
     ns = AMap
     status.value = 'ready'
-    push('ok', '高德 JS API 已就绪', `版本 ${cfg.jsapi_version}`)
+    push('ok', '地图已就绪', `JS API 版本 ${cfg.jsapi_version}`)
     return AMap
   })()
 

@@ -65,7 +65,6 @@ const who = computed(() => actor(latest.value?.origin ?? ''))
       <div class="ot__clip">
         <ol class="ot__list">
           <li v-for="e in log" :key="e.seq" class="ot__row">
-            <span class="ot__seq tiny">#{{ e.seq }}</span>
             <i class="ot__dot" :style="{ background: actor(e.origin).color }" />
             <span class="ot__text">{{ e.text }}</span>
             <span class="ot__by tiny">{{ actor(e.origin).name }}</span>
@@ -80,26 +79,33 @@ const who = computed(() => actor(latest.value?.origin ?? ''))
 <style scoped>
 .ot {
   flex: 0 0 auto;
-  border-bottom: 1px solid var(--border);
 }
 
+/* 这一行不再自带色带与下边线：它头顶的页签已经是「一条 surface-2 + 一条 border」，
+   两条并排就把左栏顶上摞成了三道横杠。收起态是压在面板底色上的一行安静文字，
+   hover 才给底；展开的那一段才需要底色把自己从内容里分出来。 */
 .ot__bar {
   display: flex;
   gap: 7px;
   align-items: center;
   width: 100%;
-  padding: 6px 10px;
+  padding: 6px 12px;
   font: inherit;
   text-align: left;
   color: var(--text-2);
-  background: var(--surface-2);
+  background: none;
   border: 0;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out);
 }
 
 .ot__bar:hover {
-  background: var(--surface-3);
+  background: var(--surface-hover);
+}
+
+.ot--open .ot__bar {
+  background: var(--surface-2);
 }
 
 .ot__ic {
@@ -187,12 +193,16 @@ const who = computed(() => actor(latest.value?.origin ?? ''))
   visibility: visible;
 }
 
+.ot--open .ot__body {
+  background: var(--surface-2);
+}
+
 .ot__list {
   display: flex;
   flex-direction: column;
   gap: 1px;
   max-height: 220px;
-  padding: 4px 10px 8px;
+  padding: 4px 12px 8px;
   margin: 0;
   overflow-y: auto;
   list-style: none;
@@ -203,13 +213,6 @@ const who = computed(() => actor(latest.value?.origin ?? ''))
   gap: 6px;
   align-items: baseline;
   padding: 2px 0;
-}
-
-.ot__seq {
-  flex: 0 0 auto;
-  min-width: 26px;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-faint);
 }
 
 .ot__by {

@@ -30,7 +30,7 @@ const emit = defineEmits<{
 const MODES: readonly SegOption[] = [
   { value: 'driving', label: '驾车 / 打车', hint: '按真实路况计算' },
   { value: 'walking', label: '步行', hint: '适合城市漫步' },
-  { value: 'straight', label: '直线', hint: '不消耗配额，即时返回' },
+  { value: 'straight', label: '直线', hint: '即时返回，不占地图额度' },
 ]
 
 const MODE_TEXT: Record<string, string> = { driving: '驾车', walking: '步行', straight: '直线' }
