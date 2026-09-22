@@ -53,8 +53,10 @@ const isSelected = computed(() => store.currentDayId === props.day.id)
 const startPlace = computed(() => places.value.find((p) => p.id === props.day.start_place_id) ?? null)
 const endPlace = computed(() => places.value.find((p) => p.id === props.day.end_place_id) ?? null)
 
-/** 天色带：六档 ramp 按 day_index 轮着用，这一天的顶边、序号牌、纵向轨道共用这四条变量。
- *  颜色在这里是「第几天」的编码，所以取值只能是既有的 ramp 阶，不现场发明色相。 */
+/** 天色：六档 ramp 按 day_index 轮着用，这一天的色带底、左脊、序号牌、纵向轨道共用
+ *  这三条变量。颜色在这里是「第几天」的编码，所以取值只能是既有的 ramp 阶，
+ *  不现场发明色相。`--ramp-N-ink`（实心块上的字色）目前没有消费者了：序号牌不再
+ *  是色底白字，登记在 docs/MASTHEAD-AND-RIBBON.md 的例外清单里。 */
 const ramp = computed(() => (props.day.day_index % 6) + 1)
 
 /** 天头概要：`N 个地点 · 09:00–21:40`。收束时刻先取服务端排程的 end_min（它把当天每一
@@ -177,7 +179,6 @@ function runOptimize() {
       '--dc': `var(--ramp-${ramp})`,
       '--dc-soft': `var(--ramp-${ramp}-soft)`,
       '--dc-deep': `var(--ramp-${ramp}-deep)`,
-      '--dc-ink': `var(--ramp-${ramp}-ink)`,
     }"
   >
     <header
@@ -328,24 +329,33 @@ function runOptimize() {
 </template>
 
 <style scoped>
-.daysec {
+/* 选择器多带一枚 `.card`：全局那条 `.panel .card { box-shadow: var(--shadow-sm) }` 也是
+   两类的权重，只写 `.daysec` 会被它压掉——左脊就再也画不出来。既然要压过它，外阴影
+   跟着它降的那一档走：一列里同时摆三块色带，每张都拿 --shadow-md 就等于没有层次。 */
+.daysec.card {
+  /* 色带底：这一天的天色按 55% 混进卡片色。混色而不是直接铺 ramp-soft，是因为
+     三块天同屏时纯色带会连成一张日历；混过一档之后它是「垫了一层颜色」，
+     票券（地点卡）压在上面才分得清谁浮着。 */
+  --band: color-mix(in oklab, var(--dc-soft) 55%, var(--surface));
   position: relative;
   /* clip 而不是 hidden：hidden 会造出一个滚动容器，卡片里那条 `position: sticky` 的吸底
      栏就会以这一层为参照——它永远不滚，于是吸底栏永远吸不住。clip 裁得一样干净，
      但不接管滚动，也不产生层叠上下文之外的新参照系。 */
   overflow: clip;
-}
-
-/* 顶边色带：这一天的天色从左边实心起、往右淡出。用 ::before 而不是 border-top，
-   是因为被选中的那天要把描边换成 --accent——两件事不能抢同一条边。 */
-.daysec::before {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  height: 3px;
-  content: "";
-  background: linear-gradient(90deg, var(--dc), color-mix(in srgb, var(--dc) 12%, transparent));
+  background: var(--band);
+  /* 交给地点卡的三枚变量（PlaceCard 只认变量，不认谁是宿主）：
+     票券不描边、只靠一道近影浮起来；轨道上那枚站点圆的环要跟着色带走，
+     否则它会在这块天色上开一个白洞。 */
+  --place-edge: transparent;
+  --place-shadow:
+    0 1px 0 var(--hairline),
+    0 2px 6px color-mix(in oklab, var(--ink) 8%, transparent);
+  --place-ring: var(--band);
+  /* 左脊：6px 实心天色。用 inset 阴影而不是 border-left——描边会跟着圆角拐，
+     而这一条要贴着盒子内侧直直地拉到底。 */
+  box-shadow:
+    inset 6px 0 0 var(--dc),
+    var(--shadow-sm);
 }
 
 .daysec--on {
@@ -362,8 +372,9 @@ function runOptimize() {
   transition: background var(--dur-fast) var(--ease-out);
 }
 
+/* 悬停的洗色跟着色带走：直接铺 --surface-hover 会在天色上开一块灰矩形。 */
 .daysec__head:hover {
-  background: var(--surface-hover);
+  background: color-mix(in oklab, var(--dc) 9%, transparent);
 }
 
 .daysec__arrow {
@@ -387,16 +398,16 @@ function runOptimize() {
   transform: rotate(180deg);
 }
 
+/* 序号牌从「色底白字胶囊」改成一行展示字：天色已经由左脊和整块底色说了，胶囊再说一遍
+   就是同一件事讲两次。19px 的展示字压 --dc-deep，比原来那枚 12px 小药丸好认。 */
 .daysec__badge {
   flex: 0 0 auto;
-  padding: 1px 7px;
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: calc(19px * var(--fs-scale));
   font-weight: 700;
-  letter-spacing: var(--ls-label);
-  color: var(--dc-ink);
-  background: var(--dc);
-  border-radius: var(--radius-pill);
+  line-height: 1.1;
+  letter-spacing: var(--ls-tight);
+  color: var(--dc-deep);
 }
 
 .daysec__title {
@@ -415,7 +426,7 @@ function runOptimize() {
   place-items: center;
   width: 14px;
   height: 14px;
-  font-size: 10px;
+  font-size: calc(10px * var(--fs-scale));
   font-weight: 700;
   color: var(--warn);
   background: var(--warn-soft);
@@ -536,7 +547,7 @@ function runOptimize() {
   width: 10px;
   height: 10px;
   content: "";
-  background: var(--surface);
+  background: var(--band);
   border: 2px solid var(--dc);
   border-radius: 50%;
   transform: translateY(-50%);
@@ -707,5 +718,15 @@ function runOptimize() {
   display: inline-flex;
   align-items: center;
   text-decoration: none;
+}
+
+/* 窄屏那条侧栏就是整屏宽，6px 的实心脊会开始吃正文的起视位置；天色本身已经在
+   序号牌和底色上说过一遍了，这里只把脊收到 4px。 */
+@media (max-width: 860px) {
+  .daysec.card {
+    box-shadow:
+      inset 4px 0 0 var(--dc),
+      var(--shadow-sm);
+  }
 }
 </style>

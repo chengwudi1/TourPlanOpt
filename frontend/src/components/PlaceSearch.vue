@@ -252,7 +252,7 @@ onBeforeUnmount(() => {
 .search__stash {
   flex: 0 0 auto;
   padding: 2px 6px;
-  font-size: 14px;
+  font-size: calc(14px * var(--fs-scale));
   background: none;
   border: 0;
   border-radius: 8px;
@@ -268,7 +268,7 @@ onBeforeUnmount(() => {
 }
 
 .search__name {
-  font-size: 14px;
+  font-size: calc(14px * var(--fs-scale));
   color: var(--text);
 }
 

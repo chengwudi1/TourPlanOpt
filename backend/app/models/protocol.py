@@ -55,6 +55,13 @@ class Ops:
     EXPENSE_UPDATE = "expense_update"
     EXPENSE_DELETE = "expense_delete"
 
+    # M30 同行聊天。**故意没有 message_update**：话发出去就不许改，于是 `rev` 恒为 1，
+    # 也省掉「同一条消息两个版本谁赢」这套判断。delete 是软删，restore 按 id 把它放回
+    # 原来那一格——聊天的位置就是语义，放回末尾会接不上上文。
+    MESSAGE_ADD = "message_add"
+    MESSAGE_DELETE = "message_delete"
+    MESSAGE_RESTORE = "message_restore"
+
 
 # -- server -> client --------------------------------------------------------------
 

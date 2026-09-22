@@ -21,6 +21,8 @@ from app.models.domain import (
     DayOut,
     ExpenseCreate,
     ExpenseOut,
+    MessageIn,
+    MessageOut,
     ParticipantOut,
     PlaceCreate,
     PlaceOut,
@@ -154,6 +156,15 @@ async def get_snapshot(db: Database, trip_id: str) -> Snapshot | None:
         expense_rows = conn.execute(
             "SELECT * FROM expenses WHERE trip_id = ? ORDER BY created_at", (trip_id,)
         ).fetchall()
+        # 聊天按窗口取：内层倒着捞最近 60 条未删的，外层再正过来——客户端要的是时间正序。
+        message_rows = conn.execute(
+            """SELECT * FROM (
+                   SELECT rowid AS pos, * FROM messages
+                    WHERE trip_id = ? AND deleted_at IS NULL
+                    ORDER BY rowid DESC LIMIT ?
+               ) ORDER BY pos""",
+            (trip_id, MESSAGE_WINDOW),
+        ).fetchall()
         return Snapshot(
             trip=TripOut.model_validate(dict(trip_row)),
             days=[DayOut.model_validate(dict(r)) for r in day_rows],
@@ -162,6 +173,7 @@ async def get_snapshot(db: Database, trip_id: str) -> Snapshot | None:
             stash=[StashItemOut.model_validate(dict(r)) for r in stash_rows],
             checklist=[ChecklistItemOut.model_validate(dict(r)) for r in checklist_rows],
             expenses=[ExpenseOut.model_validate(dict(r)) for r in expense_rows],
+            messages=[MessageOut.model_validate(dict(r)) for r in message_rows],
         )
 
     return await db.run(_load)
@@ -1038,3 +1050,106 @@ async def delete_expense(db: Database, trip_id: str, expense_id: str) -> bool:
         return cur.rowcount > 0
 
     return await db.run(_delete)
+
+
+# -- messages（同行聊天）---------------------------------------------------------------
+
+# 快照带走的条数。它是**读取窗口，不是删除策略**：写入时永不裁剪，否则 seq 会指向一条
+# 已经不存在的行，resync 时就成了「我是不是漏了一条」这种查不出来的问题。
+MESSAGE_WINDOW = 60
+MESSAGE_TEXT_MAX = 300
+
+
+def _clean_ref(value: object) -> str:
+    return str(value or "").strip()[:40]
+
+
+async def message_add(
+    db: Database, trip_id: str, client_id: str, payload: MessageIn
+) -> MessageOut | None:
+    """记一句留言。空文本返回 None（调用方拒）。
+
+    锚点指向不属于本行程的东西时**丢掉锚点、把话照发**：同伴刚删掉那张卡，不该让这句话
+    因此发不出去——内容比挂点重要。最多挂一个，地点优先（它比「某一天」具体）。
+    """
+    text = str(payload.text or "").strip()[:MESSAGE_TEXT_MAX]
+    if not text:
+        return None
+    message_id = new_id()
+    now = now_iso()
+    place_ref = _clean_ref(payload.ref_place_id)
+    day_ref = _clean_ref(payload.ref_day_id)
+
+    def _insert(conn: sqlite3.Connection) -> dict:
+        place, day = place_ref, day_ref
+        if place and conn.execute(
+            "SELECT 1 FROM places WHERE id = ? AND trip_id = ?", (place, trip_id)
+        ).fetchone() is None:
+            place = ""
+        if day and conn.execute(
+            "SELECT 1 FROM days WHERE id = ? AND trip_id = ?", (day, trip_id)
+        ).fetchone() is None:
+            day = ""
+        if place:
+            day = ""
+        conn.execute(
+            """INSERT INTO messages
+                   (id, trip_id, client_id, text, ref_place_id, ref_day_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (message_id, trip_id, client_id[:40], text, place, day, now),
+        )
+        row = conn.execute(
+            "SELECT rowid AS pos, * FROM messages WHERE id = ?", (message_id,)
+        ).fetchone()
+        return dict(row)
+
+    return MessageOut.model_validate(await db.run(_insert))
+
+
+async def message_delete(
+    db: Database, trip_id: str, message_id: str, client_id: str
+) -> tuple[str, MessageOut | None]:
+    """软删一句留言，返回 `('ok'|'not_found'|'not_owner', 那一行)`。
+
+    软删而不是硬删：**聊天的位置就是语义**——「换成早上去吧」指的是它上面那句，撤销若把
+    它放回末尾就接不上上文。返回那一行是为了让 5 秒撤销知道该放回哪一格。
+    """
+
+    def _apply(conn: sqlite3.Connection):
+        row = conn.execute(
+            """SELECT rowid AS pos, * FROM messages
+               WHERE id = ? AND trip_id = ? AND deleted_at IS NULL""",
+            (message_id, trip_id),
+        ).fetchone()
+        if row is None:
+            return "not_found", None
+        if str(row["client_id"] or "") != client_id:
+            return "not_owner", None
+        conn.execute("UPDATE messages SET deleted_at = ? WHERE id = ?", (now_iso(), message_id))
+        return "ok", MessageOut.model_validate(dict(row))
+
+    return await db.run(_apply)
+
+
+async def message_restore(
+    db: Database, trip_id: str, message_id: str, client_id: str
+) -> tuple[str, MessageOut | None]:
+    """撤销那次删除：把 `deleted_at` 清回 NULL。
+
+    行从头到尾没动过，所以 `pos` 还是原来的 `pos`——「回到原位」的全部实现就是这一列。
+    """
+
+    def _apply(conn: sqlite3.Connection):
+        row = conn.execute(
+            """SELECT rowid AS pos, * FROM messages
+               WHERE id = ? AND trip_id = ? AND deleted_at IS NOT NULL""",
+            (message_id, trip_id),
+        ).fetchone()
+        if row is None:
+            return "not_found", None
+        if str(row["client_id"] or "") != client_id:
+            return "not_owner", None
+        conn.execute("UPDATE messages SET deleted_at = NULL WHERE id = ?", (message_id,))
+        return "ok", MessageOut.model_validate(dict(row))
+
+    return await db.run(_apply)

@@ -4,6 +4,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import {
   ExternalLink,
   Landmark,
+  MapPin,
   MoonStar,
   Plus,
   ShoppingBasket,
@@ -15,7 +16,7 @@ import type { Poi } from '@/types/domain'
 import { apiFetch } from '@/utils/api'
 
 const props = defineProps<{ city: string; tripId: string }>()
-const emit = defineEmits<{ 'update:open': [value: boolean] }>()
+const emit = defineEmits<{ 'update:open': [value: boolean]; setCity: [] }>()
 
 const store = useTripStore()
 
@@ -305,96 +306,105 @@ defineExpose({
 <template>
   <div v-show="open" class="reco">
     <div class="reco__body">
-      <p class="reco__lead tiny muted">
-        {{ city ? `${city}的景点、美食与夜市，点击即可加入行程` : '请先设置目的地城市，此处才会展示推荐结果' }}
-      </p>
-
-      <div class="reco__tabs">
-        <button
-          v-for="c in CATEGORIES"
-          :key="c.key"
-          class="reco__tab"
-          :class="{ 'reco__tab--on': category === c.key }"
-          type="button"
-          @click="category = c.key"
-        >
-          <component :is="c.icon" class="ic" :size="13" /> {{ c.label }}
+      <!-- 没有城市时这一整块只有一件事可做，那就给这件事一个键。类目、排序、距离基准在
+           按城市之前全是死控件——摆出来只会让人以为点了会有反应，而它永远没反应。 -->
+      <div v-if="!city" class="reco__need">
+        <div class="reco__need-text">
+          <div class="reco__need-title">尚未设置目的地城市</div>
+          <p class="tiny muted">景点、美食与夜市推荐按城市给出，设置之后可直接在此处加入行程。</p>
+        </div>
+        <button class="btn btn--sm btn--primary" type="button" @click="emit('setCity')">
+          <MapPin class="ic" :size="13" /> 设置城市
         </button>
       </div>
 
-      <SegmentedControl v-model="sort" :options="SORT_OPTIONS" label="发现结果的排序方式" />
-      <div v-if="sort === 'distance'" class="reco__origin">
-        <label class="tiny muted" for="reco-origin">距离基准点</label>
-        <select id="reco-origin" v-model="originId" class="input reco__select">
-          <option value="">不设置（该档位不按距离重排）</option>
-          <optgroup v-for="g in originGroups" :key="g.label" :label="g.label">
-            <option v-for="o in g.items" :key="o.id" :value="o.id">{{ o.label }}</option>
-          </optgroup>
-          <optgroup v-if="originStash.length" label="想去清单">
-            <option v-for="o in originStash" :key="o.id" :value="o.id">{{ o.label }}</option>
-          </optgroup>
-        </select>
-        <p class="reco__note tiny">{{ originNote }}</p>
-      </div>
+      <template v-else>
+        <p class="reco__lead tiny muted">{{ city }}的景点、美食与夜市，点击即可加入行程</p>
 
-      <p v-if="!city" class="reco__empty tiny muted">
-        请先设置目的地城市，此处将展示景点、美食与夜市推荐。
-      </p>
-      <p v-else-if="loading" class="reco__empty tiny muted">正在加载 {{ city }} 的推荐结果…</p>
-      <p v-else-if="error" class="reco__empty tiny muted">{{ error.message }}（{{ error.hint }}）</p>
-      <p v-else-if="sort === 'distance' && !originPlace" class="reco__empty tiny muted">
-        选择基准点后按直线距离重排；未选择时按综合排序展示。
-      </p>
+        <div class="reco__tabs">
+          <button
+            v-for="c in CATEGORIES"
+            :key="c.key"
+            class="reco__tab"
+            :class="{ 'reco__tab--on': category === c.key }"
+            type="button"
+            @click="category = c.key"
+          >
+            <component :is="c.icon" class="ic" :size="13" /> {{ c.label }}
+          </button>
+        </div>
 
-      <ul v-else-if="pois.length" class="reco__list">
-        <li v-for="poi in pois" :key="poi.id || poi.name" class="reco__item">
-          <img
-            v-if="poi.photo"
-            class="reco__photo"
-            :src="poi.photo"
-            :alt="`${poi.name} 的照片`"
-            loading="lazy"
-            referrerpolicy="no-referrer"
-          />
-          <div class="reco__info">
-            <div class="reco__name">{{ poi.name }}</div>
-            <div class="tiny muted reco__addr">
-              {{ poi.address || poi.district }}<template v-if="poi.distance_m != null">
-                · <template v-if="isBasis(poi)">即为基准点</template
-                ><template v-else>距离 {{ fmtDistance(poi.distance_m) }}</template></template
-              >
+        <SegmentedControl v-model="sort" :options="SORT_OPTIONS" label="发现结果的排序方式" />
+        <div v-if="sort === 'distance'" class="reco__origin">
+          <label class="tiny muted" for="reco-origin">距离基准点</label>
+          <select id="reco-origin" v-model="originId" class="input reco__select">
+            <option value="">不设置（该档位不按距离重排）</option>
+            <optgroup v-for="g in originGroups" :key="g.label" :label="g.label">
+              <option v-for="o in g.items" :key="o.id" :value="o.id">{{ o.label }}</option>
+            </optgroup>
+            <optgroup v-if="originStash.length" label="想去清单">
+              <option v-for="o in originStash" :key="o.id" :value="o.id">{{ o.label }}</option>
+            </optgroup>
+          </select>
+          <p class="reco__note tiny">{{ originNote }}</p>
+        </div>
+
+        <p v-if="loading" class="reco__empty tiny muted">正在加载 {{ city }} 的推荐结果…</p>
+        <p v-else-if="error" class="reco__empty tiny muted">{{ error.message }}（{{ error.hint }}）</p>
+        <p v-else-if="sort === 'distance' && !originPlace" class="reco__empty tiny muted">
+          选择基准点后按直线距离重排；未选择时按综合排序展示。
+        </p>
+
+        <ul v-else-if="pois.length" class="reco__list">
+          <li v-for="poi in pois" :key="poi.id || poi.name" class="reco__item">
+            <img
+              v-if="poi.photo"
+              class="reco__photo"
+              :src="poi.photo"
+              :alt="`${poi.name} 的照片`"
+              loading="lazy"
+              referrerpolicy="no-referrer"
+            />
+            <div class="reco__info">
+              <div class="reco__name">{{ poi.name }}</div>
+              <div class="tiny muted reco__addr">
+                {{ poi.address || poi.district }}<template v-if="poi.distance_m != null">
+                  · <template v-if="isBasis(poi)">即为基准点</template
+                  ><template v-else>距离 {{ fmtDistance(poi.distance_m) }}</template></template
+                >
+              </div>
             </div>
-          </div>
-          <button
-            class="btn btn--sm"
-            type="button"
-            title="暂存至想去清单"
-            @click="stash(poi)"
-          >
-            <ShoppingBasket class="ic" :size="13" />
-          </button>
-          <button
-            class="btn btn--sm"
-            type="button"
-            :disabled="added(poi)"
-            @click="add(poi)"
-          >
-            <template v-if="!added(poi)"><Plus class="ic" :size="13" /> 加入</template>
-            <template v-else>已加入</template>
-          </button>
-        </li>
-      </ul>
-      <p v-else class="reco__empty tiny muted">当前类目暂无推荐结果，可更换类目或排序方式。</p>
+            <button
+              class="btn btn--sm"
+              type="button"
+              title="暂存至想去清单"
+              @click="stash(poi)"
+            >
+              <ShoppingBasket class="ic" :size="13" />
+            </button>
+            <button
+              class="btn btn--sm"
+              type="button"
+              :disabled="added(poi)"
+              @click="add(poi)"
+            >
+              <template v-if="!added(poi)"><Plus class="ic" :size="13" /> 加入</template>
+              <template v-else>已加入</template>
+            </button>
+          </li>
+        </ul>
+        <p v-else class="reco__empty tiny muted">当前类目暂无推荐结果，可更换类目或排序方式。</p>
 
-      <a
-        v-if="amapUrl"
-        class="reco__amap tiny"
-        :href="amapUrl"
-        target="_blank"
-        rel="noopener"
-      >
-        <ExternalLink class="ic" :size="12" /> 在高德地图中查看更多
-      </a>
+        <a
+          v-if="amapUrl"
+          class="reco__amap tiny"
+          :href="amapUrl"
+          target="_blank"
+          rel="noopener"
+        >
+          <ExternalLink class="ic" :size="12" /> 在高德地图中查看更多
+        </a>
+      </template>
     </div>
   </div>
 </template>
@@ -414,6 +424,35 @@ defineExpose({
   padding-top: 10px;
 }
 
+/* 没有城市那一档：说明与动作并排，键就长在句子末尾——只写「请先设置目的地城市」而不给入口，
+   等于把用户留在原地猜按钮在哪。这一档不渲染 `.reco__lead`，10px 顶距得自己撑。 */
+.reco__need {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 10px;
+}
+
+.reco__need-text {
+  display: flex;
+  flex: 1 1 220px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.reco__need-title {
+  font-size: calc(14px * var(--fs-scale));
+  font-weight: 600;
+  color: var(--text);
+}
+
+.reco__need-text p {
+  margin: 0;
+}
+
 .reco__tabs {
   display: flex;
   gap: 6px;
@@ -421,7 +460,7 @@ defineExpose({
 
 .reco__tab {
   padding: 5px 11px;
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   color: var(--text-2);
   background: var(--surface-2);
   border: 1px solid transparent;
@@ -444,7 +483,7 @@ defineExpose({
 
 .reco__select {
   width: 100%;
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   font-weight: 600;
   color: var(--text);
 }
@@ -494,7 +533,7 @@ defineExpose({
 }
 
 .reco__name {
-  font-size: 14px;
+  font-size: calc(14px * var(--fs-scale));
   font-weight: 600;
 }
 

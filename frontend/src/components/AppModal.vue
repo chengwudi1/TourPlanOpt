@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { X } from '@/components/icons'
+import { useReduceMotion } from '@/composables/useReduceMotion'
 import { isTopModalLayer, popModalLayer, pushModalLayer } from '@/utils/modalStack'
 import { trapTab } from '@/utils/focusTrap'
 
@@ -19,8 +20,12 @@ const props = withDefaults(
     variant?: 'sheet' | 'center'
     /** 退场动画的时长（ms），也用来兜底超时。 */
     leaveMs?: number
+    /** 打开时是否把光标放进第一个表单控件。设置面板这类「点一下就生效」的面板要给 false：
+     *  那条规则是为改名/输入框准备的，套在一块只有一个低位输入控件的面板上，症状是
+     *  一打开就滚到面板中部，光标还停在一个没人正看着的时间里。 */
+    autofocus?: boolean
   }>(),
-  { variant: 'sheet', leaveMs: 220 },
+  { variant: 'sheet', leaveMs: 220, autofocus: true },
 )
 
 const emit = defineEmits<{ close: [] }>()
@@ -31,6 +36,7 @@ defineOptions({ inheritAttrs: false })
 
 /** 叠放时键盘归属的凭据，见 utils/modalStack。挂载时领取，卸载时归还。 */
 let modalLayer = 0
+const reduceMotion = useReduceMotion()
 const panel = ref<HTMLElement | null>(null)
 const backdrop = ref<HTMLElement | null>(null)
 const dragging = ref(false)
@@ -73,12 +79,13 @@ function delay(ms: number): Promise<void> {
 /**
  * 退场用 WAAPI 而不是 CSS class：class 方案要等 transitionend，而在隐藏的内嵌浏览器里
  * 动画时钟是停的，事件永远不来，弹层就再也关不掉了。所以 `Promise.race` 一个纯定时器
- * 兜底。同理，CSS 那条全局 prefers-reduced-motion 兜不住 WAAPI，必须自己挡。
+ * 兜底。同理，CSS 那条全局兜底管不住 WAAPI，而设置面板里那一档「减少动效」也只能靠 JS
+ * 才看得见——两处都指向同一个 reduceMotion，单一真源见 composables/useReduceMotion。
  */
 async function requestClose() {
   if (closing) return
   closing = true
-  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  if (!reduceMotion.value) {
     const frames = props.variant === 'sheet' && canSwipe.value
       ? [{ opacity: 1, transform: 'translateY(0)' }, { opacity: 0, transform: 'translateY(100%)' }]
       : [{ opacity: 1, transform: 'translateY(0) scale(1)' }, { opacity: 0, transform: 'translateY(12px) scale(0.98)' }]
@@ -138,7 +145,7 @@ onMounted(() => {
   document.addEventListener('keydown', onKeydown)
   prevOverflow = document.body.style.overflow
   document.body.style.overflow = 'hidden'
-  const first = panel.value?.querySelector<HTMLElement>('input, textarea, select')
+  const first = props.autofocus ? panel.value?.querySelector<HTMLElement>('input, textarea, select') : null
   if (first) first.focus()
   else panel.value?.focus()
 })
@@ -261,7 +268,7 @@ defineExpose({ close: requestClose })
 }
 
 .modal__heading h2 {
-  font-size: 16px;
+  font-size: calc(16px * var(--fs-scale));
 }
 
 .modal__heading p {

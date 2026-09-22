@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, HTTPException, Request, Response, status
 
 from app.auth import accounts
@@ -102,3 +104,34 @@ async def unfollow_trip(trip_id: str, request: Request) -> dict:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "先登录")
     removed = await accounts.unfollow(get_db(), trip_id, user["id"])
     return {"trip_id": trip_id, "removed": removed}
+
+
+@router.get("/prefs")
+async def get_prefs(request: Request) -> dict:
+    """读我自己的偏好。未登录返回空对象而不是 401：前端在登录态确认前就要开面板，
+    拿一份空偏好渲染默认值是正常路径，不是错误。"""
+    user = await current_user(request)
+    if user is None:
+        return {"prefs": {}}
+    return {"prefs": await accounts.get_prefs(get_db(), user["id"])}
+
+
+@router.put("/prefs")
+async def put_prefs(request: Request) -> dict:
+    """存偏好。这里刻意先读原始请求体再自己解析：FastAPI 的 `body: dict` 会在 JSON
+    坏掉时抛 400 之外的 500，而超长要在解析前就拦住——解析一兆垃圾再量长度没意义。"""
+    user = await current_user(request)
+    if user is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "先登录")
+
+    raw = await request.body()
+    if len(raw) > accounts.PREF_MAX_BYTES:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "偏好数据太长了")
+    try:
+        parsed = json.loads(raw or b"{}")
+        prefs = accounts.sanitize_prefs(parsed)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    merged = await accounts.put_prefs(get_db(), user["id"], prefs)
+    return {"prefs": merged}

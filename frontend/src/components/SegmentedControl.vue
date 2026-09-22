@@ -81,7 +81,7 @@ const emit = defineEmits<{ 'update:modelValue': [string] }>()
 }
 
 .seg__label {
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   font-weight: 600;
 }
 

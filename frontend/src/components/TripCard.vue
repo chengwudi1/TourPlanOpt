@@ -316,7 +316,7 @@ onBeforeUnmount(closeMenu)
 
 .tripcard__title {
   overflow: hidden;
-  font-size: 15px;
+  font-size: calc(15px * var(--fs-scale));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -342,7 +342,7 @@ onBeforeUnmount(closeMenu)
   gap: 3px;
   align-items: center;
   padding: 1px 7px;
-  font-size: 11px;
+  font-size: calc(11px * var(--fs-scale));
   color: var(--text-2);
   background: var(--surface-2);
   border: 1px solid var(--border-faint);
@@ -421,7 +421,7 @@ onBeforeUnmount(closeMenu)
   gap: 7px;
   align-items: center;
   padding: 7px 9px;
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   color: var(--text);
   text-align: left;
   background: none;

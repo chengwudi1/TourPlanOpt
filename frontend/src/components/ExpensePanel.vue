@@ -368,7 +368,7 @@ function drop(expense: Expense) {
 }
 
 .exp__total {
-  font-size: 15px;
+  font-size: calc(15px * var(--fs-scale));
   font-weight: 600;
   color: var(--ember-deep);
 }
@@ -420,7 +420,7 @@ function drop(expense: Expense) {
   gap: 4px;
   align-items: center;
   padding: 2px 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--fs-scale));
   color: var(--text-2);
   background: var(--surface-2);
   border-radius: var(--radius-pill);
@@ -454,7 +454,7 @@ function drop(expense: Expense) {
 
 .exp__yuan {
   padding: 0 2px 0 8px;
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   color: var(--text-3);
 }
 
@@ -575,7 +575,7 @@ function drop(expense: Expense) {
   padding: 0;
   overflow: hidden;
   font: inherit;
-  font-size: 14px;
+  font-size: calc(14px * var(--fs-scale));
   font-weight: 500;
   color: inherit;
   text-align: left;
@@ -595,7 +595,7 @@ function drop(expense: Expense) {
 .entry__sum {
   flex: 0 0 auto;
   padding: 2px 6px;
-  font-size: 14px;
+  font-size: calc(14px * var(--fs-scale));
   font-weight: 600;
   color: var(--text);
   background: none;
@@ -650,7 +650,7 @@ function drop(expense: Expense) {
 }
 
 .aa__name {
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   font-weight: 600;
 }
 
@@ -659,7 +659,7 @@ function drop(expense: Expense) {
 }
 
 .aa__net {
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   font-weight: 600;
   color: var(--text-3);
 }

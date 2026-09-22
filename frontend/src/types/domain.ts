@@ -159,9 +159,29 @@ export interface Expense {
 }
 
 /**
+ * 同行聊天里的一句留言。镜像后端 `MessageOut`。
+ *
+ * `pos` 是这一句在流里的位置（后端取 SQLite rowid）：原位放回删掉的那句、算未读，
+ * 要的都是「谁在谁前面」，不是谁的时间戳大。署名不落快照——`client_id` 是唯一身份，
+ * 昵称与颜色现读 `participants`，改名之后旧话自动跟着走。
+ */
+export interface Message {
+  id: string
+  trip_id: string
+  client_id: string
+  text: string
+  ref_place_id: string
+  ref_day_id: string
+  created_at: string
+  pos: number
+}
+
+/**
  * The whole trip over REST. Deliberately WITHOUT any schedule summary: recomputing one
  * for every day would turn the read-only snapshot path into a routing pass, so day-level
  * results arrive separately as `timeline_updated` frames (and ride along with optimize).
+ *
+ * `messages` 是唯一按窗口取的一格：库里不裁剪，这里只给最近 60 条未删的。
  */
 export interface Snapshot {
   trip: Trip
@@ -172,6 +192,7 @@ export interface Snapshot {
   stash: StashItem[]
   checklist: ChecklistItem[]
   expenses: Expense[]
+  messages: Message[]
 }
 
 /** One day's authoritative schedule: mirrored from timeline.py DayTimeline.payload(). */

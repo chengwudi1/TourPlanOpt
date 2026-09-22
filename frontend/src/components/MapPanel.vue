@@ -4,6 +4,7 @@ import { h, onBeforeUnmount, onMounted, ref, render, shallowRef, watch } from 'v
 import { ensureAmap, useAmap } from '@/composables/useAmap'
 import type { AMapNS } from '@/composables/useAmap'
 import { BedDouble, Flag, LocateFixed } from '@/components/icons'
+import { useSettingsStore } from '@/stores/settings'
 import { useTripStore } from '@/stores/trip'
 import type { Place } from '@/types/domain'
 import { wgs84ToGcj02 } from '@/utils/coords'
@@ -47,6 +48,7 @@ const locateNote = ref('')
 const emit = defineEmits<{ pick: [point: { lng: number; lat: number }] }>()
 
 const { status } = useAmap()
+const settings = useSettingsStore()
 const store = useTripStore()
 
 /** place id -> marker. Rebuilt against `currentPlaces` on every sync. */
@@ -105,9 +107,6 @@ onMounted(async () => {
   map.value.addControl(new AMap.Scale())
   bindPickHandlers()
   syncMarkers()
-  // 芯色读的是 CSS 变量，而变量由 @media (prefers-color-scheme) 换值 -- 主题一翻就得
-  // 重画一次，否则路线会停在旧色上直到下一次编辑。
-  darkScheme.addEventListener('change', onSchemeChange)
 })
 
 // -- 地图选点（右键 = 桌面，长按 = 触屏）------------------------------------------------
@@ -164,17 +163,21 @@ function bindPickHandlers() {
   }
 }
 
-const darkScheme = window.matchMedia('(prefers-color-scheme: dark)')
-const onSchemeChange = () => {
-  // 底图必须跟着翻：暗色界面配一张亮瓦片，等于在屏幕右侧糊了一块白光。
-  map.value?.setMapStyle?.(basemapStyle())
-  syncPolyline()
-}
+// 主题一翻，地图上有三样东西要跟着动：底图样式、描边色（它跟底图，不跟界面）、芯色
+// （它读 --accent，是界面令牌）。所以这里盯的是两个已解析值，而不是浏览器的偏好——
+// 用户把底图钉成亮色之后，「界面深色」和「底图深色」就再也不是同一件事了。
+watch(
+  () => [settings.basemapDark, settings.theme] as const,
+  () => {
+    // 底图必须跟着翻：暗色界面配一张亮瓦片，等于在屏幕右侧糊了一块白光。
+    map.value?.setMapStyle?.(basemapStyle())
+    syncPolyline()
+  },
+)
 
 onBeforeUnmount(() => {
   detachPickHandlers?.()
   detachPickHandlers = null
-  darkScheme.removeEventListener('change', onSchemeChange)
   // 标记 DOM 由地图销毁，但挂进 pill 的 lucide 子树得显式卸载，不然它的 effect 作用域
   // 就永久留在一个已经不在文档里的容器上。
   for (const entry of markers.values()) render(null, entry.pill)
@@ -191,7 +194,7 @@ const CASING_DARK = '#dbe6ef'
 const FALLBACK_ACCENT = '#1670c2'
 
 function basemapStyle(): string {
-  return darkScheme.matches ? 'amap://styles/dark' : 'amap://styles/normal'
+  return settings.basemapDark ? 'amap://styles/dark' : 'amap://styles/normal'
 }
 
 function cssColor(name: string, fallback: string): string {
@@ -331,7 +334,7 @@ function syncPolyline() {
   }
 
   const accent = cssColor('--accent', FALLBACK_ACCENT)
-  const casingColor = darkScheme.matches ? CASING_DARK : CASING_LIGHT
+  const casingColor = settings.basemapDark ? CASING_DARK : CASING_LIGHT
   if (!route.value) {
     const base = { path, lineJoin: 'round', lineCap: 'round', bubble: true }
     route.value = {
@@ -413,7 +416,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="map-panel">
+  <div class="map-panel" :class="{ 'map-panel--dark-basemap': settings.basemapDark }">
     <div ref="host" class="map-panel__host" />
 
     <div v-if="status === 'ready'" class="map-panel__tools">
@@ -471,7 +474,7 @@ defineExpose({
 }
 .map-panel__locate {
   padding: 7px 12px;
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--ink);
@@ -538,7 +541,7 @@ defineExpose({
 }
 
 .tp-marker__num {
-  font-size: 12px;
+  font-size: calc(12px * var(--fs-scale));
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: #fff;
@@ -561,7 +564,7 @@ defineExpose({
   place-items: center;
   width: 15px;
   height: 15px;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--fs-scale));
   color: var(--warp-ink);
   background: var(--tp-fill);
   border: 1.5px solid #fff;
@@ -609,12 +612,13 @@ defineExpose({
 }
 
 /* 夜航底图上的高德角标与审图号是深色字，压在深色图上等于没有——这两条是必须留着的
-   归属信息，所以把它反成浅灰，而不是藏起来。 */
-@media (prefers-color-scheme: dark) {
-  .amap-logo img,
-  .amap-copyright {
-    filter: invert(0.9) hue-rotate(180deg);
-    opacity: 0.82;
-  }
+   归属信息，所以把它反成浅灰，而不是藏起来。
+   键在「实际画出来的那张底图」上（模板里的 .map-panel--dark-basemap），不是媒体查询：
+   用户把底图钉成亮色之后，深色界面配的是亮瓦片，这时候再 invert 一次就把审图号反成了
+   深色字压亮图——归属信息必须在每一种组合下都可读，所以它的开关不能自己猜主题。 */
+.map-panel--dark-basemap .amap-logo img,
+.map-panel--dark-basemap .amap-copyright {
+  filter: invert(0.9) hue-rotate(180deg);
+  opacity: 0.82;
 }
 </style>

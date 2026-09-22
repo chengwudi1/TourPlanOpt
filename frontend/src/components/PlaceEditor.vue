@@ -426,7 +426,7 @@ const orderHint = computed(() => {
 }
 
 .flow__v {
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--text-2);
@@ -502,7 +502,7 @@ const orderHint = computed(() => {
   display: inline-flex;
   gap: 4px;
   align-items: center;
-  font-size: 12px;
+  font-size: calc(12px * var(--fs-scale));
   font-weight: 600;
   color: var(--text-2);
 }
@@ -525,7 +525,7 @@ const orderHint = computed(() => {
 
 .edit__input {
   padding: 6px 9px;
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   font-variant-numeric: tabular-nums;
 }
 
@@ -542,7 +542,7 @@ const orderHint = computed(() => {
 
 .edit__note {
   padding: 7px 9px;
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   line-height: 1.5;
   resize: vertical;
 }
@@ -550,7 +550,7 @@ const orderHint = computed(() => {
 .chip {
   flex: 0 0 auto;
   padding: 4px 9px;
-  font-size: 12px;
+  font-size: calc(12px * var(--fs-scale));
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   color: var(--text-2);

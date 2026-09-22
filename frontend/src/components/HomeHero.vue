@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 
 import { CalendarDays, CheckCheck, ChevronRight, ListChecks, MapPin, Sparkles, Users, Wallet } from '@/components/icons'
+import RouteArt from '@/components/RouteArt.vue'
 import { useCountUp } from '@/composables/useCountUp'
 import { useNow } from '@/composables/useNow'
 import type { TripSummary } from '@/types/domain'
@@ -75,18 +76,7 @@ const statusText = computed(() =>
       <img :src="trip.cover_photo" :alt="`${trip.title || '未命名行程'}的封面`" decoding="async" referrerpolicy="no-referrer" />
     </div>
     <div v-else class="hero__fallback" aria-hidden="true">
-      <svg viewBox="0 0 400 200" preserveAspectRatio="none">
-        <path
-          d="M20 160C70 160 78 60 130 60s60 92 112 92 44-64 96-64 40 40 40 40"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2.5"
-          stroke-linecap="round"
-          stroke-dasharray="2 9"
-        />
-        <circle cx="20" cy="160" r="5" fill="currentColor" />
-        <circle cx="358" cy="128" r="5" fill="currentColor" />
-      </svg>
+      <RouteArt />
     </div>
 
     <div class="hero__inner">
@@ -191,48 +181,10 @@ const statusText = computed(() =>
 .hero__fallback {
   /* 没有封面就不装成有封面：这块是「地图底」，不是「假照片」。所以它跟着主题走——
      亮色态是浅蓝到纸色的一层淡彩，深色态自己落回夜航蓝；压在上面的是墨色大字，
-     不是白字。原来那四档深色渐变在奶油色的首页上就是一块黑石板，越干净越像漏了底。 */
+     不是白字。原来那四档深色渐变在奶油色的首页上就是一块黑石板，越干净越像漏了底。
+     线本身（含两条入场动画）在 components/RouteArt.vue，这里只决定它压多深。 */
   color: var(--accent);
-}
-.hero__fallback svg {
-  width: 100%;
-  height: 100%;
   opacity: 0.5;
-}
-
-/* 路线自绘：这条线是虚线点阵，stroke-dashoffset 派不上用场（只会让点往前爬，
-   不会「长出来」）。改用一层从左推进的 clip-path，点阵图案原封不动。
-   收到 -1% 而不是 0 是给线帽留余量，不然末端会被切掉半个像素。 */
-.hero__fallback path {
-  animation: route-draw 1.5s var(--ease-inout) calc(var(--stagger) * 2) backwards;
-}
-@keyframes route-draw {
-  from {
-    clip-path: inset(0 100% 0 0);
-  }
-  to {
-    clip-path: inset(0 -1% 0 0);
-  }
-}
-
-/* 端点跟着线到达的时间点冒出来：transform-box 让 transform-origin 落在图形自身
-   的包围盒上，否则圆心会被当成用户坐标系原点，缩放时圆点乱飞。 */
-.hero__fallback circle {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: dot-pop var(--dur-slow) var(--ease-pop) backwards;
-}
-.hero__fallback circle:first-of-type {
-  animation-delay: calc(var(--stagger) * 2);
-}
-.hero__fallback circle:last-of-type {
-  animation-delay: 1.62s;
-}
-@keyframes dot-pop {
-  from {
-    opacity: 0;
-    transform: scale(0.2);
-  }
 }
 
 /* 文字全在底部那摞内容里，而内容摞的顶端在哪取决于视口和数据带换不换行（实测最矮的
@@ -330,7 +282,7 @@ const statusText = computed(() =>
 
 .hero__badge {
   padding: 3px 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--fs-scale));
   font-weight: 600;
   color: var(--ember-ink);
   background: var(--ember);
@@ -435,7 +387,7 @@ const statusText = computed(() =>
 }
 
 .hero__stat-num {
-  font-size: 24px;
+  font-size: calc(24px * var(--fs-scale));
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1.1;
@@ -444,7 +396,7 @@ const statusText = computed(() =>
 /* 金额是这一格里唯一会长的字符串，宁可省略号也不许它把票券挤歪。 */
 .hero__stat-label {
   overflow: hidden;
-  font-size: 15px;
+  font-size: calc(15px * var(--fs-scale));
   font-weight: 600;
   white-space: nowrap;
   text-overflow: ellipsis;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import CreateTripDialog from '@/components/CreateTripDialog.vue'
@@ -16,12 +16,14 @@ import {
   Plus,
   Route,
   Search,
+  Settings,
   X,
   Zap,
 } from '@/components/icons'
 import { useCopy } from '@/composables/useCopy'
 import {
   hideTrip,
+  hiddenRev,
   pruneRecentTrips,
   readHiddenTrips,
   readRecentTrips,
@@ -31,6 +33,7 @@ import {
 import { useAuthStore, type MyTrip } from '@/stores/auth'
 import { useDialogStore } from '@/stores/dialog'
 import { useFeedbackStore } from '@/stores/feedback'
+import { useSettingsStore } from '@/stores/settings'
 import type { TripStatus, TripSummary } from '@/types/domain'
 import { apiFetch } from '@/utils/api'
 import { formatMoney } from '@/utils/money'
@@ -56,6 +59,7 @@ const route = useRoute()
 const auth = useAuthStore()
 const feedback = useFeedbackStore()
 const dialog = useDialogStore()
+const settings = useSettingsStore()
 const copy = useCopy()
 
 interface HomeTrip {
@@ -242,6 +246,16 @@ async function refresh() {
   loading.value = false
 }
 
+/**
+ * 设置面板里点了「恢复」之后要重画。名单是 localStorage，首页那份 `hidden` 只是它的一个
+ * 副本，所以靠 useRecentTrips 的变更版本号通知。只补 hydrate 不重跑 refresh：账号那两份
+ * 请求和恢复这件事无关，而恢复出来的那条恰好还没缓存过摘要，非问一次不可。
+ */
+watch(hiddenRev, () => {
+  hidden.value = readHiddenTrips()
+  void hydrate()
+})
+
 function say(message: string) {
   feedback.show({ message })
 }
@@ -356,6 +370,9 @@ onMounted(() => {
     <header class="homebar">
       <h1 class="homebar__brand"><Compass class="ic homebar__mark" :size="18" /> TourPlanOpt</h1>
       <div class="homebar__right">
+        <button class="iconbtn" type="button" title="设置" aria-label="设置" @click="settings.show()">
+          <Settings :size="15" />
+        </button>
         <template v-if="auth.user">
           <span class="homebar__who">
             <span class="homebar__avatar" :title="auth.user.name">{{ auth.user.name.slice(0, 1) }}</span>
@@ -578,7 +595,7 @@ onMounted(() => {
   display: inline-flex;
   gap: 7px;
   align-items: center;
-  font-size: 15px;
+  font-size: calc(15px * var(--fs-scale));
   font-weight: 700;
   letter-spacing: 0.01em;
 }
@@ -605,7 +622,7 @@ onMounted(() => {
   display: inline-flex;
   gap: 7px;
   align-items: center;
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   font-weight: 600;
   color: var(--text-2);
 }
@@ -652,7 +669,7 @@ onMounted(() => {
   margin-bottom: 10px;
 }
 .sec__head h2 {
-  font-size: 15px;
+  font-size: calc(15px * var(--fs-scale));
 }
 .sec__head .muted {
   margin-left: auto;
@@ -690,7 +707,7 @@ onMounted(() => {
   display: inline-flex;
   gap: 6px;
   align-items: center;
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   color: var(--text-2);
 }
 .board__head .muted {
@@ -731,7 +748,7 @@ onMounted(() => {
 }
 .board__name {
   overflow: hidden;
-  font-size: 14px;
+  font-size: calc(14px * var(--fs-scale));
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -745,7 +762,7 @@ onMounted(() => {
   align-self: flex-start;
   padding: 1px 8px;
   margin-bottom: 2px;
-  font-size: 11px;
+  font-size: calc(11px * var(--fs-scale));
   font-weight: 600;
   color: var(--text-2);
   background: var(--surface-2);
@@ -803,14 +820,12 @@ onMounted(() => {
 }
 
 /* 夜航图是蓝灰的，暖棕块落在首屏会显脏：深色态欢迎卡跟着强调蓝走。 */
-@media (prefers-color-scheme: dark) {
-  .welcome {
-    background: linear-gradient(140deg, var(--accent-soft), var(--surface) 58%);
-  }
-  .welcome__art {
-    color: var(--accent);
-    opacity: 0.5;
-  }
+:global(html[data-theme='dark']) .welcome {
+  background: linear-gradient(140deg, var(--accent-soft), var(--surface) 58%);
+}
+:global(html[data-theme='dark']) .welcome__art {
+  color: var(--accent);
+  opacity: 0.5;
 }
 
 .steps {
@@ -838,17 +853,17 @@ onMounted(() => {
   background: var(--accent-soft);
   color: var(--accent-strong);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--fs-scale));
   font-weight: 600;
 }
 .steps__title {
   margin: 0 0 3px;
-  font-size: 14px;
+  font-size: calc(14px * var(--fs-scale));
   font-weight: 600;
 }
 .steps__desc {
   margin: 0;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--fs-scale));
   line-height: 1.55;
   color: var(--text-2);
 }
@@ -862,7 +877,7 @@ onMounted(() => {
   gap: 6px;
   align-items: center;
   margin-bottom: 10px;
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   color: var(--text-2);
 }
 .side__steps {
@@ -878,7 +893,7 @@ onMounted(() => {
   display: flex;
   gap: 7px;
   align-items: flex-start;
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   color: var(--text-2);
 }
 .side__steps .ic {
@@ -916,7 +931,7 @@ onMounted(() => {
 }
 .side__row-title {
   overflow: hidden;
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -945,7 +960,7 @@ onMounted(() => {
   border-color: var(--accent);
 }
 .newcard span {
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   font-weight: 600;
 }
 

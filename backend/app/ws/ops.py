@@ -12,6 +12,7 @@ needs to converge (e.g. the current order after order_stale) -- never a bare err
 from __future__ import annotations
 
 import logging
+import time
 import typing
 
 from pydantic import ValidationError
@@ -20,7 +21,7 @@ from app.amap.client import fetch_photo_best_effort
 from app.db import repositories
 from app.db.database import get_db
 from app.models import protocol
-from app.models.domain import ChecklistAdd, ExpenseCreate, PlaceCreate, StashCreate
+from app.models.domain import ChecklistAdd, ExpenseCreate, MessageIn, PlaceCreate, StashCreate
 from app.routing.timeline import reschedule_days
 from app.ws.hub import TripHub
 
@@ -68,6 +69,9 @@ async def apply_op(conn: ClientConnection, hub: TripHub, frame: dict) -> None:
         Ops.EXPENSE_ADD: _expense_add,
         Ops.EXPENSE_UPDATE: _expense_update,
         Ops.EXPENSE_DELETE: _expense_delete,
+        Ops.MESSAGE_ADD: _message_add,
+        Ops.MESSAGE_DELETE: _message_delete,
+        Ops.MESSAGE_RESTORE: _message_restore,
     }
     handler = handlers.get(op)
     if handler is None:
@@ -614,3 +618,69 @@ async def _expense_delete(
         await _reject(conn, op_id, "expense_not_found", {"id": expense_id})
         return
     await _broadcast(hub, db, trip_id, "expense_deleted", op_id, client_id, {"id": expense_id})
+
+
+# -- messages（同行聊天）---------------------------------------------------------------
+
+async def _message_add(
+    conn: ClientConnection, hub: TripHub, db, client_id: str, op_id: str, data: dict
+) -> None:
+    trip_id = conn.trip_id
+    try:
+        payload = MessageIn(
+            text=str(data.get("text") or ""),
+            ref_place_id=str(data.get("ref_place_id") or ""),
+            ref_day_id=str(data.get("ref_day_id") or ""),
+        )
+    except ValidationError:
+        await _reject(conn, op_id, "bad_message")
+        return
+    # 先验内容再频控：一句空话不该把这个人 2 秒的窗口烧掉。
+    if not payload.text.strip():
+        await _reject(conn, op_id, "bad_message")
+        return
+    if not hub.message_should_send(client_id, time.monotonic()):
+        await _reject(conn, op_id, "message_too_fast", {"retry_after_ms": 2000})
+        return
+    message = await repositories.message_add(db, trip_id, client_id, payload)
+    if message is None:
+        await _reject(conn, op_id, "bad_message")
+        return
+    await _broadcast(
+        hub, db, trip_id, "message_added", op_id, client_id, {"message": message.model_dump()}
+    )
+
+
+async def _message_delete(
+    conn: ClientConnection, hub: TripHub, db, client_id: str, op_id: str, data: dict
+) -> None:
+    trip_id = conn.trip_id
+    message_id = str(data.get("id") or "")
+    if not message_id:
+        await _reject(conn, op_id, "message_not_found", {"id": ""})
+        return
+    status, _row = await repositories.message_delete(db, trip_id, message_id, client_id)
+    if status != "ok":
+        # 越权与不存在分开回：前端要能区分「这句不是你的」和「这句已经没了」——
+        # 前者该提示用户，后者只需把自己那条静默收掉。
+        await _reject(conn, op_id, f"message_{status}", {"id": message_id})
+        return
+    await _broadcast(hub, db, trip_id, "message_deleted", op_id, client_id, {"id": message_id})
+
+
+async def _message_restore(
+    conn: ClientConnection, hub: TripHub, db, client_id: str, op_id: str, data: dict
+) -> None:
+    trip_id = conn.trip_id
+    message_id = str(data.get("id") or "")
+    if not message_id:
+        await _reject(conn, op_id, "message_not_found", {"id": ""})
+        return
+    status, row = await repositories.message_restore(db, trip_id, message_id, client_id)
+    if status != "ok" or row is None:
+        await _reject(conn, op_id, f"message_{status}", {"id": message_id})
+        return
+    # 广播整行而不是只广播「恢复了」：客户端靠行里的 pos 把它插回原来那一格。
+    await _broadcast(
+        hub, db, trip_id, "message_restored", op_id, client_id, {"message": row.model_dump()}
+    )

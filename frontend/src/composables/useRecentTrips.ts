@@ -15,6 +15,8 @@
  * 所以「移除」只能是这台设备上的过滤规则，而不是删除动作。
  */
 
+import { ref } from 'vue'
+
 const RECENT_KEY = 'tourplanopt.recent_trips'
 const MAX_RECENT = 24
 
@@ -75,6 +77,12 @@ export function pruneRecentTrips(aliveIds: Set<string>): RecentTrip[] {
 const HIDDEN_KEY = 'tourplanopt.hidden_trips'
 const MAX_HIDDEN = 60
 
+/**
+ * 黑名单的变更版本号。localStorage 不是响应式的：设置面板里点了「恢复」，首页那份
+ * `hidden` 还是旧的，看着像按钮没反应。所以唯一那条写入路径 bump 一次，谁在渲染谁 watch 它。
+ */
+export const hiddenRev = ref(0)
+
 export function readHiddenTrips(): string[] {
   let raw: string | null = null
   try {
@@ -98,6 +106,7 @@ function writeHidden(ids: string[]): void {
   } catch {
     /* 存不下就等于没有这个功能，首页照常渲染 */
   }
+  hiddenRev.value += 1
 }
 
 /**
@@ -120,4 +129,12 @@ export function hideTrip(id: string): string[] {
 export function unhideTrip(id: string): void {
   if (!readHiddenTrips().includes(id)) return
   writeHidden(readHiddenTrips().filter((x) => x !== id))
+}
+
+/** 清空名单，返回恢复了几条。设置面板那句「全部恢复」要的数就是它。 */
+export function unhideAllTrips(): number {
+  const n = readHiddenTrips().length
+  if (!n) return 0
+  writeHidden([])
+  return n
 }

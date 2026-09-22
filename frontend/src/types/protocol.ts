@@ -45,6 +45,10 @@ export const Ops = {
   EXPENSE_ADD: 'expense_add',
   EXPENSE_UPDATE: 'expense_update',
   EXPENSE_DELETE: 'expense_delete',
+  // 同行聊天。没有 message_update：话发出去就不许改。
+  MESSAGE_ADD: 'message_add',
+  MESSAGE_DELETE: 'message_delete',
+  MESSAGE_RESTORE: 'message_restore',
 } as const
 
 export interface HelloFrame {

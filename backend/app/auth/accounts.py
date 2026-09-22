@@ -1,8 +1,9 @@
 """Accounts: registration, login, cookie sessions. Deliberately small.
 
 Auth is OPTIONAL by design -- guests can still create and join trips through the
-share-link flow (the product's core loop). An account buys exactly one thing today:
-「我的行程」 history (recently opened trips). Everything here is stdlib only --
+share-link flow (the product's core loop). An account buys two things today:
+「我的行程」 history (recently opened trips) and 「偏好」 (users.prefs: theme, font size,
+motion, basemap, sprite). Everything here is stdlib only --
 pbkdf2_hmac for hashing, SQLite for session storage, no JWT, no email.
 
 Password rules kept honest for a LAN tool: scrypt/pbkdf2 with a per-user salt, tokens
@@ -14,6 +15,7 @@ limitation for public deployment in docs/ARCHITECTURE.md.
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets
 import sqlite3
 from datetime import UTC, datetime, timedelta
@@ -147,3 +149,68 @@ async def unfollow(db: Database, trip_id: str, user_id: str) -> bool:
         return cur.rowcount > 0
 
     return await db.run(_delete)
+
+
+# ---------- M31 个人偏好（users.prefs 那一整块 JSON） ----------
+
+PREF_MAX_BYTES = 4096
+
+_THEME_VALUES = frozenset({"auto", "light", "dark"})
+_FONT_VALUES = frozenset({"md", "lg", "xl"})
+_MOTION_VALUES = frozenset({"auto", "reduce"})
+_BASEMAP_VALUES = frozenset({"auto", "light"})
+
+
+def sanitize_prefs(raw: object) -> dict:
+    """只留认识的键和取值，其余丢掉。
+
+    丢掉而不是报错是刻意的：一个还没升级的前端多传了键，不该让自己的偏好保存整个失败；
+    但库里也不能堆没人读的垃圾——白名单是这两件事唯一的交点。
+    """
+    if not isinstance(raw, dict):
+        raise ValueError("prefs 需要是一个 JSON 对象")
+    out: dict[str, object] = {}
+    for key, allowed in (
+        ("theme", _THEME_VALUES),
+        ("font_size", _FONT_VALUES),
+        ("motion", _MOTION_VALUES),
+        ("basemap", _BASEMAP_VALUES),
+    ):
+        value = raw.get(key)
+        if isinstance(value, str) and value in allowed:
+            out[key] = value
+    pet = raw.get("pet_visible")
+    if isinstance(pet, bool):
+        out["pet_visible"] = pet
+    return out
+
+
+async def get_prefs(db: Database, user_id: str) -> dict:
+    row = await db.fetch_one("SELECT prefs FROM users WHERE id = ?", (user_id,))
+    if row is None:
+        return {}
+    try:
+        stored = json.loads(row["prefs"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        # 库里那一份坏掉就当没有：界面照样能开，下一次保存会顺手写回一份干净的。
+        return {}
+    return sanitize_prefs(stored)
+
+
+async def put_prefs(db: Database, user_id: str, prefs: dict) -> dict:
+    """逐键合并，不整块覆盖。
+
+    同一账号可能在手机上刚把界面调暗、在电脑上刚把字号调大，两边各自发一次 PUT。整块
+    覆盖的话后发的那次会把前一次抹掉，而且用户完全看不出发生过什么。合并之后最坏只是
+    同一键后写者赢，那是可以接受的。
+    """
+    merged = {**(await get_prefs(db, user_id)), **prefs}
+
+    def _write(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "UPDATE users SET prefs = ? WHERE id = ?",
+            (json.dumps(merged, ensure_ascii=False, sort_keys=True), user_id),
+        )
+
+    await db.run(_write)
+    return merged

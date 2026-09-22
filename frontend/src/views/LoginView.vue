@@ -9,7 +9,8 @@
  *    写在声明里、靠 forwards 收尾，减少动效的用户就永远看不见路线和贴纸。
  * 2. 常驻循环只有两项（光点沿路线、罗盘针微摆），标签页不可见时整页暂停。
  * 3. 指针联动是「回声」不是循环：三层视差、光带、罗盘转向全部只往根元素写
- *    CSS 变量（幅度分配留在 CSS），prefers-reduced-motion 下三个监听一个都不挂。
+ *    CSS 变量（幅度分配留在 CSS），「减少动效」下三个监听一个都不挂——那一档现在既
+ *    来自系统，也来自设置面板，判断收在 composables/useReduceMotion，见该文件。
  *    根节点本身永远不加 transform——视图根上挂 transform 会把页内的 fixed 件掀出视口。
  * 4. 贴纸是插画不是界面，所以它的纸色与文字不随主题反色（同 --pet-body 的口径）。
  */
@@ -17,6 +18,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import { ArrowLeft, Compass, Eye, EyeOff, LoaderCircle, LogIn, Lock, User } from '@/components/icons'
+import { useReduceMotion } from '@/composables/useReduceMotion'
 import { useAuthStore } from '@/stores/auth'
 
 type Mode = 'login' | 'register'
@@ -239,7 +241,7 @@ function onPointerLeave() {
   start()
 }
 
-let reduceMq: MediaQueryList | null = null
+const reduceMotion = useReduceMotion()
 
 function bindPointer(on: boolean) {
   const el = rootEl.value
@@ -265,10 +267,12 @@ function bindPointer(on: boolean) {
   el.style.removeProperty('--aim')
 }
 
-/** 系统偏好一变，这条通道就整条接上或整条断开。 */
+/** 减少动效一变，这条通道就整条接上或整条断开——指针回声也是动效，不是例外。 */
 function syncPointer() {
-  bindPointer(!!reduceMq && !reduceMq.matches)
+  bindPointer(!reduceMotion.value)
 }
+
+watch(reduceMotion, syncPointer)
 
 let mql: MediaQueryList | null = null
 
@@ -284,8 +288,6 @@ onMounted(async () => {
   wide.value = mql.matches
   mql.addEventListener('change', onResize)
   window.addEventListener('resize', onWindowResize)
-  reduceMq = window.matchMedia('(prefers-reduced-motion: reduce)')
-  reduceMq.addEventListener('change', syncPointer)
   syncPointer()
   document.addEventListener('visibilitychange', onVisibility)
   onVisibility()
@@ -298,7 +300,6 @@ onBeforeUnmount(() => {
   window.clearTimeout(stampTimer)
   mql?.removeEventListener('change', onResize)
   window.removeEventListener('resize', onWindowResize)
-  reduceMq?.removeEventListener('change', syncPointer)
   bindPointer(false)
   if (raf) cancelAnimationFrame(raf)
   raf = 0
@@ -523,14 +524,12 @@ onBeforeUnmount(() => {
   overflow-x: clip;
 }
 
-@media (prefers-color-scheme: dark) {
-  .login {
-    --canvas-bg: #16293c;
-    --canvas-shadow: 3px 3px 0 rgba(3, 8, 14, 0.6);
-    --canvas-shadow-hover: 5px 5px 0 rgba(3, 8, 14, 0.65);
-    --canvas-edge: rgba(255, 255, 255, 0.07);
-    --canvas-beam: rgba(206, 230, 250, 0.34);
-  }
+:global(html[data-theme='dark']) .login {
+  --canvas-bg: #16293c;
+  --canvas-shadow: 3px 3px 0 rgba(3, 8, 14, 0.6);
+  --canvas-shadow-hover: 5px 5px 0 rgba(3, 8, 14, 0.65);
+  --canvas-edge: rgba(255, 255, 255, 0.07);
+  --canvas-beam: rgba(206, 230, 250, 0.34);
 }
 
 /* ---------- 左：画布 ---------- */
@@ -923,10 +922,8 @@ onBeforeUnmount(() => {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0) 300px), var(--bg);
 }
 
-@media (prefers-color-scheme: dark) {
-  .panel {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0) 300px), var(--bg);
-  }
+:global(html[data-theme='dark']) .panel {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0) 300px), var(--bg);
 }
 
 /* 骑缝线：本页专属件之一，纵向压在两栏交界上。 */
@@ -1281,7 +1278,7 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, var(--surface) 72%, transparent);
   color: var(--accent);
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: calc(15px * var(--fs-scale));
   font-weight: 700;
   letter-spacing: var(--ls-label);
   pointer-events: none;
@@ -1309,7 +1306,7 @@ onBeforeUnmount(() => {
 
   .pitch {
     margin-top: var(--s2);
-    font-size: 26px;
+    font-size: calc(26px * var(--fs-scale));
   }
 
   .chart {

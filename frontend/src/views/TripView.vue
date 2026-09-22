@@ -3,18 +3,21 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AmapKeyCheck from '@/components/AmapKeyCheck.vue'
+import AppModal from '@/components/AppModal.vue'
 import AssistantPanel from '@/components/AssistantPanel.vue'
 import ChecklistPanel from '@/components/ChecklistPanel.vue'
 import DaySection from '@/components/DaySection.vue'
 import ExpensePanel from '@/components/ExpensePanel.vue'
 import JoinGate from '@/components/JoinGate.vue'
 import MapPanel from '@/components/MapPanel.vue'
+import MessagePanel from '@/components/MessagePanel.vue'
 import OpTicker from '@/components/OpTicker.vue'
 import PlaceSearch from '@/components/PlaceSearch.vue'
 import StashPanel from '@/components/StashPanel.vue'
 import Sprite from '@/components/Sprite.vue'
 import RecommendPanel from '@/components/RecommendPanel.vue'
 import TripHeader from '@/components/TripHeader.vue'
+import TripMasthead from '@/components/TripMasthead.vue'
 import {
   ArrowDown,
   ArrowRight,
@@ -28,6 +31,7 @@ import {
   Lock,
   LockOpen,
   Map as MapIcon,
+  MessageSquare,
   Package,
   Pencil,
   Plus,
@@ -40,6 +44,7 @@ import { recordRecentTrip } from '@/composables/useRecentTrips'
 import { useAuthStore } from '@/stores/auth'
 import { useDialogStore } from '@/stores/dialog'
 import { useFeedbackStore } from '@/stores/feedback'
+import { useSettingsStore } from '@/stores/settings'
 import { useSocketStore } from '@/stores/socket'
 import { useTripStore } from '@/stores/trip'
 import type { Place, Poi } from '@/types/domain'
@@ -53,6 +58,7 @@ const props = defineProps<{ tripId: string }>()
 const store = useTripStore()
 const socket = useSocketStore()
 const auth = useAuthStore()
+const settings = useSettingsStore()
 const feedback = useFeedbackStore()
 const dialog = useDialogStore()
 const copy = useCopy()
@@ -82,6 +88,92 @@ const sheetOpen = computed(() => narrow.value && !!store.selectedPlaceId)
 const loadFail = computed(() => store.loadError ?? socket.fatalError)
 
 /**
+ * 海报头（D1）：往下滚进列表就把封面收起来，滚回顶再放开。
+ *
+ * 两个门限不相等是有意的：收起与展开写成同一个值，就会在临界点上每滚一格抖一次；
+ * 12 那条留出的是「明确回到了顶上」的距离。监听挂在宿主的 `.panel__scroll` 上而不是
+ * 组件里——滚动条是这一层的东西，内容件不该反过来偷看自己摆在哪个容器里。
+ *
+ * 收起门限从 72 抬到 148：照片的视差要读出「列表在封面底下滚过」需要一段行程，
+ * 72 那一级封面先折了，视差就永远没被看见过——「像贴进来的一张截图」病的这一半在这。
+ * 滚动偏移一并交给组件（`mastScrollY`）：位移写在照片上，容器又不在照片这一层，
+ * 除了宿主没人知道已经滚过多少。
+ *
+ * **收起不许动读数**（M34、M35）。海报头不在滚动容器里面，收起它等于把视口抬高整整
+ * 一截封面，于是可滚范围同量缩小，浏览器随即把 `scrollTop` 夹到新的最大值——那一夹就是
+ * 「下拉框拉到底部会自动弹上去」。M34 的第一版用门槛躲：当前位置底下剩的清单装不下一截
+ * 封面就不许收。它确实不弹了，代价是「可滚范围本来就比封面矮」的短列表整段都不折封面，
+ * 于是同一套界面在两段行程上是两种行为——用户按「南宁不收、南京收」把它打回了。
+ *
+ * 现在改成正面补：折叠让出多少，就在清单末尾垫多少（`mastPad` → `--tail-h`）。滚动区
+ * 高度多出那一截、内容也多出那一截，可滚范围自始至终没变小，读数没有可被夹的理由，
+ * 短列表长列表于是走同一条路。垫的量只算「这一收会夹掉的像素」
+ * （`steal = top - (room - occupied)`），长列表上它是 0，一分空间也不多占；
+ * 只有清单本来就比屏幕短的那几趟会露出末尾的空档，而那一点空档是清单自己读完了，
+ * 不是封面腾出来的洞。补白与封面用同一条 `--dur-slow var(--ease-inout)` 过渡，
+ * 两边始终互补，中途也不会出现「可滚范围短暂变小」的夹。
+ *
+ * 反过来展开不需要这种补：`top < 12` 时视口缩回去只会让可滚范围变大，动不了读数。
+ */
+const mastCollapsed = ref(false)
+const mastScrollY = ref(0)
+
+/** 快照没到手就没有名字、没有城市、没有地点数，这块只能整条不上屏；
+ *  读失败那一栏有自己的兜底块，别在它头顶再挂一条封面。 */
+const mastShown = computed(() => !!store.trip && !loadFail.value)
+
+const mastRef = ref<InstanceType<typeof TripMasthead> | null>(null)
+
+/** 封面这一整块从列表头上占掉的高度（含跟着一起收的外边距——收起让出来的正是整块，
+ *  只量元素本身会少算 margin 那一格，补白就偏乐观了）。取历史最大值：收起态读到 0、
+ *  重展开的过渡没走完会读小；换到更矮的封面形态只会让它偏大，而偏大在这里是安全方向
+ *  ——宁可多垫一格，不可挤掉读数。 */
+let mastReserve = 0
+
+function mastOccupied(): number {
+  const el = mastRef.value?.rootEl
+  if (el) {
+    const h = el.offsetHeight + Number.parseFloat(getComputedStyle(el).marginTop || '0')
+    if (h > mastReserve) mastReserve = h
+  }
+  return mastReserve
+}
+
+/** 折叠会夹掉的那一截，垫在清单末尾接住（写进 `--tail-h`，见 `.panel__content::after`）。 */
+const mastPad = ref(0)
+
+function onPanelScroll(e: Event) {
+  const el = e.target as HTMLElement
+  const top = el.scrollTop
+  const room = el.scrollHeight - el.clientHeight - mastPad.value
+  mastScrollY.value = top
+  if (mastCollapsed.value) {
+    if (top < 12) {
+      mastCollapsed.value = false
+      mastPad.value = 0
+    }
+    return
+  }
+  if (top > 148) {
+    const occupied = mastOccupied()
+    const steal = top - (room - occupied)
+    if (steal > 0) mastPad.value = Math.min(occupied, Math.round(steal))
+    mastCollapsed.value = true
+  }
+}
+
+// 换了另一段行程：滚动容器回到了顶上，但这一趟不会有第二次 scroll 来把封面放开。
+watch(
+  () => store.trip?.id,
+  () => {
+    mastCollapsed.value = false
+    mastScrollY.value = 0
+    mastPad.value = 0
+    mastReserve = 0
+  },
+)
+
+/**
  * 抽屉背后是地图，不是列表：列表那一屏被抽屉盖掉 72%，留在上面等于什么也看不见，
  * 而这一站长在哪儿恰好是改停留时长、看排程结果时最想知道的一件事。
  * 关掉抽屉把视图还给用户原来那一侧，不是无条件回列表。
@@ -96,12 +188,12 @@ watch(sheetOpen, (open) => {
   if (mobileView.value === 'map') mobileView.value = viewBeforeSheet
 })
 
-// -- 分栏（M24b）-----------------------------------------------------------------------
-// 行程 / 出行清单 / 费用是三块各自完整的界面，不再从上到下堆在同一条侧栏里。
+// -- 分栏（M24b / M30）-------------------------------------------------------------------
+// 行程 / 出行清单 / 费用 / 聊天是四块各自完整的界面，不再从上到下堆在同一条侧栏里。
 // pane 写进 ?pane=：刷新留在当前页，前进后退也能跟上；「行程」不占参数，保持短链。
 
-type Pane = 'trip' | 'checklist' | 'cost'
-const PANES: Pane[] = ['trip', 'checklist', 'cost']
+type Pane = 'trip' | 'checklist' | 'cost' | 'chat'
+const PANES: Pane[] = ['trip', 'checklist', 'cost', 'chat']
 
 function readPane(value: unknown): Pane {
   return PANES.includes(value as Pane) ? (value as Pane) : 'trip'
@@ -141,6 +233,72 @@ function showMobileView(view: 'list' | 'map') {
 function showPane(p: Pane) {
   pane.value = p
   mobileView.value = 'list'
+}
+
+// -- 聊天这一面（M30）--------------------------------------------------------------------
+// 同一份 MessagePanel，两个宿主：宽屏是第四页签，窄屏是顶栏气泡开出的底部抽屉。
+// `pane === 'chat'` 是意图（也是地址栏里那位）；下面这一位只管抽屉板子还在不在屏幕上——
+// AppModal 的退场要播完才许卸载，所以不能拿 pane 直接 v-if 它。
+
+const chatWanted = computed(() => pane.value === 'chat')
+const chatSheetShown = ref(false)
+const chatSheetEl = ref<InstanceType<typeof AppModal> | null>(null)
+
+watch(
+  chatWanted,
+  (on) => {
+    if (on) {
+      if (narrow.value) chatSheetShown.value = true
+      return
+    }
+    if (chatSheetShown.value) chatSheetEl.value?.close()
+  },
+  { immediate: true },
+)
+
+/* 抽屉开着时把窗口拉宽：页签宿主接管这一面，抽屉得自己走完退场，不然它会永远悬在半空。 */
+watch(narrow, (isNarrow) => {
+  if (!isNarrow && chatSheetShown.value) chatSheetEl.value?.close()
+})
+
+function onChatSheetClosed() {
+  chatSheetShown.value = false
+  if (pane.value === 'chat') pane.value = 'trip'
+}
+
+/** 「9+」封顶：一位数的徽标比两位数安静，而三百条未读也要说同一句「去看」。 */
+const chatBadge = computed(() =>
+  store.chatUnread > 9 ? '9+' : String(store.chatUnread),
+)
+
+/**
+ * 气泡上那行「关于：某一站」按下去：切到那一天、选中那张卡，抽屉顺手关掉。
+ *
+ * 窄屏的选中会把地点编辑器抬起来（这是点卡片本来的行为），所以这里不额外解释「为什么
+ * 又开了一个抽屉」——两件事都是用户自己按出来的。
+ */
+function openChatRef(ref: { placeId?: string; dayId?: string }) {
+  if (ref.dayId) {
+    selectDay(ref.dayId)
+    return
+  }
+  const placeId = ref.placeId
+  if (!placeId) return
+  const place = store.places.find((p) => p.id === placeId)
+  if (place) selectDay(place.day_id)
+  store.selectPlace(placeId)
+  if (chatSheetShown.value) chatSheetEl.value?.close()
+}
+
+// 徽标与回执上的「查看」：store 不碰路由，落到这里的这一句才决定去哪儿。
+watch(
+  () => store.chatOpenWanted,
+  () => showPane('chat'),
+)
+
+/** 未读只在「界面切回前台」时补一条汇总——后台那几十分钟里浏览器连定时器都不给。 */
+function onVisibility() {
+  if (!document.hidden) store.flushChatSummary()
 }
 
 // -- 写入失败的反馈（M26a）----------------------------------------------------------------
@@ -374,6 +532,7 @@ onMounted(async () => {
     sessionStorage.setItem('tourplanopt.joined', '1')
   }
   initExpand()
+  document.addEventListener('visibilitychange', onVisibility)
   // 打不开就不记：分享 ID 敲错一次，不该在首页留一条永远点不进去的历史。
   if (!store.loadError) recordRecentTrip(props.tripId)
   if (joined.value) socket.connect(props.tripId)
@@ -381,6 +540,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (flashTimer) clearTimeout(flashTimer)
+  document.removeEventListener('visibilitychange', onVisibility)
   socket.disconnect()
 })
 
@@ -584,10 +744,23 @@ if (import.meta.env.DEV) {
       :presence="store.presence"
       :self-id="selfId"
       :status="socket.status"
+      :chat-unread="store.chatUnread"
+      :hide-title="mastShown && !mastCollapsed"
       @share="copyShareLink"
       @rename="renameTrip(store.trip?.title ?? '')"
       @set-city="setTripCity"
       @copy-text="copyTextItinerary"
+      @chat="showPane('chat')"
+    />
+
+    <!-- 海报头（D1）：名字的大字这一屏说了两遍，所以它开着的时候顶栏那行标题让位，
+         重命名与改城市都由这里的标题和「更多」菜单接手。 -->
+    <TripMasthead
+      v-if="mastShown"
+      ref="mastRef"
+      :collapsed="mastCollapsed"
+      :scroll-y="mastScrollY"
+      @rename="renameTrip(store.trip?.title ?? '')"
     />
 
     <AmapKeyCheck />
@@ -657,9 +830,27 @@ if (import.meta.env.DEV) {
               {{ formatMoney(store.spentCents) }}
             </span>
           </button>
+          <button
+            class="panebar__btn"
+            :class="{ 'panebar__btn--on': pane === 'chat' }"
+            type="button"
+            role="tab"
+            :aria-selected="pane === 'chat'"
+            @click="pane = 'chat'"
+          >
+            <MessageSquare class="ic" :size="14" /> 聊天
+            <!-- 未读是「有事没看」，不是「这里有几条」：实心强调底，和上面三枚淡底数字分开
+                 两套语义。清单那枚写的是 1/6，费用写的是 ¥172.84。 -->
+            <span v-if="store.chatUnread" class="panebar__badge tiny mono">{{ chatBadge }}</span>
+          </button>
         </nav>
         <OpTicker />
-        <div class="panel__scroll panel__content">
+        <div
+          class="panel__scroll panel__content"
+          :class="{ 'panel__content--fill': pane === 'chat' && !narrow }"
+          :style="{ '--tail-h': `${mastPad}px` }"
+          @scroll.passive="onPanelScroll"
+        >
           <div v-if="store.loading" class="skeletongroup" aria-label="正在加载行程">
             <div class="skeleton" style="height: 30px" />
             <div class="skeleton" style="height: 46px" />
@@ -686,7 +877,7 @@ if (import.meta.env.DEV) {
                   class="addbar__reco"
                   type="button"
                   :aria-expanded="recoOpen"
-                  :title="cityText ? `${cityText}的景点、美食与夜市` : '先设置目的地城市，此处才会展示推荐结果'"
+                  :title="cityText ? `${cityText}的景点、美食与夜市` : '推荐按城市给出，展开后可设置目的地城市'"
                   @click="recoEl?.toggle()"
                 >
                   <Compass class="ic" :size="14" /> 发现
@@ -699,6 +890,7 @@ if (import.meta.env.DEV) {
                 :city="store.trip.city"
                 :trip-id="tripId"
                 @update:open="recoOpen = $event"
+                @set-city="setTripCity"
               />
             </div>
 
@@ -733,6 +925,12 @@ if (import.meta.env.DEV) {
             <section v-else-if="pane === 'cost'" class="page">
               <p class="page__lead tiny muted">记录每笔开销，按人分摊并给出结算建议。</p>
               <ExpensePanel />
+            </section>
+
+            <!-- 聊天：宽屏这一份是第四页签，窄屏交给顶栏气泡开出的抽屉（同一组件两份宿主）。
+                 v-show 不用 v-if：切走页签时那句没发完的话不该蒸发。 -->
+            <section v-if="!narrow" v-show="pane === 'chat'" class="page page--chat">
+              <MessagePanel :active="pane === 'chat'" @open-ref="openChatRef" />
             </section>
           </template>
         </div>
@@ -781,8 +979,24 @@ if (import.meta.env.DEV) {
 
     <JoinGate v-if="!joined" @join="onJoin" />
 
+    <!-- 窄屏的聊天：抽屉不抬地图（这一面要看的是话，不是这一站在哪儿），也不进底部那条
+         dock——dock 四个按钮已经贴住拇指能到的边界，第五个会把前四个都挪位。 -->
+    <AppModal
+      v-if="chatSheetShown && narrow"
+      ref="chatSheetEl"
+      title="聊天"
+      sub="同行的人都会看到这句话"
+      variant="sheet"
+      @close="onChatSheetClosed"
+    >
+      <div class="chatsheet">
+        <MessagePanel active @open-ref="openChatRef" />
+      </div>
+    </AppModal>
+
     <template v-if="joined">
-      <Sprite />
+      <!-- 收起来的是那个会动的角色，不是助手：面板照旧挂着，入口在顶栏「更多」里（TripHeader 按同一条偏好补）。 -->
+      <Sprite v-if="settings.prefs.pet_visible" />
       <AssistantPanel />
     </template>
 
@@ -794,6 +1008,14 @@ if (import.meta.env.DEV) {
     >
       <button class="cardmenu__item" type="button" @click="renamePlace(cardMenu.place)">
         <Pencil class="ic" :size="13" /> 重命名
+      </button>
+      <button
+        class="cardmenu__item"
+        type="button"
+        title="就这一站说一句，同伴的屏幕上会同时出现"
+        @click="store.askAboutPlace(cardMenu.place.id); closeCardMenu()"
+      >
+        <MessageSquare class="ic" :size="13" /> 说一句
       </button>
       <button
         v-if="cardMenu.place.address"
@@ -921,7 +1143,7 @@ if (import.meta.env.DEV) {
   gap: 6px;
   align-items: center;
   padding: 8px 10px;
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   color: var(--text);
   text-align: left;
   text-decoration: none;
@@ -952,7 +1174,7 @@ if (import.meta.env.DEV) {
 
 .mappick__name {
   padding: 8px 10px;
-  font-size: 14px;
+  font-size: calc(14px * var(--fs-scale));
   background: var(--surface-2);
   border: 1px solid var(--ink);
   border-radius: var(--radius-sm);
@@ -999,15 +1221,40 @@ if (import.meta.env.DEV) {
 
 /* 收尾这一圈不敢写回容器自己的 padding-bottom：sticky 钉的是「滚动视口扣掉 padding」
    那一条线，写在容器上就等于把地点编辑器的吸底栏永久抬离面板下缘（实测差 20px）。
-   垫在最后一项之后，吸底栏才真的贴住边线。连同 10px 的 gap，仍是 20px 的收口气。 */
+   垫在最后一项之后，吸底栏才真的贴住边线。连同 10px 的 gap，仍是 20px 的收口气。
+   `--tail-h` 是海报头折叠让出的那一截（见 onPanelScroll）：接在末尾而不是凭空多一个元素，
+   就是为了不往里层插第二道 gap。过渡必须与 `.mast` 的 height 同一条曲线——两边一帧都
+   得互补，中途只要「视口抬得比补白快」，可滚范围就会短暂变小，读数照样被夹一次。 */
 .panel__content::after {
   flex: 0 0 auto;
-  height: 10px;
+  height: calc(10px + var(--tail-h, 0px));
   content: "";
+  transition: height var(--dur-slow) var(--ease-inout);
 }
 
 .panel__content > * {
   flex: 0 0 auto;
+}
+
+/* 聊天要的是「铺满这一栏、自己滚」：外层再滚一次就会出现两个滚动条，而输入框会被推出
+   视口——一句要回的话得先滚到页尾，那就不叫聊天了。 */
+.panel__content--fill {
+  overflow: hidden;
+}
+
+/* 只在它真的被看着那一面时抬起来：这一节平时只是 `v-show` 藏着的（为的是切页签不丢草稿），
+   要是把 `flex: 1 1 auto` 常驻在它身上，就等于给整栏的 shrink-0 不变量留了个后门。 */
+.panel__content--fill > .page--chat {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-bottom: 4px;
+}
+
+/* 窄屏抽屉里的那一份：外层 `.modal__body` 自己会滚，所以这里给一个定高，让列表在里面滚。 */
+.chatsheet {
+  display: flex;
+  height: min(58vh, 520px);
+  padding: 0 14px 14px;
 }
 
 /* ---------- 窄屏：地点抽屉与地图抬起（见上面 sheetOpen） ---------- */
@@ -1091,7 +1338,20 @@ if (import.meta.env.DEV) {
   background: var(--accent-soft);
 }
 
-/* 窄屏这三个入口整条搬进底部 dock，这里再留一条就是同一件事说两遍。 */
+/* 未读徽标：强调色实心 + 反白字。三枚「量」徽标（10 / 1/6 / ¥172.84）都是淡底数字，
+   同一排里再放一枚淡底数字就分不出「有事没看」和「这里有多少」。 */
+.panebar__badge {
+  flex: 0 0 auto;
+  min-width: 18px;
+  padding: 1px 5px;
+  color: var(--accent-ink);
+  text-align: center;
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+}
+
+/* 窄屏这四档各归各位：行程/地图与清单/费用在底部 dock，聊天在顶栏气泡。这里整条藏掉，
+   否则同一件事会在屏幕两头各说一遍。 */
 @media (max-width: 860px) {
   .panebar {
     display: none;

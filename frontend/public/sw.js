@@ -11,7 +11,9 @@
  * 发新版本时把 CACHE 版本号 +1，activate 会清掉旧缓存。
  */
 
-const CACHE = 'tourplanopt-v1'
+// v2：index.html 多了内联的防闪脚本与 manifest 链接。v1 里那份 shell 不含这两样，
+// 断网打开就会先白一下再翻深色——正是这段脚本要消灭的症状，不能让它的缓存版本留着。
+const CACHE = 'tourplanopt-v2'
 const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png']
 
 self.addEventListener('install', (event) => {

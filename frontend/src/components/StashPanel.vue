@@ -98,7 +98,7 @@ const store = useTripStore()
 }
 
 .stash__name {
-  font-size: 14px;
+  font-size: calc(14px * var(--fs-scale));
   font-weight: 600;
 }
 

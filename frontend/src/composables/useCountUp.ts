@@ -1,5 +1,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
+import { useReduceMotion } from '@/composables/useReduceMotion'
+
 /** ease-out cubic：起步快、收尾慢，读起来像数字自己落位，不是匀速滚过去。 */
 function easeOut(k: number): number {
   return 1 - (1 - k) ** 3
@@ -15,16 +17,17 @@ function easeOut(k: number): number {
  * 而 CSS 动画停摆只是「不动」，性质完全不同。所以 document.hidden 与 reduced-motion
  * 同样走直达终值的路径。
  *
- * WAAPI 与 CSS 的那条全局 reduced-motion 兜底管不到这里，必须在 JS 侧自己挡一道。
+ * WAAPI 与 CSS 的那条全局兜底管不到这里，设置面板里那一档「减少动效」也只能由 JS 看见，
+ * 所以两道判断都收在 composables/useReduceMotion 那一个出口上。
  */
 export function useCountUp(source: () => number, durationMs = 760) {
-  const reduce = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null
+  const reduceMotion = useReduceMotion()
   const shown = ref(0)
   let raf = 0
   let started = false
 
   function run(from: number, to: number) {
-    if (reduce?.matches || durationMs <= 0 || from === to || document.hidden) {
+    if (reduceMotion.value || durationMs <= 0 || from === to || document.hidden) {
       shown.value = to
       return
     }

@@ -307,7 +307,7 @@ function remove(item: ChecklistItem) {
   padding: 0;
   overflow: hidden;
   font: inherit;
-  font-size: 14px;
+  font-size: calc(14px * var(--fs-scale));
   color: inherit;
   text-align: left;
   text-overflow: ellipsis;

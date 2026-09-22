@@ -286,6 +286,42 @@ async def test_city_poi_cache_key_gains_sort(tmp_path: Path) -> None:
         )
 
 
+async def test_m31_users_prefs_column_is_added_to_an_m10_database(tmp_path: Path) -> None:
+    """M31 个人偏好给 users 补一列整块 JSON。
+
+    上面那份 OLD_SCHEMA 刻意没有 users（它是 M10 才有的表，那张图要演的是更早的库），
+    所以这里单独造一个「有账号、没 prefs」的中间态：这正是任何一个 M10~M30 之间建过账号
+    的老库下次启动会走的分支，而 schema.sql 的 CREATE TABLE IF NOT EXISTS 对它完全不动。
+    """
+    path = tmp_path / "old.db"
+    build_old_db(path)
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            """CREATE TABLE users (
+                   id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+                   password_hash TEXT NOT NULL, created_at TEXT NOT NULL
+               )"""
+        )
+        conn.execute(
+            "INSERT INTO users (id, name, password_hash, created_at)"
+            " VALUES ('U0', '小明', 'salt$digest', 'x')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    db = Database(path)
+    await db.init()
+    await db.init()  # 第二次必须认出 prefs 列已存在
+
+    row = await db.fetch_one("SELECT name, prefs FROM users WHERE id = 'U0'")
+    assert row is not None
+    assert row["name"] == "小明"  # 补列不能把账号搬走
+    # NOT NULL DEFAULT '{}'：老账号读出来是一份空偏好，而不是要让每个调用方都判 NULL。
+    assert row["prefs"] == "{}"
+
+
 async def _snapshot_trip(path: Path) -> dict:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row

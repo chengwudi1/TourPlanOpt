@@ -25,6 +25,11 @@ logger = logging.getLogger("tourplan.ws")
 # seconds -- the latest state wins, intermediate states are dropped.
 PRESENCE_MIN_INTERVAL_S = 0.25
 
+# 聊天频控：同一个 client 每 2 秒最多一句。防的不是机器人（这产品没有公网），是**误触
+# 长按回车**把同伴的手机弹到炸。它叠在既有的 30 帧/10 秒兜底之上——聊天不开任何豁免，
+# presence 才需要（250ms 心跳不豁免会自己把自己限流掉）。
+MESSAGE_MIN_INTERVAL_S = 2.0
+
 # Reconnecting clients may replay ops they already sent. We remember this many recent
 # op_ids per trip; a replay older than the window is applied twice, which the LWW model
 # survives (same payload, same result).
@@ -41,6 +46,8 @@ class TripHub:
         # crash must not leave zombie roster rows, so presence is never persisted.
         self.presence: dict[str, dict[str, Any]] = {}
         self._presence_last_broadcast: dict[str, float] = {}
+        # 聊天频控同样是内存态：重启后清空不是 bug，是「没人正在连着我就不欠他计数」。
+        self._message_last_sent: dict[str, float] = {}
         self._seen_op_ids: OrderedDict[str, None] = OrderedDict()
 
     # -- membership ------------------------------------------------------------------
@@ -81,6 +88,14 @@ class TripHub:
         if now - last < PRESENCE_MIN_INTERVAL_S:
             return False
         self._presence_last_broadcast[client_id] = now
+        return True
+
+    def message_should_send(self, client_id: str, now: float) -> bool:
+        """收下这句没有。被拒的那一次**不更新时间**——否则一直按着回车就永远出不了窗口。"""
+        last = self._message_last_sent.get(client_id, 0.0)
+        if now - last < MESSAGE_MIN_INTERVAL_S:
+            return False
+        self._message_last_sent[client_id] = now
         return True
 
     def presence_list(self) -> list[dict[str, Any]]:

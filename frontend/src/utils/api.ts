@@ -86,3 +86,12 @@ export function postJson(body: unknown): RequestInit {
     body: JSON.stringify(body),
   }
 }
+
+/** 需要 PUT 的那一条：目前只有个人偏好。其余写入一律走 WS 的 op 通道。 */
+export function putJson(body: unknown): RequestInit {
+  return {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }
+}

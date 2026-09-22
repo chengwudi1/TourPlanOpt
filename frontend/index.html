@@ -7,6 +7,32 @@
       content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
     />
     <title>TourPlanOpt · 一起把行程排好</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- 浏览器地址栏/系统状态栏的底色。这里写的是亮纸的 --bg 值，深色由 stores/settings.ts
+         在应用起来后按已解析主题改写——meta 用不了 CSS 变量，这一处硬编码是例外，已登记在
+         main.css 的例外清单里。 -->
+    <meta name="theme-color" content="#fcf9f2" />
+    <script>
+      // 防闪：第一次绘制之前把「已解析」的主题/字号/动效写到 <html> 上。
+      //
+      // 这段算式以 src/utils/prefs.ts 为准，两处必须一起改：模块脚本是 deferred 的，
+      // 文档解析阶段跑不到它，所以只能自带一份。不一致的症状就是刷新瞬间那一下白闪
+      // （或深色界面配一套亮字号），docs/_theme-probe.mjs 的第 1 条判据盯的就是它。
+      (function () {
+        var root = document.documentElement
+        var p = {}
+        try {
+          p = JSON.parse(localStorage.getItem('tourplanopt.prefs') || '{}') || {}
+        } catch (e) {
+          /* 隐私模式或坏 JSON：当没有偏好，走系统值 */
+        }
+        var sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+        var sysReduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        root.setAttribute('data-theme', p.theme === 'light' || p.theme === 'dark' ? p.theme : sysDark ? 'dark' : 'light')
+        root.style.setProperty('--fs-scale', p.font_size === 'lg' ? '1.08' : p.font_size === 'xl' ? '1.16' : '1')
+        root.setAttribute('data-motion', p.motion === 'reduce' || sysReduce ? 'off' : 'on')
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>

@@ -97,7 +97,7 @@ onBeforeUnmount(() => {
 
 .gate__title {
   margin: 0 0 6px;
-  font-size: 20px;
+  font-size: calc(20px * var(--fs-scale));
 }
 
 .gate__form {

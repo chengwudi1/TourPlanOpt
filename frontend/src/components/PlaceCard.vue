@@ -301,6 +301,14 @@ onBeforeUnmount(() => esc(false))
   align-items: flex-start;
 }
 
+/* 描边与阴影由宿主递变量：日色带（DaySection）把这一档换成票券——不描边、只留一道
+   近影。选择器要多带一枚 `.card`：全局那条 `.panel .card` 也是两类的权重，
+   只写 `.place` 会被它压掉，兜底跟着它降过的那一档，别的宿主看到的还是原来那层影。 */
+.place.card {
+  border-color: var(--place-edge, var(--ink));
+  box-shadow: var(--place-shadow, var(--shadow-sm));
+}
+
 /* 站点：一枚落在轨道中线上的实心圆（--dc 由这一天继承下来，所以颜色本身就是「第几天」）。
    白环负责把它从虚线上摘出来，外圈 --ink 保证深色态下仍认得出边界。
    挂在卡片上而不是列表上：重排与 hover 位移时节点要跟着这一站走。 */
@@ -312,7 +320,8 @@ onBeforeUnmount(() => esc(false))
   height: 10px;
   content: "";
   background: var(--dc, var(--accent));
-  border: 2px solid var(--surface);
+  /* 环色跟宿主：白环在卡片上是干净的，落在日色带上就是一个白洞，所以由宿主递过来。 */
+  border: 2px solid var(--place-ring, var(--surface));
   border-radius: 50%;
   box-shadow: 0 0 0 1px var(--ink);
   transition: transform var(--dur) var(--ease-pop);
@@ -388,7 +397,7 @@ onBeforeUnmount(() => esc(false))
   min-width: 15px;
   height: 15px;
   padding: 0 3px;
-  font-size: 10px;
+  font-size: calc(10px * var(--fs-scale));
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: #fff;
@@ -417,7 +426,7 @@ onBeforeUnmount(() => esc(false))
      旁边的「某某 在这张卡上」会把地名挤成一两个省略号，而不是把自己换到下一行去。 */
   min-width: 5em;
   overflow: hidden;
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -489,7 +498,7 @@ onBeforeUnmount(() => esc(false))
 }
 
 .place__clock {
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--text-2);
@@ -521,7 +530,7 @@ onBeforeUnmount(() => esc(false))
 .place__menu,
 .place__delete {
   padding: 2px 6px;
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
 }
 
 /* 出口与删除挨着长，颜色必须分开：× 走主色，垃圾桶才走危险色。 */

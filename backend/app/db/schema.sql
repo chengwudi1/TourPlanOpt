@@ -129,6 +129,10 @@ CREATE TABLE IF NOT EXISTS users (
     id            TEXT PRIMARY KEY,           -- 8-char base32
     name          TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,              -- pbkdf2_hmac: salt$hash (hex)
+    -- 个人偏好整块 JSON（主题/字号/动效/底图/精灵）。刻意只开一列而不是逐项加列：
+    -- 加设置项不该再动 schema。键与取值由 app/auth/accounts.py 的白名单管，库里不兜。
+    -- 这是「我自己的界面」，绝不进 trips、绝不进 op——否则我一翻深色，同行的人跟着翻。
+    prefs         TEXT NOT NULL DEFAULT '{}',
     created_at    TEXT NOT NULL
 );
 
@@ -208,3 +212,25 @@ CREATE TABLE IF NOT EXISTS expenses (
     rev          INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_expenses_trip ON expenses(trip_id, created_at);
+
+-- -- M30: 同行聊天 ---------------------------------------------------------------------
+
+-- 一句留言一行。与 expenses 恰好相反：**这里不存昵称快照**（`client_id` 是唯一身份），
+-- 因为账要定格在记下的那一刻，而话要认得出现在那个人——同伴改了昵称，历史气泡上的名字
+-- 跟着变才是对的；落一份 `from_name` 就成了没人负责改对的第二个真相源。
+-- 锚点同样只存 id：改名跟着变，那张卡被删掉时读成「这一站已不在行程里」并停止跳转。
+-- 软删（`deleted_at`）而不是硬删：**聊天的位置就是语义**，撤销必须回到原处，
+-- 而放回末尾会让「那家馆子换成早上去吧」接不上它上面那句。
+CREATE TABLE IF NOT EXISTS messages (
+    id           TEXT PRIMARY KEY,
+    trip_id      TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    client_id    TEXT NOT NULL DEFAULT '',        -- 谁说的；只存 id
+    text         TEXT NOT NULL,
+    ref_place_id TEXT NOT NULL DEFAULT '',        -- 可空（空串 = 不挂锚点）
+    ref_day_id   TEXT NOT NULL DEFAULT '',        -- 与 ref_place_id 互斥，最多挂一个
+    created_at   TEXT NOT NULL,
+    deleted_at   TEXT                             -- 非空 = 已删；撤销就是把它清回 NULL
+);
+-- 只按 trip_id 建索引：rowid 不许出现在索引定义里（SQLite 直接报 no such column），
+-- 而「一个行程的最近 N 句」本来就是过滤完再按 rowid 倒着数，剩不了几行。
+CREATE INDEX IF NOT EXISTS idx_messages_trip ON messages(trip_id);

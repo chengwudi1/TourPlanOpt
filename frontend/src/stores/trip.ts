@@ -6,6 +6,7 @@ import type {
   Day,
   DayTimeline,
   Expense,
+  Message,
   Participant,
   Place,
   PlaceCreateInput,
@@ -39,6 +40,18 @@ type PendingOp =
   | { kind: 'expense_add'; tempId: string; cancelled?: boolean }
   /** 删除是本地先移除再发 op，回广播时那一行已经查不到了：名字只能暂存在这里。 */
   | { kind: 'deleted'; name: string }
+  /** 被服务端挡回来的那一句要连文字一起回输入框：发出去又凭空消失是最坏的一种失败。 */
+  | {
+      kind: 'message_add'
+      tempId: string
+      text: string
+      ref_place_id: string
+      ref_day_id: string
+      /** 等回执期间自己又把这句撤了：回声到达时不能再把它插回屏幕。 */
+      cancelled?: boolean
+    }
+  /** 撤回被拒（那句其实还在）时，靠这一份原样放回去。 */
+  | { kind: 'message_delete'; row: Message }
 
 /**
  * 撤销删除时要在 place_add 落地之后补发的第二笔。
@@ -94,6 +107,17 @@ export interface DeletedExpense {
 }
 
 /**
+ * 撤回一句留言前拍下的快照。
+ *
+ * `wasTemp` 在聊天里的含义与别处不同：那句可能还没落地（回声在路上），这时撤销不该去
+ * 请求服务端删一个不存在的 id，而是把那一笔在路上的发送直接取消。
+ */
+export interface DeletedMessage {
+  row: Message
+  wasTemp: boolean
+}
+
+/**
  * 撤销一次开销删除。
  *
  * 只带付款人：一笔账的付款人是「谁付的钱」，不能让「谁手快点了撤销」把它改成自己——
@@ -106,6 +130,9 @@ export interface ExpenseRestore {
 
 /** 删除回执里「撤销」能按多久。够读完一句话再抬手点一下，长过这个就该让屏幕安静下来。 */
 const UNDO_MS = 5000
+
+/** 一句留言的字数上限，与后端 `MESSAGE_TEXT_MAX` 同一个数。 */
+export const MESSAGE_TEXT_MAX = 300
 
 export interface OptimizeSummary {
   before_min: number
@@ -159,6 +186,7 @@ export const useTripStore = defineStore('trip', () => {
   const stash = ref<StashItem[]>([])
   const checklist = ref<ChecklistItem[]>([])
   const expenses = ref<Expense[]>([])
+  const messages = ref<Message[]>([])
   const currentDayId = ref<string | null>(null)
   const selectedPlaceId = ref<string | null>(null)
   const loading = ref(false)
@@ -219,6 +247,27 @@ export const useTripStore = defineStore('trip', () => {
   const expensesNewestFirst = computed(() => expenses.value.slice().reverse())
   const spentCents = computed(() => expenses.value.reduce((sum, e) => sum + e.amount_cents, 0))
 
+  /**
+   * 海报头的封面：第一个真的带图的地点。
+   *
+   * 规则与 `backend/app/db/repositories.py` 里摘要接口那条 `covers` 一致——天按
+   * `day_index`、天内按 `sort_index`，取首条非空 `photo_url`。两处必须挑同一张图，
+   * 否则首页卡片与行程页顶上各显示一张，看着像两个不同的行程。服务端是一次 SQL 排好
+   * 序在 Python 里取首条；这里的数据本来就在手，按同一个顺序现算就行。
+   */
+  const coverPhoto = computed(() => {
+    const dayIndex = new Map(days.value.map((d) => [d.id, d.day_index]))
+    const hit = places.value
+      .filter((p) => p.photo_url)
+      .slice()
+      .sort(
+        (a, b) =>
+          (dayIndex.get(a.day_id) ?? 0) - (dayIndex.get(b.day_id) ?? 0) ||
+          a.sort_index - b.sort_index,
+      )[0]
+    return hit?.photo_url ?? ''
+  })
+
   function selectPlace(placeId: string | null) {
     selectedPlaceId.value = placeId
     if (trip.value) {
@@ -235,6 +284,13 @@ export const useTripStore = defineStore('trip', () => {
     stash.value = snap.stash ?? []
     checklist.value = snap.checklist ?? []
     expenses.value = snap.expenses ?? []
+    messages.value = snap.messages ?? []
+    // 游标只在「换了一份行程」时重新读盘：同一次会话里的 resync 不能把它倒回去，
+    // 否则同伴刚补的那几句会在你眼皮底下重新亮成未读。
+    if (snap.trip.id !== chatCursorTrip) {
+      chatCursorTrip = snap.trip.id
+      readPos.value = readPosOf(snap.trip.id)
+    }
     // 台账只记这一页亲眼看到的广播：换行程与重连都会重新 welcome，
     // 留着上一段行程的 seq 等于把别处的改动报成本页刚发生的。
     opLog.value = []
@@ -888,6 +944,246 @@ export const useTripStore = defineStore('trip', () => {
   }
 
 
+  // -- messages（同行聊天）----------------------------------------------------------------
+
+  /**
+   * 未读游标：这一屏读到过的那一句。存 localStorage、按行程各存一份，**没有服务端字段**——
+   * 未读是纯派生量，落库就成了没人负责改对的第二个真相源，而且每次进聊天页都得发一笔 op，
+   * 等于往改动台账里灌「某某读了消息」。
+   */
+  const readPosKey = (tripId: string) => `tourplanopt.chat-read-${tripId}`
+
+  function readPosOf(tripId: string): number {
+    const raw = Number(localStorage.getItem(readPosKey(tripId)))
+    return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0
+  }
+
+  /** 比 pos 现算更省事的是别存时间戳：软删的行 pos 不变，徽标才不会因为别人撤了一句而重亮。 */
+  const readPos = ref(0)
+  /** 聊天那一面此刻在不在屏幕上。宽屏看的是页签，窄屏看的是抽屉，两边共用这一个位。 */
+  const chatInView = ref(false)
+  /** 游标属于哪一份行程：换行程才重新读盘，同一次会话的 resync 不倒车。 */
+  let chatCursorTrip = ''
+  /** 徽标/回执上的「查看」按下去要干的事：界面订阅这个计数，store 不碰路由。 */
+  const chatOpenWanted = ref(0)
+  /** 被服务端挡回来的那一句：文字原样回输入框。 */
+  const chatBounced = ref<{ text: string; ref_place_id: string; ref_day_id: string } | null>(
+    null,
+  )
+  /**
+   * 地点卡菜单上那句「说一句」。带 seq：只比 placeId 的话，连点同一张卡的第二次会被
+   * 界面当成「没变」而吞掉——那一下必须仍然有回声。
+   */
+  const chatAsk = ref<{ placeId: string; seq: number } | null>(null)
+  let chatAskSeq = 0
+
+  /** 汇总型回执只留一条：三条独立 toast 会占满 MAX_TOASTS，把「这一步没有同步出去」挤掉。 */
+  let chatSummary: { count: number; names: Set<string> } | null = null
+  let chatSummaryToast: number | null = null
+
+  const myClientId = useClientIdentity().client_id
+
+  /** 留言按 `pos` 插回原位（撤销删除靠的就是这一条），临时行排在最后。 */
+  function insertMessage(message: Message) {
+    if (messages.value.some((m) => m.id === message.id)) return
+    const at = messages.value.findIndex((m) => m.id.startsWith('tmp-') || m.pos > message.pos)
+    if (at === -1) messages.value.push(message)
+    else messages.value.splice(at, 0, message)
+  }
+
+  /** 署名现读名册：昵称改了，历史气泡上的名字跟着走。认不出的人只兜一个「同伴」。 */
+  function authorOf(clientId: string): { name: string; color: string } {
+    const found = participants.value.find((p) => p.client_id === clientId)
+    return {
+      name: found?.name || '同伴',
+      color: found?.color || colorForClient(clientId),
+    }
+  }
+
+  /** 未读只看「别人说的、比游标新的」：自己那句回声永远不算，`9+` 由界面封顶。 */
+  const chatUnread = computed(
+    () =>
+      messages.value.filter(
+        (m) => m.client_id !== myClientId && !m.id.startsWith('tmp-') && m.pos > readPos.value,
+      ).length,
+  )
+
+  function markChatRead() {
+    const newest = messages.value.reduce(
+      (max, m) => (m.id.startsWith('tmp-') ? max : Math.max(max, m.pos)),
+      0,
+    )
+    const tripId = trip.value?.id
+    if (tripId) {
+      localStorage.setItem(readPosKey(tripId), String(Math.max(newest, readPos.value)))
+      chatCursorTrip = tripId
+    }
+    readPos.value = Math.max(newest, readPos.value)
+    chatSummary = null
+    if (chatSummaryToast !== null) {
+      useFeedbackStore().dismiss(chatSummaryToast)
+      chatSummaryToast = null
+    }
+  }
+
+  /** 宿主（宽屏页签 / 窄屏抽屉）开合时报一句：一开就清徽标，一关就停止清。 */
+  function setChatInView(on: boolean) {
+    chatInView.value = on
+    if (on) markChatRead()
+  }
+
+  /**
+   * 「说一句」的落点：挂上这一站，同时把聊天面叫出来。
+   *
+   * 只挂点不开面是不行的——按下菜单里那一行之后屏幕什么都不动，读起来就是这一条坏了。
+   */
+  function askAboutPlace(placeId: string) {
+    chatAsk.value = { placeId, seq: ++chatAskSeq }
+    chatOpenWanted.value += 1
+  }
+
+  /**
+   * 只在「不在看」时吵：视图没开 + 非本人 + 页面在前台。
+   *
+   * 页面在后台时一条都不弹（`document.hidden` 下浏览器把定时器掐到分钟级，弹出来的东西
+   * 一回来就全过期了），攒着，等界面切回前台时由 `flushChatSummary()` 补一条汇总。
+   */
+  function noteIncoming(message: Message) {
+    if (message.client_id === myClientId) return
+    if (chatInView.value) {
+      markChatRead()
+      return
+    }
+    const { name } = authorOf(message.client_id)
+    chatSummary = chatSummary
+      ? { count: chatSummary.count + 1, names: chatSummary.names.add(name) }
+      : { count: 1, names: new Set([name]) }
+    if (typeof document !== 'undefined' && document.hidden) return
+    showChatSummary()
+  }
+
+  function showChatSummary() {
+    const summary = chatSummary
+    if (!summary) return
+    const names = [...summary.names].slice(0, 2).join('、')
+    const who = summary.names.size > 2 ? `${names} 等` : names
+    const feedback = useFeedbackStore()
+    if (chatSummaryToast !== null) feedback.dismiss(chatSummaryToast)
+    chatSummaryToast = feedback.show({
+      kind: 'info',
+      message: `${who} 说了 ${summary.count} 句`,
+      durationMs: 6000,
+      action: { label: '查看', run: () => (chatOpenWanted.value += 1) },
+    })
+  }
+
+  /** 回到前台补账：界面切回可见时调一次。 */
+  function flushChatSummary() {
+    if (chatInView.value) {
+      markChatRead()
+      return
+    }
+    showChatSummary()
+  }
+
+  interface MessageSendInput {
+    text: string
+    ref_place_id?: string
+    ref_day_id?: string
+  }
+
+  /**
+   * 发一句。乐观上屏，回广播换成权威行（位置不变：临时行就排在末尾）。
+   *
+   * 返回 false 表示这句根本不该发出去（空白、超长到裁剪后为空）——那种情况下连 op 都不发，
+   * 免得同伴的屏幕上弹一条「某某发了个空」。300 字的上限在服务端裁剪，这里同步裁一次，
+   * 为的是输入框里的字数和屏幕上看到的字数对上。
+   */
+  function sendMessage(input: MessageSendInput): boolean {
+    if (!trip.value) return false
+    const text = String(input.text ?? '').trim().slice(0, MESSAGE_TEXT_MAX)
+    if (!text) return false
+    const refPlaceId = input.ref_place_id || ''
+    const refDayId = refPlaceId ? '' : input.ref_day_id || ''
+    const now = new Date().toISOString()
+    const tempId = `tmp-${crypto.randomUUID()}`
+    const newest = messages.value.reduce((max, m) => Math.max(max, m.pos), 0)
+    messages.value.push({
+      id: tempId,
+      trip_id: trip.value.id,
+      client_id: myClientId,
+      text,
+      ref_place_id: refPlaceId,
+      ref_day_id: refDayId,
+      created_at: now,
+      // 临时行没有 pos：给一个比现存所有行都大的，排序与「原位放回」才不会被它带偏。
+      pos: newest + 1,
+    })
+    const opId = useSocketStore().sendOp(Ops.MESSAGE_ADD, {
+      text,
+      ref_place_id: refPlaceId,
+      ref_day_id: refDayId,
+    })
+    pendingOps.set(opId, { kind: 'message_add', tempId, text, ref_place_id: refPlaceId, ref_day_id: refDayId })
+    return true
+  }
+
+  /** 软删一句：本地先收掉，回执到达前它就在别处消失了。只作者删得掉，界面那侧也要挡住入口。 */
+  function deleteMessage(id: string): DeletedMessage | null {
+    const message = messages.value.find((m) => m.id === id)
+    if (!message || message.client_id !== myClientId) return null
+    messages.value = messages.value.filter((m) => m.id !== id)
+    const snap: DeletedMessage = { row: { ...message }, wasTemp: id.startsWith('tmp-') }
+    if (snap.wasTemp) {
+      // 还没落地的那句：给在路上的那笔立个墓碑，回声到达时直接收掉。
+      cancelMessageAdd(id)
+      return snap
+    }
+    const opId = useSocketStore().sendOp(Ops.MESSAGE_DELETE, { id })
+    pendingOps.set(opId, { kind: 'message_delete', row: snap.row })
+    return snap
+  }
+
+  function cancelMessageAdd(tempId: string) {
+    for (const pending of pendingOps.values()) {
+      if (pending.kind === 'message_add' && pending.tempId === tempId) pending.cancelled = true
+    }
+  }
+
+  /**
+   * 撤销那次撤回：**回到原来那一格**，不是长回末尾。
+   *
+   * 这是聊天与清单/费用唯一不同的地方——「那家馆子换成早上去吧」指的是它上面那句，
+   * 照抄费用撤销的「放回最新一笔」会把上下文劈开。清单/费用的撤销是「重新记一笔」，
+   * 这里不能那么做：那句的 id 就是它在流里的位置，所以要回服务端把同一行解开。
+   */
+  function restoreMessage(snap: DeletedMessage) {
+    if (snap.wasTemp) {
+      // 那笔还在路上：撤了墓碑，回声到达时照常收下这一行——本地先摆回原位。
+      for (const pending of pendingOps.values()) {
+        if (pending.kind === 'message_add' && pending.tempId === snap.row.id) {
+          pending.cancelled = false
+        }
+      }
+      insertMessage(snap.row)
+      return
+    }
+    insertMessage(snap.row)
+    useSocketStore().sendOp(Ops.MESSAGE_RESTORE, { id: snap.row.id })
+  }
+
+  /** 留言撤回的界面入口：立即删 + 一条带「撤销」的回执（与地点/清单/费用同一把尺子）。 */
+  function deleteMessageWithUndo(id: string) {
+    const snap = deleteMessage(id)
+    if (!snap) return
+    useFeedbackStore().show({
+      message: '已撤回那句话',
+      durationMs: UNDO_MS,
+      action: { label: '撤销', run: () => restoreMessage(snap) },
+    })
+  }
+
+
   // -- optimization --------------------------------------------------------------------
 
   /** Run the optimizer over one day over HTTP (it can take seconds on a cold cache);
@@ -1209,6 +1505,40 @@ export const useTripStore = defineStore('trip', () => {
         dropExpense(String(data.id))
         break
       }
+      case 'message_added': {
+        const message = data.message as Message
+        const pending = pendingOps.get(frame.op_id)
+        pendingOps.delete(frame.op_id)
+        if (pending?.kind === 'message_add') {
+          if (pending.cancelled) {
+            // 这句在等回执期间被自己撤掉了：服务端刚把它种下去，反过来补一发删除收掉。
+            useSocketStore().sendOp(Ops.MESSAGE_DELETE, { id: message.id })
+            break
+          }
+          // 自己那句的回声：原地换成权威行，位置不动，也不算未读。
+          const at = messages.value.findIndex((m) => m.id === pending.tempId)
+          if (at === -1) insertMessage(message)
+          else messages.value.splice(at, 1, message)
+          break
+        }
+        insertMessage(message)
+        noteIncoming(message)
+        break
+      }
+      case 'message_deleted': {
+        pendingOps.delete(frame.op_id)
+        const id = String(data.id)
+        messages.value = messages.value.filter((m) => m.id !== id)
+        break
+      }
+      case 'message_restored': {
+        // 广播带的是整行：位置由行里的 pos 决定，谁撤销都放回原来那一格。
+        pendingOps.delete(frame.op_id)
+        const message = data.message as Message
+        messages.value = messages.value.filter((m) => m.id !== message.id)
+        insertMessage(message)
+        break
+      }
       case 'timeline_updated': {
         // Follows every schedule-affecting op (and greets a joining client). Rows ride
         // the normal rev guard -- a dry-run join frame carries equal revs and only
@@ -1256,7 +1586,19 @@ export const useTripStore = defineStore('trip', () => {
     if (pending?.kind === 'expense_add') {
       dropExpense(pending.tempId)
     }
-    const messages: Record<string, string> = {
+    if (pending?.kind === 'message_add') {
+      // 那句被挡回来了：临时行收掉，文字原样交给输入框——吞字比拒了还糟。
+      dropMessage(pending.tempId)
+      chatBounced.value = {
+        text: pending.text,
+        ref_place_id: pending.ref_place_id,
+        ref_day_id: pending.ref_day_id,
+      }
+    }
+    if (pending?.kind === 'message_delete') {
+      insertMessage(pending.row)
+    }
+    const reasons: Record<string, string> = {
       place_not_found: '该地点已被删除',
       day_not_found: '目标天不存在',
       day_not_empty: '这一天还有地点没删掉，先把它们移到别的天',
@@ -1267,11 +1609,15 @@ export const useTripStore = defineStore('trip', () => {
       checklist_not_found: '该清单项已被删除',
       expense_not_found: '该笔开销已被删除',
       bad_expense: '记录添加失败：标题或金额无效',
+      bad_message: '这句是空的',
+      message_too_fast: '说得有点快，稍一下再发',
+      message_not_found: '那句话已经不在了',
+      message_not_owner: '只能撤回自己说的那句',
       op_failed: '服务端处理这一步时出了错，请重试',
     }
     opError.value = {
       // 认不出的 reason 不把内部标识拼上界面（用户读不懂 `place_not_found`）。
-      message: messages[reason] ?? '这一步没有保存，请重试',
+      message: reasons[reason] ?? '这一步没有保存，请重试',
       hint: '',
       level: 'danger',
     }
@@ -1282,10 +1628,12 @@ export const useTripStore = defineStore('trip', () => {
     places.value = places.value.filter((p) => !p.id.startsWith('tmp-'))
     checklist.value = checklist.value.filter((i) => !i.id.startsWith('tmp-'))
     expenses.value = expenses.value.filter((e) => !e.id.startsWith('tmp-'))
+    messages.value = messages.value.filter((m) => !m.id.startsWith('tmp-'))
     // 例外：等回执期间被删掉的那几笔新增。它们还排在 socket 的离线队列里，重连之后
     // 照样会落地——墓碑跟着一起清，删掉的行就会在重连后自己长回来。
     const tombstones = [...pendingOps].filter(([, p]) => {
       if (p.kind === 'checklist_add') return !!p.cancelled?.length
+      if (p.kind === 'message_add') return !!p.cancelled
       if (p.kind === 'place_add' || p.kind === 'expense_add') return !!p.cancelled
       return false
     })
@@ -1405,6 +1753,10 @@ export const useTripStore = defineStore('trip', () => {
     expenses.value = expenses.value.filter((e) => e.id !== id)
   }
 
+  function dropMessage(id: string) {
+    messages.value = messages.value.filter((m) => m.id !== id)
+  }
+
   function describe(err: unknown): { message: string; hint: string } {
     const e = err as { message?: string; hint?: string }
     return { message: e?.message ?? '加载失败', hint: e?.hint ?? '' }
@@ -1436,6 +1788,7 @@ export const useTripStore = defineStore('trip', () => {
     checklistDoneCount,
     expensesNewestFirst,
     spentCents,
+    coverPhoto,
     selectPlace,
     applySnapshot,
     load,
@@ -1465,6 +1818,19 @@ export const useTripStore = defineStore('trip', () => {
     updateExpense,
     removeExpense,
     deleteExpenseWithUndo,
+    messages,
+    chatUnread,
+    chatInView,
+    chatOpenWanted,
+    chatBounced,
+    chatAsk,
+    askAboutPlace,
+    authorOf,
+    sendMessage,
+    deleteMessageWithUndo,
+    setChatInView,
+    markChatRead,
+    flushChatSummary,
     optimize,
     undoOptimize,
     dismissOptimizeResult,

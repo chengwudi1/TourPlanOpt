@@ -62,7 +62,7 @@ function runAction(toast: Toast) {
   gap: 10px;
   max-width: 100%;
   padding: 7px 8px 7px 13px;
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   color: var(--text);
   background: var(--ok-soft);
   border: 1px solid var(--ok-border);
@@ -84,7 +84,7 @@ function runAction(toast: Toast) {
 .toast__action {
   flex: none;
   padding: 3px 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--fs-scale));
   font-weight: 600;
   color: var(--accent-strong);
   background: var(--surface);

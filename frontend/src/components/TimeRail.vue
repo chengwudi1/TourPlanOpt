@@ -599,7 +599,7 @@ const bubble = computed(() => dragging.value || hovered.value || focused.value)
   bottom: 22px;
   left: 50%;
   padding: 2px 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--fs-scale));
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -618,7 +618,7 @@ const bubble = computed(() => dragging.value || hovered.value || focused.value)
 .rail__hour {
   position: absolute;
   padding: 1px 3px;
-  font-size: 11px;
+  font-size: calc(11px * var(--fs-scale));
   font-variant-numeric: tabular-nums;
   color: var(--text-2);
   background: none;

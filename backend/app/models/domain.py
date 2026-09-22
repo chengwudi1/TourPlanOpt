@@ -245,9 +245,42 @@ class ExpenseOut(BaseModel):
         return value
 
 
+class MessageIn(BaseModel):
+    """一句留言的入参。锚点最多一个：挂了地点就不再挂天。"""
+
+    text: str
+    ref_place_id: str = ""
+    ref_day_id: str = ""
+
+
+class MessageOut(BaseModel):
+    """一句留言的权威行。
+
+    `pos` 是 SQLite 的 rowid，也就是这句话在流里的**位置**：撤销删除要放回原处，
+    未读游标也比着它算——两者要的都是「谁在谁前面」，而不是谁的时间戳大。
+    署名不落快照：`client_id` 是唯一身份，昵称读 `participants` 的当前值。
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    trip_id: str
+    client_id: str = ""
+    text: str = ""
+    ref_place_id: str = ""
+    ref_day_id: str = ""
+    created_at: str = ""
+    pos: int = 0
+
+
 class Snapshot(BaseModel):
     """The whole trip. Small enough (tens of records, a few KB) that we always send it
-    in full on hello/resync instead of maintaining an op-replay ring buffer."""
+    in full on hello/resync instead of maintaining an op-replay ring buffer.
+
+    聊天是唯一按窗口取的一格：库里一直攒着、写入时不裁剪（裁掉最旧的那条会让 seq 指向
+    一条已经不存在的行，resync 时就成了查不出来的「我是不是漏了一条」），只有这里裁到
+    最近 60 条未删的。
+    """
 
     trip: TripOut
     days: list[DayOut] = Field(default_factory=list)
@@ -257,6 +290,7 @@ class Snapshot(BaseModel):
     stash: list[StashItemOut] = Field(default_factory=list)
     checklist: list[ChecklistItemOut] = Field(default_factory=list)
     expenses: list[ExpenseOut] = Field(default_factory=list)
+    messages: list[MessageOut] = Field(default_factory=list)
 
 
 class MatrixOut(BaseModel):

@@ -1,6 +1,8 @@
 import type { Ref } from 'vue'
 import { nextTick, watch } from 'vue'
 
+import { useReduceMotion } from '@/composables/useReduceMotion'
+
 /** 一次重排走 340ms：够看清「谁换到哪去了」，又不至于让人觉得系统在磨蹭。
  *  曲线就是 --ease-out 那一条，JS 里读不到 CSS 变量，只能抄一份。 */
 const DURATION_MS = 340
@@ -30,8 +32,9 @@ function rowKey(node: Element): string | null {
  * 顺序，届时 DOM 已经是新顺序了，差值≈0，不会二次动画。
  */
 export function useFlipList(container: Ref<HTMLElement | null>, keys: () => string[]) {
-  // WAAPI 建的动画不吃 CSS 的 prefers-reduced-motion 全局兜底，必须在 JS 侧自己挡一道。
-  const reduceMotion = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null
+  // WAAPI 建的动画不吃 CSS 的全局兜底，设置面板那一档也只能由 JS 看见：单一出口见
+  // composables/useReduceMotion。
+  const reduceMotion = useReduceMotion()
 
   watch(
     () => keys().join('|'),
@@ -39,7 +42,7 @@ export function useFlipList(container: Ref<HTMLElement | null>, keys: () => stri
       // 首帧不从这里过：列表还没渲染出 <ul> 时容器是 null，snapshot 落地的第一次
       // 填充因此不会拿到「旧位置」去比，也就不会给一批凭空出现的行做位移。
       const el = container.value
-      if (!el || reduceMotion?.matches) return
+      if (!el || reduceMotion.value) return
 
       const before = new Map<string, DOMRect>()
       for (const node of Array.from(el.children)) {

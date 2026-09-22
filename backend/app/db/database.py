@@ -120,6 +120,11 @@ class Database:
             conn.execute(
                 "ALTER TABLE trips ADD COLUMN budget_cents INTEGER NOT NULL DEFAULT 0"
             )
+        # M31 个人偏好：users 补一列整块 JSON。和上面几列一样，schema.sql 的
+        # CREATE TABLE IF NOT EXISTS 对已存在的表是空操作，所以老库必须走这条 ALTER。
+        user_cols = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+        if user_cols and "prefs" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN prefs TEXT NOT NULL DEFAULT '{}'")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=5.0)

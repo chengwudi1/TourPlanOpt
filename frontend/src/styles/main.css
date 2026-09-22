@@ -6,6 +6,15 @@
      文字分三层，只有前两层许给正文：--text-2 是 AA 底线（≥7:1 压在 surface-2 上），
      --text-3 在三种底面上都过 4.5，--text-faint 永远只做装饰（它到不了 4.5，别拿它写句子）。 */
   --bg: #fcf9f2;
+  /* ---------- 令牌之外的三处色值（改配色时必须一起改） ----------
+     CSS 变量出不了这个文件，所以浏览器自己的那几块底色只能各留一个字面值：
+     1. index.html 的 <meta name="theme-color"> —— 必须等于亮档的 --bg；深色由
+        stores/settings.ts 在主题解析后按当下 --bg 重写，所以它只在首绘前那一段是硬编码。
+     2. public/manifest.webmanifest 的 background_color 与 theme_color —— 等于亮档 --bg。
+        JSON 读不了变量，装机启动屏那一刻也没有 JS，这两个值就是深色用户开机看到的亮底；
+        这是可接受的代价，反过来（写深色值）会让默认亮档用户看到一屏脏黑。
+     3. mask-image 渐变里的 #000 —— 那是蒙版的形状不是颜色，全屏只有这一处。
+     除此之外屏幕上不许出现第四个硬编码色值。 */
   --surface: #fdfdfd;
   --surface-2: #f4f1e8;
   --surface-3: #e6e1d6;
@@ -56,7 +65,10 @@
        --ramp-N-soft 浅底（tinted 卡片背景）
        --ramp-N-deep 正文色（压在白底或浅底上的字，全部 ≥4.5:1）
        --ramp-N-ink  实心块上的字色——这条是硬规矩，按实测分：海蓝/公园绿/藕紫/玫红
-                     四档白字过 5.3:1，主干道橙与沙金只到 2.6 左右，必须用近黑墨字。 */
+                     四档白字过 5.3:1，主干道橙与沙金只到 2.6 左右，必须用近黑墨字。
+                     M32 的日色带把序号牌改成纯 --ramp-N-deep 大字之后，这一档暂时没有
+                     消费者。契约保留：以后再加实心色块，字色先查这条，别现场发明
+                     （见 docs/MASTHEAD-AND-RIBBON.md 第 7 节）。 */
   --ramp-1: #2e6eae;
   --ramp-1-soft: #dceafb;
   --ramp-1-deep: #1b5e93;
@@ -112,6 +124,10 @@
   --photo-scrim: rgba(24, 28, 30, 0.74);
   --photo-soon: #8a4a0c;
   --photo-live: #165c0a;
+  /* 「已过去」这一档比别名单独：首页那颗胶囊压在照片上，半透明才对；海报头的胶囊压在
+     票券的 --surface 上，半透明地压亮纸只合成出 4.17:1（白字，AA 正文不合格），压深纸
+     又和底几乎同色。所以这里是实心色，两档主题下都是它，白字 5.95:1。 */
+  --photo-past: #5f6467;
 
   --ok: #1d770e;
   --ok-soft: #ddeec3;
@@ -149,12 +165,17 @@
   /* ---------- 阶：字阶与字距 ----------
      字距必须双向：大字号收（-0.035em）、小字号放（+0.02em）。
      原先全站 letter-spacing 只有 1 处，这是「像后台系统」的第二大来源。 */
-  --t-hero: clamp(34px, 6vw, 52px);
-  --t-h1: 24px;
-  --t-h2: 17px;
-  --t-body: 15px;
-  --t-meta: 13px;
-  --t-micro: 11px;
+  /* 字号档位的缩放因子：settingsStore 按偏好写成 <html style="--fs-scale">，index.html
+     的内联脚本在首绘前先写一次（防闪）。三档是倍率 1 / 1.08 / 1.16，不是 +1px/+2px：
+     正文 15px 与 hero 52px 差三倍多，同一个加数在小字上是放大、在大字上是没变。
+     乘在这一层，组件里就不许出现第二处乘法——那 87 处硬编码 px 也是包成 calc(乘它)。 */
+  --fs-scale: 1;
+  --t-hero: calc(clamp(34px, 6vw, 52px) * var(--fs-scale));
+  --t-h1: calc(24px * var(--fs-scale));
+  --t-h2: calc(17px * var(--fs-scale));
+  --t-body: calc(15px * var(--fs-scale));
+  --t-meta: calc(13px * var(--fs-scale));
+  --t-micro: calc(11px * var(--fs-scale));
   --ls-display: -0.035em;
   --ls-tight: -0.015em;
   --ls-label: 0.02em;
@@ -195,6 +216,9 @@
   --dur-slow: 260ms;
   /* 入场比状态切换慢一倍：首屏那一下要「有重量」，不是闪出来。错峰步长给模板算 --i 用。 */
   --dur-entrance: 520ms;
+  /* 照片落位比文字再慢一档：图从 1.12 缩回 1.0 这件事要读得出「沉下来」，
+     跟票券同速的话两张卡就是一起闪现。只有海报头用。 */
+  --dur-photo: 860ms;
   --stagger: 62ms;
   /* 照片呼吸一个来回 22s——慢到注意力不会跟着它跑，但画面不再是死的。 */
   --dur-drift: 22s;
@@ -205,9 +229,13 @@
   /* 左栏宽度：390→400 那一版是给「一条搜索框独占一行」用的；现在搜索框要与「发现」
      开关并排，400px 下正文卡片会被啃得只剩两行字。 */
   --panel-w: 440px;
-  --header-h: 56px;
+  /* 两条横条里装的是文字，字号档一调它们必须跟着长，否则第一行字就被裁掉半截。
+     但它们是「吃掉视口的边栏」，所以各带一个上限（min()）：手机上一条无限长高的顶栏
+     会把地图挤没——上限取标准档 +12px，正好是最大档 1.16 也够用、又不再多的那一点。
+     两处消费者（布局与让位计算）都必须读这两个令牌，不许出现第二份 px。 */
+  --header-h: min(68px, calc(56px * var(--fs-scale)));
   /* 移动端底部 dock 的整条高度（不含安全区）。精灵靠它让位，所以两边共用这一个数。 */
-  --dock-h: 53px;
+  --dock-h: min(65px, calc(53px * var(--fs-scale)));
   /* 窄屏地点抽屉的高度：抽屉自己按它长，地图按它的一半抬起（选中的那一站要落在
      抽屉上方那条可见带里，而不是正好处在抽屉背后）。两处必须是同一个数。 */
   --place-sheet-h: 72dvh;
@@ -236,88 +264,87 @@
         换皮时那份算式要跟着重跑，算式与消费者绑在同一页里比散在 token 层更难被无声用错。
    要再加这种件，先回到这里登记一行，别在别的组件里现场发明。 */
 
-/* 深色模式：跟随系统。地图瓦片仍是亮色（行业惯例，叠加层已用 token），
-   其余界面全部走这里的变量。中性阶从亮纸翻成「夜航图」的蓝板岩（跟亮色同一批色相，
-   只是明度倒过来），描边墨 --ink 反过来是亮墨——贴纸风在深底上靠的是「比界面更亮的轮廓」，
-   不是阴影。 */
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --bg: #101418;
-    --surface: #171c21;
-    --surface-2: #1e252b;
-    --surface-3: #273038;
-    --surface-hover: #222a31;
-    --surface-selected: #12314a;
-    --border: #2b3540;
-    --border-faint: rgba(255, 255, 255, 0.07);
-    --hairline: rgba(255, 255, 255, 0.16);
-    --ink: #dbe6ef;
-    --text: #e9eef3;
-    --text-2: #b0bcc6;
-    --text-3: #8f9ba5;
-    --text-faint: #74818c;
-    --page-art: linear-gradient(180deg, rgba(255, 255, 255, 0.045),
-        rgba(255, 255, 255, 0) 340px), var(--bg);
-    /* 深色下 accent 走亮蓝（水系在夜航图上的那档蓝），实心上的字必须是近黑的墨：
-       白字压 #348ac9 只有 3.1:1，近黑墨是 4.85:1。正文级的蓝用 --accent-strong。 */
-    --accent: #348ac9;
-    --accent-strong: #72b0f4;
-    --accent-soft: #10293c;
-    --accent-ink: #041823;
-    --ember: #f0a35c;
-    --ember-deep: var(--ember);
-    --ember-soft: #3a2314;
-    --ember-ink: #2a1206;
-    /* 深色态 --ember-deep 反成浅橙（那是正文色），压它就得换回近黑的墨。 */
-    --ember-deep-ink: #2a1206;
-    /* 六色 ramp 在深底上换成瓦线的亮档，soft 档换成深色 tint。
-       deep 直接回指实心色——深色态下实心色本身就够亮，可以当正文用（实测最低 5.17:1）；
-       ink 反过来全部走近黑：中亮度的色块压在深底上，白字只有 2~3:1。 */
-    --ramp-1: #5591ce;
-    --ramp-1-soft: #10293c;
-    --ramp-1-deep: var(--ramp-1);
-    --ramp-1-ink: #06202e;
-    --ramp-2: #58b45a;
-    --ramp-2-soft: #10291d;
-    --ramp-2-deep: var(--ramp-2);
-    --ramp-2-ink: #06210f;
-    --ramp-3: #f0a35c;
-    --ramp-3-soft: #3a2314;
-    --ramp-3-deep: var(--ramp-3);
-    --ramp-3-ink: #2a1206;
-    --ramp-4: #e3c04a;
-    --ramp-4-soft: #33290f;
-    --ramp-4-deep: var(--ramp-4);
-    --ramp-4-ink: #2a1e02;
-    --ramp-5: #a99df0;
-    --ramp-5-soft: #241b32;
-    --ramp-5-deep: var(--ramp-5);
-    --ramp-5-ink: #180e24;
-    --ramp-6: #ef7466;
-    --ramp-6-soft: #351512;
-    --ramp-6-deep: var(--ramp-6);
-    --ramp-6-ink: #26070f;
-    /* 深色态八色都是暗身份盘，边界只能由这圈亮环画出来（环本身算过 ≥3:1）。 */
-    --avatar-ring: #5b6a76;
-    --ok: #5cb85c;
-    --ok-soft: #10291d;
-    --ok-border: #245033;
-    --warn: #e0a53a;
-    --warn-soft: #33260f;
-    --warn-border: #4d3d1d;
-    --danger: #ef7466;
-    --danger-soft: #351815;
-    --danger-border: #5a2a25;
-    --code-bg: rgba(255, 255, 255, 0.08);
-    /* 深底上第一段硬边要更实（黑），第二段负责把重量推开。 */
-    --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.5);
-    --shadow-md: 0 2px 0 rgba(0, 0, 0, 0.4), 0 8px 18px -12px rgba(0, 0, 0, 0.9);
-    --shadow-lg: 0 3px 0 rgba(0, 0, 0, 0.45), 0 18px 32px -16px rgba(0, 0, 0, 0.95);
-    --shadow-pop: 0 5px 0 rgba(0, 0, 0, 0.5), 0 26px 48px -22px rgba(0, 0, 0, 1);
-    --shadow-modal: 0 8px 0 rgba(0, 0, 0, 0.5), 0 40px 80px -28px rgba(0, 0, 0, 1);
-    --edge: inset 0 1px 0 rgba(255, 255, 255, 0.07);
-  }
+/* 深色模式：由 stores/settings.ts 解析后写成 <html data-theme="dark">，CSS 只认这
+   一个已解析值——偏好可以是「跟随系统」，但那件事归 JS 管，这里不出现第二处真源。
+   中性阶从亮纸翻成「夜航图」的蓝板岩（跟亮色同一批色相，只是明度倒过来），描边墨
+   --ink 反过来是亮墨——贴纸风在深底上靠的是「比界面更亮的轮廓」，不是阴影。
+   地图底图跟着一起翻，单一真源见 settingsStore.basemapDark。 */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #101418;
+  --surface: #171c21;
+  --surface-2: #1e252b;
+  --surface-3: #273038;
+  --surface-hover: #222a31;
+  --surface-selected: #12314a;
+  --border: #2b3540;
+  --border-faint: rgba(255, 255, 255, 0.07);
+  --hairline: rgba(255, 255, 255, 0.16);
+  --ink: #dbe6ef;
+  --text: #e9eef3;
+  --text-2: #b0bcc6;
+  --text-3: #8f9ba5;
+  --text-faint: #74818c;
+  --page-art: linear-gradient(180deg, rgba(255, 255, 255, 0.045),
+      rgba(255, 255, 255, 0) 340px), var(--bg);
+  /* 深色下 accent 走亮蓝（水系在夜航图上的那档蓝），实心上的字必须是近黑的墨：
+     白字压 #348ac9 只有 3.1:1，近黑墨是 4.85:1。正文级的蓝用 --accent-strong。 */
+  --accent: #348ac9;
+  --accent-strong: #72b0f4;
+  --accent-soft: #10293c;
+  --accent-ink: #041823;
+  --ember: #f0a35c;
+  --ember-deep: var(--ember);
+  --ember-soft: #3a2314;
+  --ember-ink: #2a1206;
+  /* 深色态 --ember-deep 反成浅橙（那是正文色），压它就得换回近黑的墨。 */
+  --ember-deep-ink: #2a1206;
+  /* 六色 ramp 在深底上换成瓦线的亮档，soft 档换成深色 tint。
+     deep 直接回指实心色——深色态下实心色本身就够亮，可以当正文用（实测最低 5.17:1）；
+     ink 反过来全部走近黑：中亮度的色块压在深底上，白字只有 2~3:1。 */
+  --ramp-1: #5591ce;
+  --ramp-1-soft: #10293c;
+  --ramp-1-deep: var(--ramp-1);
+  --ramp-1-ink: #06202e;
+  --ramp-2: #58b45a;
+  --ramp-2-soft: #10291d;
+  --ramp-2-deep: var(--ramp-2);
+  --ramp-2-ink: #06210f;
+  --ramp-3: #f0a35c;
+  --ramp-3-soft: #3a2314;
+  --ramp-3-deep: var(--ramp-3);
+  --ramp-3-ink: #2a1206;
+  --ramp-4: #e3c04a;
+  --ramp-4-soft: #33290f;
+  --ramp-4-deep: var(--ramp-4);
+  --ramp-4-ink: #2a1e02;
+  --ramp-5: #a99df0;
+  --ramp-5-soft: #241b32;
+  --ramp-5-deep: var(--ramp-5);
+  --ramp-5-ink: #180e24;
+  --ramp-6: #ef7466;
+  --ramp-6-soft: #351512;
+  --ramp-6-deep: var(--ramp-6);
+  --ramp-6-ink: #26070f;
+  /* 深色态八色都是暗身份盘，边界只能由这圈亮环画出来（环本身算过 ≥3:1）。 */
+  --avatar-ring: #5b6a76;
+  --ok: #5cb85c;
+  --ok-soft: #10291d;
+  --ok-border: #245033;
+  --warn: #e0a53a;
+  --warn-soft: #33260f;
+  --warn-border: #4d3d1d;
+  --danger: #ef7466;
+  --danger-soft: #351815;
+  --danger-border: #5a2a25;
+  --code-bg: rgba(255, 255, 255, 0.08);
+  /* 深底上第一段硬边要更实（黑），第二段负责把重量推开。 */
+  --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 2px 0 rgba(0, 0, 0, 0.4), 0 8px 18px -12px rgba(0, 0, 0, 0.9);
+  --shadow-lg: 0 3px 0 rgba(0, 0, 0, 0.45), 0 18px 32px -16px rgba(0, 0, 0, 0.95);
+  --shadow-pop: 0 5px 0 rgba(0, 0, 0, 0.5), 0 26px 48px -22px rgba(0, 0, 0, 1);
+  --shadow-modal: 0 8px 0 rgba(0, 0, 0, 0.5), 0 40px 80px -28px rgba(0, 0, 0, 1);
+  --edge: inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
 * {
@@ -545,7 +572,7 @@ textarea {
   gap: 5px;
 }
 .field > label {
-  font-size: 12px;
+  font-size: calc(12px * var(--fs-scale));
   font-weight: 700;
   /* 小号标签放字距，和大字号收字距是同一条规则的两端。 */
   letter-spacing: var(--ls-label);
@@ -601,7 +628,7 @@ textarea {
   padding: 10px 13px;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
 }
 .banner__body {
   flex: 1;
@@ -616,7 +643,7 @@ textarea {
 }
 .banner code {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--fs-scale));
   padding: 1px 5px;
   border-radius: 4px;
   background: var(--code-bg);
@@ -714,7 +741,7 @@ textarea {
     justify-content: center;
     gap: 6px;
     padding: 9px 0;
-    font-size: 14px;
+    font-size: calc(14px * var(--fs-scale));
     font-weight: 600;
     color: var(--text-2);
     background: var(--surface-2);
@@ -842,15 +869,8 @@ textarea {
 }
 /* 深色底的扫光另算一档：0.55 的白压在近黑的 surface-2 上是一道硬闪光，
    和它在浅奶油底上的观感完全不是一回事。 */
-@media (prefers-color-scheme: dark) {
-  .skeleton::after {
-    background: linear-gradient(
-      90deg,
-      transparent,
-      rgba(255, 255, 255, 0.08),
-      transparent
-    );
-  }
+:root[data-theme='dark'] .skeleton::after {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
 }
 @keyframes skeleton-sweep {
   from {
@@ -866,6 +886,9 @@ textarea {
   outline-offset: 2px;
 }
 
+/* 动效开关两写：媒体查询管「没 JS 也得保住」和首绘前那几毫秒，data-motion 管设置面板
+   里那一档「减少动效」。后者是已解析值，由 stores/settings.ts 与 index.html 的内联脚本
+   写（同 data-theme 的口径），所以这里依旧不出现「偏好」这个概念。 */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -873,6 +896,13 @@ textarea {
     animation: none !important;
     transition: none !important;
   }
+}
+
+:root[data-motion='off'] *,
+:root[data-motion='off'] *::before,
+:root[data-motion='off'] *::after {
+  animation: none !important;
+  transition: none !important;
 }
 
 /* ---------- presence ---------- */
@@ -891,7 +921,7 @@ textarea {
   border: 2px solid var(--avatar-ring);
   border-radius: 50%;
   color: var(--warp-ink);
-  font-size: 11px;
+  font-size: calc(11px * var(--fs-scale));
   font-weight: 700;
   /* 挂在 animation 而不是 transition 上：Vue 移动已有节点不会重放动画，所以只有
      「新加入的那个人」会弹一下，别人进出不会让整排头像集体重播。 */

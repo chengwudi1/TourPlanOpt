@@ -196,7 +196,7 @@ async function copyManual() {
   padding: 14px 16px 16px;
 }
 .dlg__msg {
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   line-height: 1.65;
   color: var(--text-2);
   /* 原生框能把「仅影响当前设备…」分段显示，换成 <p> 就全糊成一行——换行得自己认。 */
@@ -208,7 +208,7 @@ async function copyManual() {
 }
 .dlg__input {
   width: 100%;
-  font-size: 15px;
+  font-size: calc(15px * var(--fs-scale));
 }
 .dlg__input--unit {
   padding-right: 36px;
@@ -217,7 +217,7 @@ async function copyManual() {
   position: absolute;
   top: 50%;
   right: 12px;
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   color: var(--text-2);
   transform: translateY(-50%);
   pointer-events: none;
@@ -225,7 +225,7 @@ async function copyManual() {
 .dlg__text {
   width: 100%;
   font-family: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   line-height: 1.6;
   color: var(--text);
   resize: vertical;
@@ -234,11 +234,11 @@ async function copyManual() {
   word-break: break-all;
 }
 .dlg__err {
-  font-size: 12px;
+  font-size: calc(12px * var(--fs-scale));
   color: var(--danger);
 }
 .dlg__hint {
-  font-size: 12px;
+  font-size: calc(12px * var(--fs-scale));
   color: var(--text-2);
 }
 .dlg__btn {

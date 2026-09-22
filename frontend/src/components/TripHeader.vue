@@ -11,13 +11,18 @@ import {
   ImageDown,
   Link2,
   MapPin,
+  MessageSquare,
   Pencil,
+  Settings,
   ShieldCheck,
+  Sparkles,
   User,
 } from '@/components/icons'
 import { useAmapHealth } from '@/composables/useAmapHealth'
+import { useAssistantStore } from '@/stores/assistant'
 import { useAuthStore } from '@/stores/auth'
 import { useFeedbackStore } from '@/stores/feedback'
+import { useSettingsStore } from '@/stores/settings'
 import { useTripStore } from '@/stores/trip'
 import { anchorMenu, type MenuPosition } from '@/utils/anchorMenu'
 import { shareTripCard } from '@/utils/shareCard'
@@ -28,12 +33,24 @@ const props = defineProps<{
   presence: Presence[]
   selfId: string
   status: SocketStatus
+  /** 没看的那几句有几条，只决定徽标；入口本身常驻（见 chatBadge）。 */
+  chatUnread?: number
+  /** 海报头开着的时候这一行不再重复行程名：两块大字上下叠着，读起来像没排完版。 */
+  hideTitle?: boolean
 }>()
 
-const emit = defineEmits<{ share: []; rename: []; setCity: []; copyText: [] }>()
+const emit = defineEmits<{
+  share: []
+  rename: []
+  setCity: []
+  copyText: []
+  chat: []
+}>()
 
 const auth = useAuthStore()
 const store = useTripStore()
+const settings = useSettingsStore()
+const assistant = useAssistantStore()
 const router = useRouter()
 
 /** 登录页是整页路由：带上 next，登录成功后回到当前这段行程。 */
@@ -85,6 +102,11 @@ async function shareImage() {
     sharing.value = false
   }
 }
+
+/** 顶栏那枚气泡是窄屏唯一的聊天入口：没有未读也常驻，藏起来等于叫人再不来找这个功能。 */
+const chatBadge = computed(() =>
+  (props.chatUnread ?? 0) > 9 ? '9+' : String(props.chatUnread ?? 0),
+)
 
 const initials = computed(() =>
   props.presence.map((p) => ({
@@ -154,12 +176,14 @@ function closeMenu() {
   menuOpen.value = false
 }
 
-/** 菜单项一律先关再做事：动作可能弹出对话框或触发下载，留着菜单会挡住视线。 */
+/** 菜单项一律先关再做事：动作可能弹出对话框或触发下载，留着菜单会挡住视线。
+ *
+ *  只能直接做，不能 `return () => {...}`：模板里写的是 `@click="run(...)"`，Vue 会把这整段
+ *  表达式包进事件处理器，返回值没人调用——那样八行菜单全都会静默失效，点了什么反应都没有。
+ */
 function run(fn: () => void) {
-  return () => {
-    closeMenu()
-    fn()
-  }
+  closeMenu()
+  fn()
 }
 
 function onDocClick(e: MouseEvent) {
@@ -196,7 +220,7 @@ onBeforeUnmount(() => {
       <ArrowLeft :size="16" />
     </button>
 
-    <h1 class="triphead__name">
+    <h1 class="triphead__name" :class="{ 'triphead__name--quiet': hideTitle }">
       <button
         class="triphead__title tap-pad"
         type="button"
@@ -280,6 +304,17 @@ onBeforeUnmount(() => {
     </button>
 
     <button
+      class="iconbtn triphead__chat"
+      type="button"
+      :title="chatUnread ? `聊天 · ${chatBadge} 条没看` : '聊天'"
+      :aria-label="chatUnread ? `聊天，有 ${chatBadge} 条没看` : '聊天'"
+      @click="emit('chat')"
+    >
+      <MessageSquare :size="16" />
+      <span v-if="chatUnread" class="triphead__chat-n mono">{{ chatBadge }}</span>
+    </button>
+
+    <button
       ref="moreBtn"
       class="iconbtn triphead__more"
       type="button"
@@ -330,6 +365,20 @@ onBeforeUnmount(() => {
         <button class="tripmenu__item" type="button" role="menuitem" @click="run(toggleHealthPanel)">
           <ShieldCheck class="ic" :size="14" /> 地图服务 · {{ healthLabel }}
         </button>
+        <!-- 精灵收起来时，这里就是助手的唯一入口：少了右下角那个角标，待确认的条数改由这句文案报。 -->
+        <button
+          v-if="!settings.prefs.pet_visible"
+          class="tripmenu__item"
+          type="button"
+          role="menuitem"
+          @click="run(() => assistant.toggle(true))"
+        >
+          <Sparkles class="ic" :size="14" />
+          {{ assistant.pendingCount ? `行程助手 · ${assistant.pendingCount} 项待确认` : '行程助手' }}
+        </button>
+        <button class="tripmenu__item" type="button" role="menuitem" @click="run(() => settings.show())">
+          <Settings class="ic" :size="14" /> 设置
+        </button>
         <RouterLink v-if="!auth.user" class="tripmenu__item" :to="loginTo" role="menuitem">
           <User class="ic" :size="14" /> 登录账号（可选）
         </RouterLink>
@@ -366,9 +415,15 @@ onBeforeUnmount(() => {
   gap: 8px;
   align-items: baseline;
   min-width: 0;
-  font-size: 15px;
+  font-size: calc(15px * var(--fs-scale));
   font-weight: 600;
   line-height: 1.3;
+}
+
+/* 海报头接管行程名的那一段时间：display: none 才是真的下屏——它同时把这一层从朗读
+   顺序里摘掉，而屏幕上只留海报头那一枚 h1。重命名与改城市仍走「更多」菜单。 */
+.triphead__name--quiet {
+  display: none;
 }
 
 /* 标题本身是个按钮：可键盘聚焦、有可供性，不再只是「看起来像文字的地方」（O10）。 */
@@ -481,7 +536,7 @@ onBeforeUnmount(() => {
   place-items: center;
   width: 26px;
   height: 26px;
-  font-size: 12px;
+  font-size: calc(12px * var(--fs-scale));
   font-weight: 700;
   color: var(--warp-ink);
   border: 2px solid var(--surface);
@@ -519,6 +574,31 @@ onBeforeUnmount(() => {
 
 /* ---------- 「更多」菜单 ---------- */
 
+/* 窄屏的聊天入口。宽屏不画它：第四页签就在正下方，同一件事不需要在屏幕两头各说一遍。 */
+.triphead__chat {
+  position: relative;
+}
+
+.triphead__chat-n {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  min-width: 15px;
+  padding: 0 3px;
+  font-size: calc(10px * var(--fs-scale));
+  line-height: calc(15px * var(--fs-scale));
+  color: var(--accent-ink);
+  text-align: center;
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+}
+
+@media (min-width: 861px) {
+  .triphead__chat {
+    display: none;
+  }
+}
+
 .triphead__menu {
   position: fixed;
   z-index: var(--z-bar);
@@ -536,7 +616,7 @@ onBeforeUnmount(() => {
   align-items: center;
   padding: 8px 10px;
   color: var(--text);
-  font-size: 13px;
+  font-size: calc(13px * var(--fs-scale));
   text-align: left;
   text-decoration: none;
   background: none;
@@ -575,7 +655,9 @@ onBeforeUnmount(() => {
   .triphead__login,
   .triphead__user,
   .avatars,
-  .triphead > .iconbtn:not(.triphead__back):not(.triphead__more):not(.triphead__health) {
+  .triphead > .iconbtn:not(.triphead__back):not(.triphead__more):not(.triphead__health):not(
+      .triphead__chat
+    ) {
     display: none;
   }
 

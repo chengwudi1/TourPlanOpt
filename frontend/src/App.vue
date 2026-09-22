@@ -2,6 +2,7 @@
 import { RouterView } from 'vue-router'
 
 import DialogHost from '@/components/DialogHost.vue'
+import SettingsPanel from '@/components/SettingsPanel.vue'
 import ToastHost from '@/components/ToastHost.vue'
 </script>
 
@@ -14,8 +15,9 @@ import ToastHost from '@/components/ToastHost.vue'
       <component :is="Component" />
     </Transition>
   </RouterView>
-  <!-- 回执与对话框属于应用，不属于某个视图：换页时不该跟着闪掉，
+  <!-- 回执、对话框与设置面板属于应用，不属于某个视图：换页时不该跟着闪掉，
        也不能落进上面那个带 transform 的过渡容器里。 -->
   <ToastHost />
   <DialogHost />
+  <SettingsPanel />
 </template>

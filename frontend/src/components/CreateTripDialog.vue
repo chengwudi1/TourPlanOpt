@@ -2,11 +2,12 @@
 import { computed, ref } from 'vue'
 
 import AppModal from '@/components/AppModal.vue'
-import SegmentedControl, { type SegOption } from '@/components/SegmentedControl.vue'
+import SegmentedControl from '@/components/SegmentedControl.vue'
 import { ArrowRight, Check, ChevronDown, Link2, LoaderCircle, MapPin } from '@/components/icons'
 import { useCopy } from '@/composables/useCopy'
 import type { TravelMode, TripCreateResult } from '@/types/domain'
 import { ApiError, apiFetch, postJson } from '@/utils/api'
+import { TRAVEL_MODE_OPTIONS, TRAVEL_MODE_TEXT } from '@/utils/tripmodes'
 import { parseHHMM } from '@/utils/time'
 
 /**
@@ -26,14 +27,6 @@ const emit = defineEmits<{
   done: [tripId: string],
   cancel: []
 }>()
-
-const MODES: readonly SegOption[] = [
-  { value: 'driving', label: '驾车 / 打车', hint: '按真实路况计算' },
-  { value: 'walking', label: '步行', hint: '适合城市漫步' },
-  { value: 'straight', label: '直线', hint: '即时返回，不占地图额度' },
-]
-
-const MODE_TEXT: Record<string, string> = { driving: '驾车', walking: '步行', straight: '直线' }
 
 const title = ref('')
 const city = ref('')
@@ -105,7 +98,7 @@ const builtLine = computed(() => {
   }
   parts.push(`${trip.day_count} 天`)
   if (city.value.trim()) parts.push(city.value.trim())
-  parts.push(MODE_TEXT[travelMode.value] ?? travelMode.value)
+  parts.push(TRAVEL_MODE_TEXT[travelMode.value])
   if (dayStart.value) parts.push(`每天 ${dayStart.value} 开始`)
   return parts.join(' · ')
 })
@@ -258,12 +251,12 @@ function openPasted() {
 
           <div class="opt__cell">
             <span class="opt__label">默认交通方式</span>
-            <SegmentedControl v-model="travelMode" :options="MODES" label="默认交通方式" />
+            <SegmentedControl v-model="travelMode" :options="TRAVEL_MODE_OPTIONS" label="默认交通方式" />
           </div>
 
           <p class="tiny muted opt__note">
             {{ hasOptions
-              ? '行程名称、城市与每天的安排都能在行程页改；交通方式与每日开始跟助手说一声即可调整。'
+              ? '行程名称、城市与每天的安排都能在行程页改；交通方式与每日开始在「设置」里改，也能跟助手说一声。'
               : '都留空也行：1 天、每天 09:00 开始、按驾车算路线，日期不填就不给每天排日期。' }}
           </p>
         </div>
@@ -340,7 +333,7 @@ function openPasted() {
 }
 
 .tf__label {
-  font-size: 12px;
+  font-size: calc(12px * var(--fs-scale));
   font-weight: 600;
   color: var(--text-2);
 }
@@ -350,7 +343,7 @@ function openPasted() {
 .tf__input {
   padding: 2px 0 9px;
   font-family: inherit;
-  font-size: 19px;
+  font-size: calc(19px * var(--fs-scale));
   font-weight: 600;
   color: var(--text);
   background: transparent;
@@ -396,7 +389,7 @@ function openPasted() {
 }
 
 .opt__label {
-  font-size: 12px;
+  font-size: calc(12px * var(--fs-scale));
   font-weight: 600;
   color: var(--text-2);
   white-space: nowrap;
@@ -446,7 +439,7 @@ function openPasted() {
   display: grid;
   place-items: center;
   height: 30px;
-  font-size: 15px;
+  font-size: calc(15px * var(--fs-scale));
   color: var(--text-2);
   background: transparent;
   border: 0;
@@ -469,7 +462,7 @@ function openPasted() {
 }
 
 .stepper__value {
-  font-size: 14px;
+  font-size: calc(14px * var(--fs-scale));
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   text-align: center;
@@ -524,7 +517,7 @@ function openPasted() {
   align-items: center;
   align-self: flex-start;
   padding: 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--fs-scale));
   color: var(--text-2);
   background: transparent;
   border: 0;
@@ -564,7 +557,7 @@ function openPasted() {
 }
 
 .done__title {
-  font-size: 21px;
+  font-size: calc(21px * var(--fs-scale));
   font-weight: 700;
   line-height: 1.3;
   color: var(--text);
@@ -591,7 +584,7 @@ function openPasted() {
 .done__url {
   overflow: hidden;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--fs-scale));
   color: var(--text-2);
   text-overflow: ellipsis;
   white-space: nowrap;
