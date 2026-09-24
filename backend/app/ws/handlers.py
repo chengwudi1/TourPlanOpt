@@ -200,7 +200,10 @@ async def _resync(conn: ClientConnection) -> Dispatch:
     if snapshot is None:
         conn.send_json(error_frame("这份行程不存在，可能已被删除"))
         return Dispatch.CLOSED
-    seq = await next_seq(db, conn.trip_id)
+    # 与 welcome 同语义：快照是一个读数，不是一次广播事件，不许消耗 seq。
+    # 用 next_seq 会凭空吃掉一个号，房里其他成员从没见过它，下一帧就会让他们误判出
+    # seq 空洞而各自触发一次 resync。
+    seq = await current_seq(db, conn.trip_id)
     conn.send_json(
         protocol.welcome_frame(
             seq,

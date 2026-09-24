@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     # Self-imposed ceiling, deliberately well under the account cap.
     amap_qps_limit: int = 3
     amap_timeout_s: float = 8.0
+    # 距离缓存的保质期。此前永不过期：新路、限行、单行道翻转会把一次实测冻成永久事实，
+    # 负缓存更是把一次偶发的 20800 判成死刑。90 天是「路况可变窗口」与「配额」的折中，
+    # 到期只当未命中，下次 optimize 自然补实测，不删行。
+    amap_cache_ttl_days: int = 90
 
     # --- 对话式助手：OpenAI 兼容的 chat/completions ------------------------------------
     # 默认是智谱的免费模型 GLM-4-Flash。指向本地 Ollama 时（LLM_BASE_URL=
@@ -88,6 +92,15 @@ class Settings(BaseSettings):
     ws_rate_limit_frames: int = 200
 
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    # WS 握手的 Origin 白名单（在 cors_origins 之外追加）。浏览器发的 WS 请求一定带
+    # Origin，非浏览器客户端（探针、脚本）不带——不带就放行，带就必须命中：
+    # 这条闸挡的是恶意网页借用户浏览器对公网房间发起的跨站连入。
+    # 本机部署靠同源即可命中；Caddy 反代后 Host 会变成上游地址，公网域名要写进这里。
+    ws_allowed_origins: list[str] = []
+
+    # /docs、/redoc、/openapi.json：给开发期自查用。公网默认关——挂着等于把整张
+    # API 面客清单白送给扫描器。本地要看就在 .env 里 EXPOSE_DOCS=true。
+    expose_docs: bool = False
 
     # A1: when frontend/dist exists it is served from this port (single-origin deploy).
     frontend_dist: Path = FRONTEND_DIST

@@ -330,9 +330,15 @@ async def _day_add(
     conn: ClientConnection, hub: TripHub, db, client_id: str, op_id: str, data: dict
 ) -> None:
     trip_id = conn.trip_id
+    # create_day 是内部路径，不经过 patch 白名单，所以这两道闸在这一层补：
+    # 标题限长；日期过唯一判据——往 TEXT 日期列塞一条「10月1日」，
+    # 首页按字典序取的起止日期就会整段跳坏。
     title = str(data.get("title") or "")
-    date = data.get("date")
-    day = await repositories.create_day(db, trip_id, title, str(date) if date else None)
+    if len(title) > 120:
+        await _reject(conn, op_id, "bad_payload")
+        return
+    date = repositories.normalize_day_date(data.get("date"))
+    day = await repositories.create_day(db, trip_id, title, date)
     if day is None:
         await _reject(conn, op_id, "trip_not_found")
         return

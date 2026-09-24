@@ -55,6 +55,10 @@ _REMOVE_TRIGGERS = re.compile(
 )
 # 元词指的是那张清单本身，不是清单里的某一条：「防晒霜的待办」内容是防晒霜。
 _META_WORDS = re.compile(r"待办|待办事项|清单|备忘|事项")
+# 疑问句不是指令：「明天想去哪里玩」要的是推荐，不是往行程里塞一个叫「哪里玩」的假地点。
+_INTERROGATIVE = re.compile(r"哪|什么|啥|多少|几点|干嘛|做什么")
+# 剥掉填充词后只剩这类元词时，说的是「一个地点」这件事，而不是地点本身的名字。
+_PLACE_META = re.compile(r"^(?:那个|这个|那|这)?(?:地点|地方|景点|位置|去处)$")
 
 _CN_DIGIT = {
     "零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
@@ -245,6 +249,9 @@ def _strip_noise(clause: str) -> str:
 
 
 def _amount(clause: str) -> float | None:
+    # 时长先摘走：「门票花了20分钟」「午饭吃了一个小时」里的数在 _EXPENSE 眼里是钱，其实是
+    # 时长。_DURATION_WORDS 连数字带单位一起吞，_AND_HALF 吞「一个半小时」这种半截写法。
+    clause = _AND_HALF.sub("", _DURATION_WORDS.sub("", clause))
     match = _EXPENSE.search(clause)
     if match:
         for group in match.groups():
@@ -415,6 +422,10 @@ def _parse_clause(clause: str, existing: list[str]) -> Intent | None:  # noqa: C
             start_clock=fmt_clock(clock) if clock is not None else "",
         )
     if explicit_add or re.search(r"(去|到|玩|想)", clause):
+        # 问句 / 只剩元词不是指令：「明天想去哪里玩」「今天加个地点」要的是推荐，不是往行程里
+        # 塞一个叫「哪里玩」「地点」的假地点（还会白烧一次高德、逼用户点撤销）。
+        if _INTERROGATIVE.search(place) or _PLACE_META.match(place):
+            return None
         return Intent(
             kind="place_add",
             name=place[:120],

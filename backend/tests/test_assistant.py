@@ -320,6 +320,32 @@ def test_spoken_shapes_the_word_table_missed() -> None:
     assert first("买3张门票") is None
 
 
+def test_duration_and_questions_not_misread_as_money_or_places() -> None:
+    """两处静默错认的反向钉桩（比不认更贵：人会照着确认点一个自己没说过的动作）。
+
+    「门票花了20分钟」以前记成 ¥20、「午饭吃了一个小时」记成 ¥1；「明天想去哪里玩」以前
+    新增一个叫「哪里玩」的地点、还白烧一次高德。钉住不认的同时，保证正常句子没被误伤。
+    """
+    known = ["鸡鸣寺", "明城墙"]
+
+    def kinds(text: str) -> list[str]:
+        return [i.kind for i in parse_rules(text, known)]
+
+    # 时长不是钱：
+    assert kinds("门票花了20分钟") == []
+    assert kinds("午饭吃了一个小时") == []
+    # 真钱照记：
+    assert kinds("门票花了240") == ["expense_add"]
+    assert kinds("打车花了88.5") == ["expense_add"]
+
+    # 问句 / 只剩元词不是加地点：
+    assert kinds("明天想去哪里玩") == []
+    assert kinds("加个地点") == []
+    # 真实加地点不受牵连（「南京」是南不是疑问哪）：
+    assert kinds("加个鸡鸣寺") == ["place_add"]
+    assert kinds("想去南京路") == ["place_add"]
+
+
 # -- 兑现器：模型说什么都不直信 --------------------------------------------------------------
 
 

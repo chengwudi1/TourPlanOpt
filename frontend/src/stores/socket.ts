@@ -40,9 +40,24 @@ export const useSocketStore = defineStore('socket', () => {
     if (tripId === id && (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING))) {
       return
     }
+    // 换房间：先把旧 ws 的 handler 逐个摘掉再关，否则它的 onclose 会在新连接已建好后
+    // 把 ws 置 null 并重新起一条重连链，旧房间的 op 也会一路写进当前这份 store。
+    if (ws) {
+      ws.onclose = null
+      ws.onmessage = null
+      ws.onerror = null
+      ws.onopen = null
+      try {
+        ws.close()
+      } catch {
+        /* 已经关了 */
+      }
+      ws = null
+    }
     tripId = id
     closedByUs = false
     fatalError.value = null
+    attempt = 0
     openSocket()
   }
 
@@ -322,6 +337,8 @@ export const useSocketStore = defineStore('socket', () => {
     disconnect,
     sendOp,
     sendPresence,
+    /** 乐观写被拒且无权威回数组时，重连重取快照把本地收敛回服务端真相——统一回滚出口。 */
+    resync: reconnectForce,
   }
 })
 

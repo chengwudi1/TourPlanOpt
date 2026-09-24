@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { RouterView } from 'vue-router'
+import { RouterView, useRoute } from 'vue-router'
 
 import DialogHost from '@/components/DialogHost.vue'
 import SettingsPanel from '@/components/SettingsPanel.vue'
 import ToastHost from '@/components/ToastHost.vue'
+
+const route = useRoute()
 </script>
 
 <template>
@@ -12,7 +14,9 @@ import ToastHost from '@/components/ToastHost.vue'
        （FAB、通知）改以页面为参照，滚动一下就跑到文档底部去了。 -->
   <RouterView v-slot="{ Component }">
     <Transition name="view" mode="out-in">
-      <component :is="Component" />
+      <!-- 按 fullPath 加 key：/trip/A↔/trip/B 只差参数时 Vue 默认复用同一 TripView 实例，
+           onMounted/onBeforeUnmount 不重跑，房间连接和 store 数据会停在上一趟行程。 -->
+      <component :is="Component" :key="route.fullPath" />
     </Transition>
   </RouterView>
   <!-- 回执、对话框与设置面板属于应用，不属于某个视图：换页时不该跟着闪掉，

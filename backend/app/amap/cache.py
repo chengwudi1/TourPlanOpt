@@ -12,12 +12,20 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
+from app.config import settings
 from app.db.database import Database
 from app.util.coords import Coord
 from app.util.timefmt import now_iso
 
 COORD_SCALE = 100_000
+
+
+def _fetched_at_cutoff() -> str:
+    """fetched_at 全是 `now_iso()` 写的 UTC 串（同格式同偏移），字典序即时间序。"""
+    stale_before = datetime.now(UTC) - timedelta(days=settings.amap_cache_ttl_days)
+    return stale_before.isoformat(timespec="seconds")
 
 
 def round_key(c: Coord) -> tuple[int, int]:
@@ -63,18 +71,21 @@ class DistanceCache:
             by_origin.setdefault(round_key(o), []).append(round_key(d))
 
         found: dict[tuple[int, int, int, int, int], CacheEntry] = {}
+        cutoff = _fetched_at_cutoff()
 
         def _load(conn):
             rows = []
             for (o_lng, o_lat), dests in by_origin.items():
                 row_placeholders = ",".join("(?, ?)" for _ in dests)
+                # fetched_at >= cutoff 让 TTL 到期的高德结果视同未命中：道路与限行会变，
+                # 一条永远不过期的实测耗时会把旧路况冻死。过期的行留着，下次实测 upsert 覆盖。
                 query = (
                     "SELECT o_lng_r, o_lat_r, d_lng_r, d_lat_r, mode, distance_m, duration_s,"
                     " ok, infocode FROM amap_distance_cache"
-                    " WHERE o_lng_r = ? AND o_lat_r = ? AND mode = ?"
+                    " WHERE o_lng_r = ? AND o_lat_r = ? AND mode = ? AND fetched_at >= ?"
                     f" AND (d_lng_r, d_lat_r) IN ({row_placeholders})"
                 )
-                params: list = [o_lng, o_lat, mode]
+                params: list = [o_lng, o_lat, mode, cutoff]
                 for d_lng, d_lat in dests:
                     params.extend([d_lng, d_lat])
                 rows.extend(conn.execute(query, params).fetchall())

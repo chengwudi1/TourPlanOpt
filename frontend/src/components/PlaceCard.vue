@@ -121,6 +121,15 @@ function esc(on: boolean) {
 
 watch(inlineOpen, (on) => esc(on), { immediate: true })
 onBeforeUnmount(() => esc(false))
+
+/** 键盘选中：Enter/空格与点击同义。只认落在卡片本身上的按键，编辑器的键不归这里管。 */
+function onCardKeydown(e: KeyboardEvent) {
+  if (e.target !== e.currentTarget) return
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    emit('select', props.place)
+  }
+}
 </script>
 
 <template>
@@ -129,7 +138,10 @@ onBeforeUnmount(() => esc(false))
     :class="{ 'place--active': active }"
     :style="ringStyle"
     :data-place-id="place.id"
+    tabindex="0"
+    :aria-label="`第 ${index + 1} 站：${place.name}`"
     @click="emit('select', place)"
+    @keydown="onCardKeydown"
     @contextmenu.prevent="emit('menu', place, { x: $event.clientX, y: $event.clientY })"
     @pointerdown="pressStart"
     @pointerup="pressCancel"
@@ -522,8 +534,15 @@ onBeforeUnmount(() => esc(false))
 }
 
 .place:hover .place__side,
+.place:focus-within .place__side,
 .place--active .place__side {
   opacity: 1;
+}
+
+/* 键盘落点：整卡可聚焦，聚焦时给一圈主色描边；否则「tab 到哪张卡」无从看出。 */
+.place:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .place__close,

@@ -7,6 +7,7 @@ add it there -- tests/test_protocol.py asserts the two stay in sync.
 from __future__ import annotations
 
 import json
+import math
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -252,9 +253,11 @@ class ExpenseOut(BaseModel):
 class MessageIn(BaseModel):
     """一句留言的入参。锚点最多一个：挂了地点就不再挂天。"""
 
+    # 文本长度不在这里拦：聊天的既有设计是「超长截断落库」（repositories.MESSAGE_TEXT_MAX），
+    # 一句太长的话该被剪短发出去，而不是被拒发。锚点 id 才是真闸——它们要进查询与广播。
     text: str
-    ref_place_id: str = ""
-    ref_day_id: str = ""
+    ref_place_id: str = Field(default="", max_length=64)
+    ref_day_id: str = Field(default="", max_length=64)
 
 
 class MessageOut(BaseModel):
@@ -341,8 +344,8 @@ class TripCreate(BaseModel):
     """Everything except `title` is optional on purpose: the create sheet must be able
     to build a trip with a single tap and enrich it later inside the trip."""
 
-    title: str = ""
-    city: str = ""
+    title: str = Field(default="", max_length=120)
+    city: str = Field(default="", max_length=60)
     travel_mode: TravelMode = TravelMode.DRIVING
     days: int = 1
     start_date: str | None = None  # 'YYYY-MM-DD'; junk is ignored, never rejected
@@ -362,30 +365,51 @@ class ParticipantUpsert(BaseModel):
     color: str = ""
 
 
-class StashCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
+class _CoordFields(BaseModel):
+    """坐标是唯一能把整趟行程打死的数值：非有限值一旦落库，WS 广播的 json.dumps 会写出裸
+    Infinity/NaN，浏览器 JSON.parse 直接抛错，该行程对所有协作者永久打不开且无法自救。
+    所以在一切不可信入口先拒掉。"""
+
     lng: float
     lat: float
-    address: str = ""
-    amap_poi_id: str = ""
-    added_by: str = ""
-    photo_url: str = ""
+
+    @field_validator("lng")
+    @classmethod
+    def _lng_finite(cls, v: float) -> float:
+        if not math.isfinite(v) or not -180.0 <= v <= 180.0:
+            raise ValueError("经度必须是 -180~180 之间的有限数值")
+        return v
+
+    @field_validator("lat")
+    @classmethod
+    def _lat_finite(cls, v: float) -> float:
+        if not math.isfinite(v) or not -90.0 <= v <= 90.0:
+            raise ValueError("纬度必须是 -90~90 之间的有限数值")
+        return v
 
 
-class PlaceCreate(BaseModel):
+class StashCreate(_CoordFields):
     name: str = Field(min_length=1, max_length=120)
-    lng: float
-    lat: float
-    address: str = ""
-    amap_poi_id: str = ""
+    # 长度闸的分工：patch 侧由仓储的 _bounded_text 拦，add 侧（这里）由模型拦。
+    # 数字与前端输入框的 maxlength 同源，浏览器计数（UTF-16）只会比 Python 更严。
+    address: str = Field(default="", max_length=300)
+    amap_poi_id: str = Field(default="", max_length=64)
+    added_by: str = Field(default="", max_length=64)
+    photo_url: str = Field(default="", max_length=500)
+
+
+class PlaceCreate(_CoordFields):
+    name: str = Field(min_length=1, max_length=120)
+    address: str = Field(default="", max_length=300)
+    amap_poi_id: str = Field(default="", max_length=64)
     duration_min: int = Field(default=60, ge=0, le=24 * 60)
-    note: str = ""
-    added_by: str = ""
+    note: str = Field(default="", max_length=2000)
+    added_by: str = Field(default="", max_length=64)
     after_place_id: str | None = None
     # 绝对插入下标：撤销删除要把行放回原位，而一天里的第一个地点没有 after_place_id 可指。
     # 越界由仓储层夹到端点，所以这里不设 bounds。
     position: int | None = None
-    photo_url: str = ""
+    photo_url: str = Field(default="", max_length=500)
 
 
 class ChecklistAdd(BaseModel):
@@ -403,9 +427,9 @@ class ExpenseCreate(BaseModel):
     title: str = Field(min_length=1, max_length=80)
     # 分、整数、必为正。上限只是挡手滑（多打六个 0），真实旅行开销碰不到。
     amount_cents: int = Field(ge=1, le=1_000_000_000)
-    category: str = "other"
-    paid_by: str = ""
-    paid_by_name: str = ""
+    category: str = Field(default="other", max_length=40)
+    paid_by: str = Field(default="", max_length=64)
+    paid_by_name: str = Field(default="", max_length=60)
     split_ids: list[str] = Field(default_factory=list, max_length=40)
 
 
@@ -416,8 +440,8 @@ class TripPatch(BaseModel):
     前者不该改动任何东西，后者是一个真实的清空意图。
     """
 
-    title: str | None = None
-    city: str | None = None
+    title: str | None = Field(default=None, max_length=120)
+    city: str | None = Field(default=None, max_length=60)
     # 与 `TRIP_PATCH_FIELDS` 同源：那一边收这一列（空串 = 恢复默认封面），这边就必须声明，
     # 否则 pydantic 把它当多余字段丢掉，route 仍回 200 而库里一个字没动。
     cover_url: str | None = None

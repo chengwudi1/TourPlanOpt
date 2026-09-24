@@ -34,26 +34,56 @@ function randomName(): string {
   return `${a}${b}`
 }
 
+// Safari 无痕模式下 sessionStorage 的读写会抛 SecurityError。裸调用会在 onopen 里抛出，
+// 连 HELLO 都发不出去、永远连不上房间。退一步：可用就持久化，抛错就用本次页面加载内的
+// 内存兜底（重新加载会换个新访客，也远比整页连不上好）。
+const memoryStore = new Map<string, string>()
+
+export function sessionGet(key: string): string | null {
+  try {
+    return sessionStorage.getItem(key)
+  } catch {
+    return memoryStore.get(key) ?? null
+  }
+}
+
+export function sessionSet(key: string, value: string): void {
+  memoryStore.set(key, value)
+  try {
+    sessionStorage.setItem(key, value)
+  } catch {
+    /* 无痕模式：只在本页面加载内保住身份，不崩。 */
+  }
+}
+
+function sGet(key: string): string | null {
+  return sessionGet(key)
+}
+
+function sSet(key: string, value: string): void {
+  sessionSet(key, value)
+}
+
 export function getClientId(): string {
-  let id = sessionStorage.getItem(ID_KEY)
+  let id = sGet(ID_KEY)
   if (!id) {
     id = randomId()
-    sessionStorage.setItem(ID_KEY, id)
+    sSet(ID_KEY, id)
   }
   return id
 }
 
 export function getClientName(): string {
-  let name = sessionStorage.getItem(NAME_KEY)
+  let name = sGet(NAME_KEY)
   if (!name) {
     name = randomName()
-    sessionStorage.setItem(NAME_KEY, name)
+    sSet(NAME_KEY, name)
   }
   return name
 }
 
 export function setClientName(name: string): void {
-  sessionStorage.setItem(NAME_KEY, name.trim() || randomName())
+  sSet(NAME_KEY, name.trim() || randomName())
 }
 
 /** Stable per-tab identity, safe to call anywhere. */

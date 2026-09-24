@@ -240,10 +240,14 @@ async function hydrate() {
 async function refresh() {
   recent.value = readRecentTrips()
   hidden.value = readHiddenTrips()
-  await auth.load()
-  serverTrips.value = auth.user ? await auth.myTrips().catch(() => [] as MyTrip[]) : []
-  await hydrate()
-  loading.value = false
+  try {
+    await auth.load()
+    serverTrips.value = auth.user ? await auth.myTrips().catch(() => [] as MyTrip[]) : []
+    await hydrate()
+  } finally {
+    // 任何一步翻车都不能把骨架永远留在屏上：加载态必须落地。
+    loading.value = false
+  }
 }
 
 /**
@@ -391,6 +395,15 @@ onMounted(() => {
 
     <div class="home__wrap">
       <main class="home__main">
+        <!-- 首屏取数期间不能整块留白：那看起来像坏了。骨架先占住门面与网格的位置，
+             眼睛有的等，列表回来再原位换成真卡。 -->
+        <div v-if="loading && !trips.length" class="home__loading" aria-label="正在加载行程" aria-busy="true">
+          <div class="skeleton" style="height: 170px" />
+          <div class="sec__grid">
+            <div v-for="i in 4" :key="i" class="skeleton" style="height: 168px" />
+          </div>
+        </div>
+
         <div v-if="trips.length" class="tabs reveal reveal--fade" :style="{ '--base': '40ms' }">
           <SegmentedControl v-model="tabModel" :options="tabOptions" label="行程状态" />
         </div>
@@ -519,7 +532,11 @@ onMounted(() => {
           </p>
         </section>
 
-        <p v-if="summaryError" class="tiny home__note">{{ summaryError }}，行程内容加载失败，请稍后重试。</p>
+        <p v-if="summaryError" class="tiny home__note">
+          {{ summaryError }}，行程内容加载失败。
+          <!-- 「稍后重试」却不给键：就地放一颗重试，别让用户自己想起来刷新整页。 -->
+          <button class="btn btn--sm btn--ghost" type="button" @click="hydrate">重试</button>
+        </p>
       </main>
 
       <aside class="home__side">
@@ -1000,11 +1017,21 @@ onMounted(() => {
   display: none;
 }
 .home__note {
+  display: flex;
+  gap: 8px;
+  align-items: center;
   padding: 8px 10px;
   color: var(--warn);
   background: var(--warn-soft);
   border: 1px solid var(--warn-border);
   border-radius: var(--radius-sm);
+}
+
+/* 首屏骨架：门面一条 + 网格四张，位置和真卡一致，换成内容时不跳版。 */
+.home__loading {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 /* ---------- FAB ---------- */

@@ -33,6 +33,25 @@ WALKING_MAX_M = 5_000.0
 # this bounds in-flight HTTP work.
 MAX_COLUMN_CONCURRENCY = 3
 
+# -- distance single-flight -------------------------------------------------------------
+# cache.put 要等整列 gather 完才落盘，两个人同刻 optimize 会双双未命中、把同一批坐标
+# 烧两遍配额。这里把在途调用按 (origins, destination, mode) 去重：后来者复用发起者的结果。
+_inflight: dict[tuple, asyncio.Task] = {}
+
+
+async def _distance_shared(
+    client: AmapWebClient, batch: list[Coord], destination: Coord, mode: int
+) -> list:
+    key = (tuple(batch), tuple(destination), mode)
+    loop = asyncio.get_running_loop()
+    task = _inflight.get(key)
+    if task is None or task.get_loop() is not loop:
+        task = loop.create_task(client.distance(batch, destination, mode))
+        _inflight[key] = task
+        task.add_done_callback(lambda _t, k=key, t=task: _inflight.pop(k, None) if _inflight.get(k) is t else None)
+    # shield：等待者被断开（客户端跳页/取消）不许掐掉别人正等的那次已付费调用。
+    return await asyncio.shield(task)
+
 
 @dataclass(slots=True)
 class MatrixResult:
@@ -190,7 +209,7 @@ async def build_matrix(
             results = []
             for start in range(0, len(origin_coords), MAX_ORIGINS_PER_CALL):
                 batch = origin_coords[start : start + MAX_ORIGINS_PER_CALL]
-                results.extend(await client.distance(batch, destination, amap_mode))
+                results.extend(await _distance_shared(client, batch, destination, amap_mode))
                 api_calls += 1
         for origin_index, res in enumerate(results):
             i = origins[origin_index]
@@ -215,10 +234,27 @@ async def build_matrix(
         if progress is not None:
             progress(columns_done, columns_total)
 
-    await asyncio.gather(*(column(j, origins) for j, origins in missing_by_dest.items()))
+    # 未命中的格子先置 None：某列实时调用失败时会留下初值 0，solver 会把「0 成本」当相邻
+    # 直接排过去，比 None（判不可达）更坏。
+    for j, origins in missing_by_dest.items():
+        for i in origins:
+            result.seconds[i][j] = None
 
+    outcomes = await asyncio.gather(
+        *(column(j, origins) for j, origins in missing_by_dest.items()),
+        return_exceptions=True,
+    )
+
+    # 先落盘已付费且成功的列，再谈报错：不这样做时一列失败抛异常会跳过 cache.put，
+    # 成功那几十次调用既白烧配额、下次 optimize 又要重烧一遍。
     if store_rows:
         await cache.put(store_rows)
+
+    failures = [o for o in outcomes if isinstance(o, BaseException)]
+    if failures and len(failures) == len(outcomes):
+        raise failures[0]
+    if failures:
+        result.warnings.append(f"{len(failures)} 个目的地调用高德失败，已按不可达处理")
 
     result.api_calls = api_calls
     return result

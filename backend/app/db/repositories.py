@@ -475,13 +475,24 @@ def _text(value: object) -> str:
     return "" if value is None else str(value)
 
 
-def _coerce_day_date(value: object) -> str | None:
-    """天日期只存规范的 ``YYYY-MM-DD``，读不懂就当「没填」。
+def _bounded_text(max_len: int) -> Callable[[object], str]:
+    """自由文本列的长度闸。上限拦的是**绕开前端直接打接口**的写入：一段几 KB 的「地点名」
+    会随每次快照与广播原样放大给房里所有人。超了就拒（抛 ValueError，整笔 patch 记
+    ``bad_patch``）而不是悄悄截断——被拒的那一笔用户在界面上看得见，截断的那一笔只会
+    在别人屏幕上少掉尾巴。"""
 
-    日期是 TEXT 列，首页的起止日期靠 ``MIN(date)`` / ``MAX(date)`` 按字典序取。混进一条
-    空串或「10月1日」，整段行程的倒计时就会消失或跳到别处去，而这颗雷是某**一**天埋的、
-    炸的是整段行程。
-    """
+    def coerce(value: object) -> str:
+        text = _text(value)
+        if len(text) > max_len:
+            raise ValueError("text_too_long")
+        return text
+
+    return coerce
+
+
+def normalize_day_date(value: object) -> str | None:
+    """天日期的唯一判据：规范 ``YYYY-MM-DD`` 或 None。WS 的 day_add 与 patch 共用，
+    见 ``_coerce_day_date`` 的注释——形状不对的日期炸的是整段行程的倒计时。"""
     if value is None:
         return None
     text = str(value).strip()
@@ -493,6 +504,11 @@ def _coerce_day_date(value: object) -> str | None:
         return None
 
 
+def _coerce_day_date(value: object) -> str | None:
+    """patch 侧走唯一判据（见 ``normalize_day_date``）：读不懂就当「没填」。"""
+    return normalize_day_date(value)
+
+
 def _coerce_day_start_min(value: object) -> int:
     """行程起始时刻 NOT NULL 且必须落在一天之内：null 不是合法的清空意图，越界夹回边缘。"""
     if value is None:
@@ -501,18 +517,18 @@ def _coerce_day_start_min(value: object) -> int:
 
 
 PLACE_PATCH_FIELDS: dict[str, Callable[[object], object]] = {
-    "name": _text,
-    "address": _text,
+    "name": _bounded_text(120),
+    "address": _bounded_text(300),
     "duration_min": _coerce_int,
     "start_min": _coerce_int,
     "user_start_min": _coerce_int,
-    "note": _text,
+    "note": _bounded_text(2000),
     "locked": lambda v: 1 if v else 0,
     "status": str,
 }
 
 DAY_PATCH_FIELDS: dict[str, Callable[[object], object]] = {
-    "title": _text,
+    "title": _bounded_text(120),
     "date": _coerce_day_date,
     "start_min": _coerce_int,
     "travel_mode": lambda v: str(v) if v is not None else None,
@@ -543,6 +559,8 @@ def _coerce_cover_url(value: object) -> str:
     if value is None:
         return ""
     url = str(value).strip()
+    if len(url) > 500:
+        raise ValueError("bad_cover_url")
     if not url:
         return ""
     in_app = url.startswith(("/uploads/", "/covers/"))
@@ -552,8 +570,8 @@ def _coerce_cover_url(value: object) -> str:
 
 
 TRIP_PATCH_FIELDS: dict[str, Callable[[object], object]] = {
-    "title": _text,
-    "city": _text,
+    "title": _bounded_text(120),
+    "city": _bounded_text(60),
     "cover_url": _coerce_cover_url,
     "travel_mode": str,
     "cost_model": str,

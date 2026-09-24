@@ -35,11 +35,17 @@ MESSAGE_MIN_INTERVAL_S = 2.0
 # survives (same payload, same result).
 OP_ID_LRU_SIZE = 4096
 
+# 同时保有多少段行程的去重历史。房间会生死（最后一人离开即回收 TripHub），历史不能跟着
+# 陪葬：重连成员那笔「已应用但 echo 没见过」的 add 全靠它挡住第二次落地。
+# 128 段 × 每段至多 4096 个 op_id 是几 MB 量级的字符串，而「房间空了又被人重连回来」
+# 在这个产品里是常态（分享链接、手机切后台）。
+ROOM_DEDUPE_LIMIT = 128
+
 
 class TripHub:
     """One room = one trip."""
 
-    def __init__(self, trip_id: str) -> None:
+    def __init__(self, trip_id: str, seen_op_ids: OrderedDict[str, None] | None = None) -> None:
         self.trip_id = trip_id
         self.members: dict[str, ClientConnection] = {}
         # client_id -> last presence payload + last broadcast time. Memory only: a
@@ -48,7 +54,12 @@ class TripHub:
         self._presence_last_broadcast: dict[str, float] = {}
         # 聊天频控同样是内存态：重启后清空不是 bug，是「没人正在连着我就不欠他计数」。
         self._message_last_sent: dict[str, float] = {}
-        self._seen_op_ids: OrderedDict[str, None] = OrderedDict()
+        # op_id 去重集由 Hub 持有并跨房间生死传下来（见 Hub._dedupe_for）：房间空掉时
+        # TripHub 被 release_if_empty 回收，下一次 join 新建的实例若带着空集合，重连成员
+        # 那笔「服务端已应用、echo 却没收到」的 add 就不再被认成重复，place_add 会落两行。
+        self._seen_op_ids: OrderedDict[str, None] = (
+            seen_op_ids if seen_op_ids is not None else OrderedDict()
+        )
 
     # -- membership ------------------------------------------------------------------
 
@@ -137,11 +148,29 @@ class Hub:
 
     def __init__(self) -> None:
         self._trips: dict[str, TripHub] = {}
+        # 去重集住在这一层而不是房间那一层：房间会生死，重连客户端的记忆不会。
+        # LRU 封顶的是「被记住的行程数」，每程内部另有 OP_ID_LRU_SIZE 的上限。
+        self._dedupe: OrderedDict[str, OrderedDict[str, None]] = OrderedDict()
+
+    def _dedupe_for(self, trip_id: str) -> OrderedDict[str, None]:
+        seen = self._dedupe.get(trip_id)
+        if seen is not None:
+            self._dedupe.move_to_end(trip_id)
+            return seen
+        seen = OrderedDict()
+        self._dedupe[trip_id] = seen
+        while len(self._dedupe) > ROOM_DEDUPE_LIMIT:
+            # 只挤掉当前没有开着的房间的历史；全是活房间时宁可暂时超限，也不清活人的记忆。
+            victim = next((old for old in self._dedupe if old not in self._trips), None)
+            if victim is None:
+                break
+            self._dedupe.pop(victim)
+        return seen
 
     def get(self, trip_id: str) -> TripHub:
         hub = self._trips.get(trip_id)
         if hub is None:
-            hub = TripHub(trip_id)
+            hub = TripHub(trip_id, self._dedupe_for(trip_id))
             self._trips[trip_id] = hub
         return hub
 

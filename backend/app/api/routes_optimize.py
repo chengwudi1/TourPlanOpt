@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
+import anyio.to_thread
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
@@ -133,11 +134,12 @@ async def optimize_day(trip_id: str, day_id: str, body: OptimizeRequest) -> Opti
 
     # cost 按节点下标存，重排过的那套 ids 只有配上同样重排的 cost 才对得齐。
     solver_cost = permute_matrix(cost, place_ids, solver_ids)
-    new_ids, _seg_costs, any_exact = optimize_day_order(
-        solver_cost,
-        solver_ids,
-        [locked_by_id[pid] or pid == end_id for pid in solver_ids],
-        [timed_by_id[pid] for pid in solver_ids],
+    locked_flags = [locked_by_id[pid] or pid == end_id for pid in solver_ids]
+    timed_flags = [timed_by_id[pid] for pid in solver_ids]
+    # Held-Karp/2-opt 是纯 Python CPU 活，直接跑在事件循环上会冻住整个进程的 WS/HTTP
+    # 直到解出（实测 n=80 上百毫秒起）；挪到工作线程。
+    new_ids, _seg_costs, any_exact = await anyio.to_thread.run_sync(
+        optimize_day_order, solver_cost, solver_ids, locked_flags, timed_flags
     )
 
     def order_cost(ids: list[str]) -> int:
@@ -194,16 +196,19 @@ async def optimize_day(trip_id: str, day_id: str, body: OptimizeRequest) -> Opti
         from app.models.protocol import broadcast_op_frame
         from app.ws.hub import get_hub
 
-        hub = get_hub().get(trip_id)
-        seq = await repositories.next_seq(db, trip_id)
-        frame = broadcast_op_frame(
-            seq,
-            "route_optimized",
-            origin="server",
-            op_id=f"optimize-{day_id}-{seq}",
-            data=result.model_dump(mode="json"),
-        )
-        hub.broadcast(frame)
+        # peek 而非 get：这是 REST 端点，给无人连接的行程 create 出的空 TripHub 只有断连
+        # 才会 release，会永久滞留。没人在线就跳过广播，结果已由 HTTP 响应交给调用方。
+        hub = get_hub().peek(trip_id)
+        if hub is not None:
+            seq = await repositories.next_seq(db, trip_id)
+            frame = broadcast_op_frame(
+                seq,
+                "route_optimized",
+                origin="server",
+                op_id=f"optimize-{day_id}-{seq}",
+                data=result.model_dump(mode="json"),
+            )
+            hub.broadcast(frame)
 
     return result
 

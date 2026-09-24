@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, TypeVar
@@ -37,6 +38,14 @@ _PER_CONNECTION_PRAGMAS = (
     "PRAGMA busy_timeout = 5000",
     "PRAGMA synchronous = NORMAL",
 )
+
+# 写事务撞锁时的退避重跑次数（IMMEDIATE 已让 busy_timeout 生效排队，这里只兜底极端对撞）。
+_WRITE_RETRIES = 2
+
+
+def _is_busy(exc: sqlite3.OperationalError) -> bool:
+    msg = str(exc).lower()
+    return "locked" in msg or "busy" in msg
 
 
 class Database:
@@ -148,12 +157,34 @@ class Database:
         return await anyio.to_thread.run_sync(self._run_sync, fn, args)
 
     def _run_sync(self, fn: Callable[[sqlite3.Connection], T], args: tuple[Any, ...]) -> T:
-        conn = self._connect()
-        try:
-            with conn:  # commit on success, rollback on exception
-                return fn(conn, *args)
-        finally:
-            conn.close()
+        # BEGIN IMMEDIATE 一开事务就拿写锁：deferred 下「先 SELECT 再 UPDATE」会在别的
+        # 写事务已提交时撞上 SQLITE_BUSY_SNAPSHOT，而 busy_timeout 对它无效——两人同时编
+        # 辑同一行程就是一条 500 打断 WS。改成先占锁后 busy_timeout 才生效地排队等待，另
+        # 加有限次退避重跑兜底（闭包整体重跑是幂等的）。
+        last_exc: sqlite3.OperationalError | None = None
+        for attempt in range(_WRITE_RETRIES + 1):
+            conn = self._connect()
+            conn.isolation_level = None  # 事务由下面显式 BEGIN/COMMIT 管理
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    result = fn(conn, *args)
+                except BaseException:
+                    try:
+                        conn.execute("ROLLBACK")
+                    except sqlite3.Error:  # 事务已因冲突失效
+                        pass
+                    raise
+                conn.execute("COMMIT")
+                return result
+            except sqlite3.OperationalError as exc:
+                if not _is_busy(exc) or attempt >= _WRITE_RETRIES:
+                    raise
+                last_exc = exc
+                time.sleep(0.02 * (attempt + 1))
+            finally:
+                conn.close()
+        raise last_exc  # pragma: no cover - 循环内要么 return 要么 raise
 
     async def fetch_all(self, sql: str, params: Params = ()) -> list[dict[str, Any]]:
         rows = await self.run(lambda conn: conn.execute(sql, params).fetchall())

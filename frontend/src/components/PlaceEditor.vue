@@ -369,6 +369,7 @@ const orderHint = computed(() => {
         v-model="note"
         class="input edit__note"
         rows="2"
+        maxlength="2000"
         placeholder="例如：19:00 已订座、周末限流"
         @focus="noteTyping = true"
         @blur="blurNote"

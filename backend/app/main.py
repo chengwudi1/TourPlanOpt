@@ -134,11 +134,39 @@ def _amap_status(kind: str) -> int:
     }.get(kind, 502)
 
 
+def _ws_origin_allowed(websocket: WebSocket) -> bool:
+    """WS 握手的 Origin 闸门。
+
+    浏览器发起的 WS 一定带 Origin（服务端脚本与探针不带，放行——它们本来就过不了
+    房间的 hello），所以「Origin 缺失」在浏览器语境下不可能发生，缺失即非浏览器客户端。
+    命中条件三选一：在显式白名单里（cors_origins + ws_allowed_origins）、与 Host 同源
+    （单端口部署与 IP 直访都走这条）、或是 localhost/127.0.0.1 的任意端口（开发期 Vite
+    5173 之外的临时端口不必每次改配置）。
+    """
+    from urllib.parse import urlsplit
+
+    origin = (websocket.headers.get("origin") or "").strip()
+    if not origin:
+        return True
+    if origin in set(settings.cors_origins) | set(settings.ws_allowed_origins):
+        return True
+    parts = urlsplit(origin)
+    host = parts.hostname or ""
+    if host in ("localhost", "127.0.0.1"):
+        return True
+    request_host = (websocket.headers.get("host") or "").split(":")[0]
+    return bool(host) and host == request_host
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.version,
         lifespan=lifespan,
+        # 公网扫描器的第一站就是 /docs 的接口清单；默认关，开发期用 EXPOSE_DOCS=true 打开。
+        docs_url="/docs" if settings.expose_docs else None,
+        redoc_url="/redoc" if settings.expose_docs else None,
+        openapi_url="/openapi.json" if settings.expose_docs else None,
     )
 
     app.add_middleware(
@@ -207,6 +235,12 @@ def create_app() -> FastAPI:
             # of an opaque handshake failure it cannot tell apart from a dead server.
             await websocket.accept()
             await websocket.close(code=4404, reason="trip not found")
+            return
+        if not _ws_origin_allowed(websocket):
+            # 同样是 accept-then-close：4403 让前端能把「被跨站闸门挡住」和「服务没起来」
+            # 分开展示，而不是给浏览器一个裸握手失败。
+            await websocket.accept()
+            await websocket.close(code=4403, reason="origin not allowed")
             return
 
         await websocket.accept()

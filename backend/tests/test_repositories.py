@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from app.db import repositories as repo
 from app.db.database import Database
@@ -46,6 +47,29 @@ async def new_day(db: Database, trip_id: str, day_index: int) -> str:
         (day_id, trip_id, day_index, f"第 {day_index + 1} 天"),
     )
     return day_id
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_place_and_stash_reject_non_finite_coords(bad: float) -> None:
+    """NaN/inf 坐标一旦落库，WS 广播的 json.dumps 会写出裸 Infinity/NaN，浏览器 JSON.parse
+    抛错、该行程对所有协作者永久打不开。校验只可能出现在输入模型上——旧代码放行，此测试即红。"""
+    from app.models.domain import StashCreate
+
+    with pytest.raises(ValidationError):
+        PlaceCreate(name="x", lng=bad, lat=31.23)
+    with pytest.raises(ValidationError):
+        PlaceCreate(name="x", lng=121.47, lat=bad)
+    with pytest.raises(ValidationError):
+        StashCreate(name="x", lng=bad, lat=31.23)
+
+
+def test_place_rejects_out_of_range_but_keeps_valid_coords() -> None:
+    with pytest.raises(ValidationError):
+        PlaceCreate(name="x", lng=181.0, lat=31.23)
+    with pytest.raises(ValidationError):
+        PlaceCreate(name="x", lng=121.47, lat=-91.0)
+    # 合法坐标一律照常通过，别把正常加地点挡在门外
+    assert PlaceCreate(name="x", lng=121.47, lat=31.23).lng == 121.47
 
 
 async def test_create_trip_makes_a_trip_and_its_first_day(db: Database) -> None:

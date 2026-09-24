@@ -40,6 +40,9 @@ type PendingOp =
       cancelled?: string[]
     }
   | { kind: 'expense_add'; tempId: string; cancelled?: boolean }
+  /** 本地已乐观改动、服务端被拒后既无权威回数组、本地也不自愈的写操作（改名/钉住/重排/跨天挪动）。
+   *  applyReject 见它即重取快照，把本地收敛回权威值——统一回滚，比给每种 op 手写 diff 稳。 */
+  | { kind: 'mutate' }
   /** 删除是本地先移除再发 op，回广播时那一行已经查不到了：名字只能暂存在这里。 */
   | { kind: 'deleted'; name: string }
   /** 被服务端挡回来的那一句要连文字一起回输入框：发出去又凭空消失是最坏的一种失败。 */
@@ -440,7 +443,8 @@ export const useTripStore = defineStore('trip', () => {
       place.user_start_min = pinned
       place.locked = pinned !== null
     }
-    useSocketStore().sendOp(Ops.PLACE_UPDATE, { place_id: placeId, patch })
+    const opId = useSocketStore().sendOp(Ops.PLACE_UPDATE, { place_id: placeId, patch })
+    pendingOps.set(opId, { kind: 'mutate' })
   }
 
   /** Pin a place: locked rows are anchors the optimizer routes around. */
@@ -451,7 +455,8 @@ export const useTripStore = defineStore('trip', () => {
     // 解锁的同一笔里服务端会清掉 user_start_min（钉住可以只钉位置，放开则时刻一并交回
     // 排程），所以这里必须跟着清，否则轨道会留着一个已经不存在的钉法。
     if (!locked) place.user_start_min = null
-    useSocketStore().sendOp(Ops.PLACE_LOCK, { place_id: placeId, locked })
+    const opId = useSocketStore().sendOp(Ops.PLACE_LOCK, { place_id: placeId, locked })
+    pendingOps.set(opId, { kind: 'mutate' })
   }
 
   /**
@@ -601,8 +606,12 @@ export const useTripStore = defineStore('trip', () => {
 
   /** Drag result: send the FULL ordered id array (never a delta) and apply optimistically. */
   function reorderDay(dayId: string, orderedIds: string[]) {
+    // 含未落地的乐观行：服务端不认这些 tmp id，发出会被 place_not_found 拒、还误报「地点已被删除」。
+    // 跳过这次整序，那一笔新增落地广播时会用权威 place_ids 重建本天顺序。
+    if (orderedIds.some((id) => id.startsWith('tmp-'))) return
     applyOrder(dayId, orderedIds)
-    useSocketStore().sendOp(Ops.DAY_REORDER, { day_id: dayId, place_ids: orderedIds })
+    const opId = useSocketStore().sendOp(Ops.DAY_REORDER, { day_id: dayId, place_ids: orderedIds })
+    pendingOps.set(opId, { kind: 'mutate' })
   }
 
   /**
@@ -725,6 +734,8 @@ export const useTripStore = defineStore('trip', () => {
   function movePlaceToDay(placeId: string, toDayId: string, beforePlaceId?: string | null) {
     const place = places.value.find((p) => p.id === placeId)
     if (!place || place.day_id === toDayId) return
+    // 未落地的乐观行（自身或目标参照位）服务端都不认其 tmp id：发出只会 place_not_found 误报。
+    if (placeId.startsWith('tmp-') || beforePlaceId?.startsWith('tmp-')) return
     removeLocalRow(placeId)
     const ordered = places.value.filter((p) => p.day_id === toDayId).map((p) => p.id)
     const at = beforePlaceId ? ordered.indexOf(beforePlaceId) : -1
@@ -733,8 +744,12 @@ export const useTripStore = defineStore('trip', () => {
     places.value.push({ ...place, day_id: toDayId, sort_index: 0 })
     applyOrder(toDayId, ordered)
     const socket = useSocketStore()
-    socket.sendOp(Ops.PLACE_MOVE, { place_id: placeId, day_id: toDayId })
-    if (at >= 0) socket.sendOp(Ops.DAY_REORDER, { day_id: toDayId, place_ids: ordered })
+    const moveOpId = socket.sendOp(Ops.PLACE_MOVE, { place_id: placeId, day_id: toDayId })
+    pendingOps.set(moveOpId, { kind: 'mutate' })
+    if (at >= 0) {
+      const reorderOpId = socket.sendOp(Ops.DAY_REORDER, { day_id: toDayId, place_ids: ordered })
+      pendingOps.set(reorderOpId, { kind: 'mutate' })
+    }
   }
 
   // -- checklist（出行清单）--------------------------------------------------------------
@@ -983,8 +998,13 @@ export const useTripStore = defineStore('trip', () => {
   const readPosKey = (tripId: string) => `tourplanopt.chat-read-${tripId}`
 
   function readPosOf(tripId: string): number {
-    const raw = Number(localStorage.getItem(readPosKey(tripId)))
-    return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0
+    try {
+      const raw = Number(localStorage.getItem(readPosKey(tripId)))
+      return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0
+    } catch {
+      // 隐私模式下 localStorage 会抛：读不出游标就当没有基线，别让整块聊天渲染崩掉。
+      return 0
+    }
   }
 
   /** 比 pos 现算更省事的是别存时间戳：软删的行 pos 不变，徽标才不会因为别人撤了一句而重亮。 */
@@ -1044,7 +1064,11 @@ export const useTripStore = defineStore('trip', () => {
     )
     const tripId = trip.value?.id
     if (tripId) {
-      localStorage.setItem(readPosKey(tripId), String(Math.max(newest, readPos.value)))
+      try {
+        localStorage.setItem(readPosKey(tripId), String(Math.max(newest, readPos.value)))
+      } catch {
+        /* 隐私模式写不进去：下次回到默认游标，别把标记已读弄崩。 */
+      }
       chatCursorTrip = tripId
     }
     readPos.value = Math.max(newest, readPos.value)
@@ -1627,6 +1651,13 @@ export const useTripStore = defineStore('trip', () => {
     if (pending?.kind === 'message_delete') {
       insertMessage(pending.row)
     }
+    // 乐观修改没有可回滚的临时行：本地早已按新值渲染，服务端却没收下。删除同理：
+    // 行在本地已经消失，但只要服务端还认它（reason 不是 *_not_found），就该被
+    // 快照带回来。两类都只有一个统一出口——重连重取快照。
+    const needsResync =
+      pending?.kind === 'mutate' ||
+      (pending?.kind === 'deleted' && !reason.endsWith('_not_found'))
+    if (needsResync) useSocketStore().resync()
     const reasons: Record<string, string> = {
       place_not_found: '该地点已被删除',
       day_not_found: '目标天不存在',
@@ -1646,7 +1677,9 @@ export const useTripStore = defineStore('trip', () => {
     }
     opError.value = {
       // 认不出的 reason 不把内部标识拼上界面（用户读不懂 `place_not_found`）。
-      message: reasons[reason] ?? '这一步没有保存，请重试',
+      message: needsResync
+        ? '这一步没有保存，已同步回最新状态'
+        : (reasons[reason] ?? '这一步没有保存，请重试'),
       hint: '',
       level: 'danger',
     }

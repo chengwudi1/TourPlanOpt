@@ -55,7 +55,8 @@ def sniff_image(data: bytes) -> str:
 
 
 def _safe_trip_id(trip_id: str) -> str:
-    if not TRIP_ID_RE.match(trip_id):
+    # fullmatch 而不是 match+$：`$` 允许尾随换行，"AAAA\n" 能伪装成合法 id 拼进目录名。
+    if not TRIP_ID_RE.fullmatch(trip_id):
         raise CoverReject("id")
     return trip_id
 
@@ -101,7 +102,7 @@ def drop_cover_file(cover_url: str, trip_id: str) -> None:
     if not cover_url.startswith(prefix):
         return
     parts = Path(cover_url[len(prefix) :]).parts
-    if len(parts) != 2 or parts[0] != trip_id or not TRIP_ID_RE.match(trip_id):
+    if len(parts) != 2 or parts[0] != trip_id or not TRIP_ID_RE.fullmatch(trip_id):
         return
     if parts[1] in ("", ".", ".."):
         return

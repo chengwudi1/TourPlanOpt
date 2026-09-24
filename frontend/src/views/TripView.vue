@@ -39,7 +39,7 @@ import {
   Receipt,
 } from '@/components/icons'
 import { useCityCoverCandidates } from '@/composables/useCityCover'
-import { getClientId, setClientName } from '@/composables/useClientIdentity'
+import { getClientId, setClientName, sessionGet, sessionSet } from '@/composables/useClientIdentity'
 import { useCopy } from '@/composables/useCopy'
 import { useNarrowView } from '@/composables/useNarrowView'
 import { recordRecentTrip } from '@/composables/useRecentTrips'
@@ -67,7 +67,7 @@ const copy = useCopy()
 
 /** Per-tab: sessionStorage identity means a reload keeps your name, a new tab asks
  * again -- exactly the granularity the collaboration semantics need. */
-const joined = ref(Boolean(sessionStorage.getItem('tourplanopt.joined')))
+const joined = ref(Boolean(sessionGet('tourplanopt.joined')))
 
 const selfId = getClientId()
 
@@ -399,6 +399,7 @@ async function renameDay(dayId: string) {
     message: `留空则恢复为默认的「第 ${day.day_index + 1} 天」。`,
     value: day.title,
     required: false,
+    maxLength: 120,
     confirmLabel: '保存',
   })
   if (name === null) return
@@ -414,6 +415,7 @@ async function renamePlace(place: Place) {
   const name = await dialog.prompt({
     title: '地点名称',
     value: place.name,
+    maxLength: 120,
     confirmLabel: '保存',
     emptyMessage: '请输入地点名称',
   })
@@ -452,6 +454,7 @@ async function setTripCity() {
     value: store.trip?.city ?? '',
     placeholder: '例如 大理',
     required: false,
+    maxLength: 60,
     confirmLabel: '保存',
   })
   if (city === null) return
@@ -462,6 +465,7 @@ async function renameTrip(current: string) {
   const name = await dialog.prompt({
     title: '行程名称',
     value: current,
+    maxLength: 120,
     confirmLabel: '保存',
     emptyMessage: '请输入行程名称',
   })
@@ -546,7 +550,7 @@ async function copyTextItinerary() {
 
 function onJoin() {
   joined.value = true
-  sessionStorage.setItem('tourplanopt.joined', '1')
+  sessionSet('tourplanopt.joined', '1')
   socket.connect(props.tripId)
 }
 
@@ -575,7 +579,7 @@ onMounted(async () => {
     // The composable's identity feeds added_by / participant rows; align it with the
     // account name so creator colours and the roster show the person, not a hex id.
     setClientName(auth.user.name)
-    sessionStorage.setItem('tourplanopt.joined', '1')
+    sessionSet('tourplanopt.joined', '1')
   }
   initExpand()
   document.addEventListener('visibilitychange', onVisibility)
@@ -587,6 +591,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (flashTimer) clearTimeout(flashTimer)
   document.removeEventListener('visibilitychange', onVisibility)
+  window.removeEventListener('click', closeCardMenuOnClick)
+  window.removeEventListener('resize', closeCardMenu)
   socket.disconnect()
 })
 
