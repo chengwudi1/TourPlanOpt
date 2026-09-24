@@ -30,6 +30,7 @@ export {
   Footprints,
   GripVertical,
   ImageDown,
+  ImagePlus,
   Landmark,
   Link2,
   List,

@@ -11,12 +11,17 @@ export type CostModel = 'haversine' | 'amap'
 export type PlaceStatus = 'confirmed' | 'pending'
 /** 存下来的只有这三档。「即将出发 / 进行中 / 已结束」由日期现算，不存。 */
 export type TripStatus = 'planning' | 'finished' | 'archived'
+/** 海报头两档里现在站着哪一档：用户自己那张 / 内置默认那张。界面与复验判据都要读它。
+ *  城市图与行程首图（M36 的自动档）在 M37 只作为封面面板里的手动档存在，不再自动上位。 */
+export type CoverSource = 'custom' | 'builtin'
 export type ExpenseCategory = 'transport' | 'lodging' | 'food' | 'ticket' | 'shopping' | 'other'
 
 export interface Trip {
   id: string
   title: string
   city: string
+  /** 用户亲手选/传的那一张海报。空串 = 没设过，海报头用内置默认那张。城市图不落这一列。 */
+  cover_url: string
   travel_mode: TravelMode
   cost_model: CostModel
   day_start_min: number
@@ -52,6 +57,7 @@ export interface TripSummary {
   checklist_done: number
   budget_cents: number
   spent_cents: number
+  /** 只有用户亲手选/传的那一张（M37）。空串时首页卡片用内置默认那张，见 utils/builtinCovers。 */
   cover_photo: string
   updated_at: string
   created_at: string

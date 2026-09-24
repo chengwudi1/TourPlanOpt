@@ -64,6 +64,7 @@ class TripOut(BaseModel):
     id: str
     title: str = ""
     city: str = ""
+    cover_url: str = ""
     travel_mode: TravelMode = TravelMode.DRIVING
     cost_model: CostModel = CostModel.HAVERSINE
     day_start_min: int = 540
@@ -82,9 +83,12 @@ class TripSummary(BaseModel):
     卡片如今还要回答「这趟走得怎么样了」：清单打勾了几件、已经花掉多少、预算是多少、
     哪天出发。这些都是聚合数，摘要接口一次批量算好，前端不用为每张卡拉一次完整快照。
 
-    `cover_photo` is the first place that actually carries a photo, in the order the trip
-    is read (day_index, then sort_index). `updated_at` is the newest edit among the trip's
-    places, falling back to the trip's own `created_at` while it has none.
+    `cover_photo` is the card's cover, and it carries only what the user picked or
+    uploaded (`cover_url`). The default tier is a short list of images bundled with the
+    frontend, chosen there by a stable hash of the trip id — the backend has no copy of
+    that list, and a second pick rule would make home and trip page disagree.
+    `updated_at` is the newest edit among the trip's places, falling back to the trip's
+    own `created_at` while it has none.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -414,5 +418,8 @@ class TripPatch(BaseModel):
 
     title: str | None = None
     city: str | None = None
+    # 与 `TRIP_PATCH_FIELDS` 同源：那一边收这一列（空串 = 恢复默认封面），这边就必须声明，
+    # 否则 pydantic 把它当多余字段丢掉，route 仍回 200 而库里一个字没动。
+    cover_url: str | None = None
     status: str | None = None
     budget_cents: int | None = None

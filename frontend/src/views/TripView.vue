@@ -6,6 +6,7 @@ import AmapKeyCheck from '@/components/AmapKeyCheck.vue'
 import AppModal from '@/components/AppModal.vue'
 import AssistantPanel from '@/components/AssistantPanel.vue'
 import ChecklistPanel from '@/components/ChecklistPanel.vue'
+import CoverPicker from '@/components/CoverPicker.vue'
 import DaySection from '@/components/DaySection.vue'
 import ExpensePanel from '@/components/ExpensePanel.vue'
 import JoinGate from '@/components/JoinGate.vue'
@@ -37,6 +38,7 @@ import {
   Plus,
   Receipt,
 } from '@/components/icons'
+import { useCityCoverCandidates } from '@/composables/useCityCover'
 import { getClientId, setClientName } from '@/composables/useClientIdentity'
 import { useCopy } from '@/composables/useCopy'
 import { useNarrowView } from '@/composables/useNarrowView'
@@ -48,7 +50,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useSocketStore } from '@/stores/socket'
 import { useTripStore } from '@/stores/trip'
 import type { Place, Poi } from '@/types/domain'
-import { apiFetch } from '@/utils/api'
+import { ApiError, apiFetch } from '@/utils/api'
 import { anchorMenu, type MenuPosition } from '@/utils/anchorMenu'
 import { formatMoney } from '@/utils/money'
 import { formatMin } from '@/utils/time'
@@ -467,6 +469,50 @@ async function renameTrip(current: string) {
   store.updateTripFields({ title: name.trim() })
 }
 
+/* ---------- 封面（M36 / M37，行程页这一处宿主） ---------- */
+
+const coverOpen = ref(false)
+
+/** 城市候选只在面板开着的那一会儿去取：海报头已经不自动用它了，只有面板里那一档手动候选要列。
+ *  关面板把源换成空串，composable 自己清空；同一座城市第二次打开走它模块级的结果缓存，不再发请求。 */
+const cityCoverPhotos = useCityCoverCandidates(
+  () => (coverOpen.value ? (store.trip?.city ?? '') : ''),
+)
+
+/** 面板里的「当前」要说的是用户亲手那张，不是链子上现在显示的那张：后者一换档就跟着变，
+ *  「当前」这个字就成了谎话。 */
+const customCover = computed(() => store.trip?.cover_url ?? '')
+
+function openCoverPicker() {
+  coverOpen.value = true
+}
+
+function onCoverPick(url: string) {
+  if (!store.trip || store.trip.cover_url === url) return
+  store.updateTripFields({ cover_url: url })
+  feedback.show({ message: '封面已更新，同行的人都会看到' })
+}
+
+function onCoverAuto() {
+  if (!store.trip?.cover_url) return
+  store.updateTripFields({ cover_url: '' })
+  feedback.show({ message: '已恢复默认封面', hint: '改用内置的那一张，与城市、地点图片无关' })
+}
+
+async function onCoverFile(blob: Blob) {
+  try {
+    await store.uploadCover(blob)
+    feedback.show({ message: '封面已更新，同行的人都会看到' })
+  } catch (err) {
+    // 上传走的是 HTTP 而不是 op，socket 那条错误通道不会替它喊，所以这里必须自己报。
+    feedback.show({
+      kind: 'danger',
+      message: '封面没有传上去',
+      hint: err instanceof ApiError ? err.message : '网络或对接出了岔子，可以重来一次。',
+    })
+  }
+}
+
 async function copyShareLink() {
   const url = `${window.location.origin}/trip/${props.tripId}`
   await copy(url, {
@@ -749,6 +795,7 @@ if (import.meta.env.DEV) {
       @share="copyShareLink"
       @rename="renameTrip(store.trip?.title ?? '')"
       @set-city="setTripCity"
+      @cover="openCoverPicker"
       @copy-text="copyTextItinerary"
       @chat="showPane('chat')"
     />
@@ -761,6 +808,7 @@ if (import.meta.env.DEV) {
       :collapsed="mastCollapsed"
       :scroll-y="mastScrollY"
       @rename="renameTrip(store.trip?.title ?? '')"
+      @pick-cover="openCoverPicker"
     />
 
     <AmapKeyCheck />
@@ -992,6 +1040,28 @@ if (import.meta.env.DEV) {
       <div class="chatsheet">
         <MessagePanel active @open-ref="openChatRef" />
       </div>
+    </AppModal>
+
+    <!-- 封面（M36 / M37）：这一处宿主只负责开合与写库，挑图与预缩都在内容件里。
+         行程图片与城市图片两档在 M37 退出海报头的自动链，只留在这里当手动候选。 -->
+    <AppModal
+      v-if="coverOpen"
+      :autofocus="false"
+      title="行程封面"
+      sub="封面属于行程本身，改动会同步给同行人。不选的话用内置的默认封面。"
+      @close="coverOpen = false"
+    >
+      <CoverPicker
+        :current="customCover"
+        :shown="store.coverPhoto"
+        :source="store.coverSource"
+        :place-photos="store.placeCovers"
+        :city-photos="cityCoverPhotos"
+        :city="store.trip?.city ?? ''"
+        @pick="onCoverPick"
+        @file="onCoverFile"
+        @auto="onCoverAuto"
+      />
     </AppModal>
 
     <template v-if="joined">

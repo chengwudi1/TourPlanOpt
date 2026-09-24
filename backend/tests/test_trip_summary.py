@@ -92,26 +92,17 @@ async def test_summary_counts_days_places_and_participants(db: Database) -> None
     assert (card.day_count, card.place_count, card.companion_count) == (2, 3, 2)
 
 
-async def test_cover_photo_skips_placeless_and_prefers_the_earlier_day(db: Database) -> None:
-    """(day_index, sort_index) 决定封面，而不是"第一个有图的 sort_index"。
+async def test_place_photos_never_reach_the_summary(db: Database) -> None:
+    """M37：摘要只带用户亲手那张，地点首图不再自动上位。
 
-    第 1 天的 D 排在 sort_index 0，第 0 天的 C 排在 sort_index 2：只按 sort_index 排的
-    实现会选中 D，这里必须选 C。
+    第 1 天与第 0 天各有一个带图地点，按 M36 那条 (day_index, sort_index) 规则该挑出 C；
+    现在两个档位都不由后端决定，空 `cover_url` 就必须是空串——前端据此去挑内置的那一张。
     """
     trip_id, day0 = await repo.create_trip(db, title="两日")
     day1 = await new_day(db, trip_id, 1)
     await repo.add_place(db, day0, make_place("无图A"))
-    await repo.add_place(db, day0, make_place("无图B"))
     await repo.add_place(db, day0, photo_place("有图C", "https://a.amap.com/C.jpg"))
     await repo.add_place(db, day1, photo_place("有图D", "https://a.amap.com/D.jpg"))
-
-    card = (await repo.get_trip_summaries(db, [trip_id]))[0]
-    assert card.cover_photo == "https://a.amap.com/C.jpg"
-
-
-async def test_cover_photo_is_empty_when_no_place_has_one(db: Database) -> None:
-    trip_id, day_id = await repo.create_trip(db, title="全程无图")
-    await repo.add_place(db, day_id, make_place("街角咖啡店"))
 
     card = (await repo.get_trip_summaries(db, [trip_id]))[0]
     assert card.cover_photo == ""
@@ -230,7 +221,8 @@ def test_summary_card_over_http(client: TestClient) -> None:
     assert card["day_count"] == 1
     assert card["place_count"] == 3
     assert card["companion_count"] == 2
-    assert card["cover_photo"] == "https://a.amap.com/B.jpg"
+    # 这一趟没人设过封面：摘要给空串，首页卡片由前端挑内置的那一张（M37）。
+    assert card["cover_photo"] == ""
     assert card["created_at"] == snapshot["trip"]["created_at"]
     assert card["updated_at"] == max(p["updated_at"] for p in snapshot["places"])
 

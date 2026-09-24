@@ -2,8 +2,10 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import RouteArt from '@/components/RouteArt.vue'
+import { ImagePlus } from '@/components/icons'
 import { useReduceMotion } from '@/composables/useReduceMotion'
 import { useTripStore } from '@/stores/trip'
+import type { CoverSource } from '@/types/domain'
 import { formatMoney } from '@/utils/money'
 import { countdownOf, formatDateRange } from '@/utils/tripstatus'
 
@@ -25,7 +27,7 @@ import { countdownOf, formatDateRange } from '@/utils/tripstatus'
  */
 const props = defineProps<{ collapsed: boolean; scrollY: number }>()
 
-const emit = defineEmits<{ rename: [] }>()
+const emit = defineEmits<{ rename: []; pickCover: [] }>()
 
 /** 展开态的封面有多高，只有这一层量得到（`height: var(--mast-h)`，收起时是 0）。
  *  宿主收这块的时候等于把列表的视口抬高同样一截，那一截得原样垫回清单末尾，读数才不会被
@@ -40,16 +42,17 @@ const title = computed(() => store.trip?.title ?? '')
 
 const cover = computed(() => store.coverPhoto)
 /** 坏图不是「没有图」这一档的装饰——它是同一个兜底形态，所以走同一条分支，
- *  而不是留下一个 1×1 的裂图标压在字下面。 */
-const broken = ref(false)
-const hasPhoto = computed(() => !!cover.value && !broken.value)
+ *  而不是留下一个 1×1 的裂图标压在字下面。记的是**哪一张**坏过：`<img>` 在 `v-if` 里，
+ *  一旦判坏就连根拔起，光靠新图的 `load` 清不掉这个标记（那时候已经没有元素在加载了）。
+ *  按 URL 记，换一张就自动重新挂载重试——一次网络抖动不该把海报永久打死。 */
+const brokenUrl = ref('')
+const hasPhoto = computed(() => !!cover.value && brokenUrl.value !== cover.value)
+/** 出的是两档链里的哪一档。屏幕上只有一处读它（下面那枚「换封面」键），复验时两条判据都要读它。 */
+const coverSource = computed<CoverSource>(() => store.coverSource)
+/** 还站在默认那张上：链头空着，或者内置资产读不出来（同一档的兜底形态，键照样要给）。 */
+const usingDefault = computed(() => coverSource.value === 'builtin')
 function onImgError() {
-  broken.value = true
-}
-/** 换封面要把「坏过」这个判断清掉，否则新图永远继承旧图的失败。`watch(cover)` 要额外
- *  引一个 import，而这条分支只有 `onerror` 会写、只有 src 变才需要清，用事件对账更直白。 */
-function onImgLoad() {
-  broken.value = false
+  brokenUrl.value = cover.value
 }
 
 /** 日期区间与出发倒计时：天的 `date` 可以整段没填，也可以只填了中间几天，所以取已知
@@ -123,6 +126,7 @@ onBeforeUnmount(() => {
     ref="rootEl"
     class="mast"
     :class="{ 'mast--photo': hasPhoto, 'mast--nophoto': !hasPhoto, 'mast--min': collapsed }"
+    :data-cover-source="coverSource"
     :style="{ '--sy': sy, '--zoom': zoom }"
     aria-label="行程概要"
   >
@@ -140,7 +144,6 @@ onBeforeUnmount(() => {
           decoding="async"
           referrerpolicy="no-referrer"
           @error="onImgError"
-          @load="onImgLoad"
         />
       </div>
       <div v-else class="mast__art" aria-hidden="true">
@@ -168,6 +171,17 @@ onBeforeUnmount(() => {
       </h1>
       <div v-if="stats" class="mast__rule" aria-hidden="true"></div>
       <p v-if="stats" class="mast__stats">{{ stats }}</p>
+      <!-- 默认档就地给键（决策 8）：内置海报保证海报头永远有图，所以这一段不再是救火，
+           而是说清「此刻是系统挑的那张」并就地给换的入口。全部落在票券里——票券长高会自己
+           往下顶，`.mast` 的总高与 `mastOccupied()` 不变，M34/M35 的收合几何才不用重开。 -->
+      <div v-if="usingDefault" class="mast__need">
+        <span class="mast__need-text tiny muted">当前使用的是默认封面</span>
+        <span class="mast__need-acts">
+          <button class="btn btn--sm btn--primary" type="button" @click="emit('pickCover')">
+            <ImagePlus class="ic" :size="13" /> 换封面
+          </button>
+        </span>
+      </div>
     </div>
   </section>
 </template>
@@ -358,7 +372,8 @@ onBeforeUnmount(() => {
   position: relative;
   z-index: 2;
   display: flex;
-  gap: 14px;
+  flex-wrap: wrap;
+  gap: 10px 14px;
   align-items: center;
   min-width: 0;
   margin: 0 12px 12px;
@@ -449,6 +464,29 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
 }
 
+/* 空态那一行独占一票：说明在左、两枚键在右，中间那道虚线与上面的分隔线是同一种语汇。
+   `flex-basis: 100%` 是「换行」的意思，只在宽屏的横向票券里成立，窄屏那段自己改回去。 */
+.mast__need {
+  display: flex;
+  flex: 1 0 100%;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 9px;
+  border-top: 1px dashed var(--hairline);
+}
+
+.mast__need-text {
+  min-width: 0;
+  line-height: 1.5;
+}
+
+.mast__need-acts {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
 @media (max-width: 860px) {
   .mast {
     --mast-h: clamp(184px, 26vh, 214px);
@@ -481,6 +519,13 @@ onBeforeUnmount(() => {
   .mast__stats {
     align-self: stretch;
     text-align: left;
+  }
+  /* 纵向票券里「换行」这层意思没了：basis 100% 撑的是高度，这一档按内容占高、占满整行宽。 */
+  .mast__need {
+    flex: 0 0 auto;
+    width: 100%;
+    margin-top: 9px;
+    padding-top: 10px;
   }
   .mast__kick {
     top: 10px;

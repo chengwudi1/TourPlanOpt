@@ -23,6 +23,12 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
+      // 本机上传的封面走 `/uploads/...`：不代理的话这张图会撞上 SPA 兜底页（200 + HTML），
+      // 海报头只看到一个加载失败的 img，于是退回装饰——上传成功却看不见效果。
+      '/uploads': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
       '/ws': {
         target: 'ws://127.0.0.1:8000',
         ws: true,

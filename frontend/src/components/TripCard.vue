@@ -16,6 +16,7 @@ import {
   X,
 } from '@/components/icons'
 import type { TripStatus, TripSummary } from '@/types/domain'
+import { summaryCover } from '@/utils/builtinCovers'
 import { formatMoney } from '@/utils/money'
 import { countdownOf, formatDateRange } from '@/utils/tripstatus'
 import { formatAgo } from '@/utils/time'
@@ -41,6 +42,9 @@ const emit = defineEmits<{
 
 const countdown = computed(() => countdownOf(props.trip?.start_date, props.trip?.end_date))
 const range = computed(() => formatDateRange(props.trip?.start_date, props.trip?.end_date))
+/** 封面两档：自己那张 > 内置默认那张（与海报头同一份散列，见 utils/builtinCovers）。
+ *  摘要没回来时给空串，让骨架那一条分支自己站着。 */
+const cover = computed(() => (props.trip ? summaryCover(props.trip) : ''))
 
 const tags = computed(() => {
   const t = props.trip
@@ -130,11 +134,11 @@ onBeforeUnmount(closeMenu)
 <template>
   <article class="tripcard card">
     <RouterLink class="tripcard__hit" :to="{ name: 'trip', params: { tripId } }">
-      <div class="tripcard__cover" :class="{ 'tripcard__cover--photo': trip?.cover_photo }">
+      <div class="tripcard__cover" :class="{ 'tripcard__cover--photo': cover }">
         <img
-          v-if="trip?.cover_photo"
-          :src="trip.cover_photo"
-          :alt="`${trip.title || '未命名行程'}的封面`"
+          v-if="cover"
+          :src="cover"
+          :alt="`${trip?.title || '未命名行程'}的封面`"
           loading="lazy"
           decoding="async"
           referrerpolicy="no-referrer"

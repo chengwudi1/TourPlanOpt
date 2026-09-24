@@ -9,6 +9,7 @@ import {
   Copy,
   Ellipsis,
   ImageDown,
+  ImagePlus,
   Link2,
   MapPin,
   MessageSquare,
@@ -43,6 +44,7 @@ const emit = defineEmits<{
   share: []
   rename: []
   setCity: []
+  cover: []
   copyText: []
   chat: []
 }>()
@@ -153,6 +155,12 @@ const healthLabel = computed(() =>
 const healthTitle = computed(() => `地图服务${healthLabel.value} · 点开看详情`)
 const healthDot = computed(() =>
   amapHealth.value === 'good' ? 'dot--ok' : amapHealth.value === 'bad' ? 'dot--danger' : '',
+)
+
+/** 「现在这张是怎么来的」在菜单里就得读出来，否则改错了不知道改的是哪一层。
+ *  措辞与封面面板同源：同一件事全站只有一个名字。 */
+const coverLabel = computed(() =>
+  store.coverSource === 'custom' ? '封面：自己选的' : '封面：默认',
 )
 
 /* ---------- 「更多」菜单：手机上把次要控件收进一处 ---------- */
@@ -346,6 +354,9 @@ onBeforeUnmount(() => {
         </button>
         <button class="tripmenu__item" type="button" role="menuitem" @click="run(() => emit('setCity'))">
           <MapPin class="ic" :size="14" /> {{ city ? `目的地城市：${city}` : '设置目的地城市' }}
+        </button>
+        <button class="tripmenu__item" type="button" role="menuitem" @click="run(() => emit('cover'))">
+          <ImagePlus class="ic" :size="14" /> {{ coverLabel }}
         </button>
         <button class="tripmenu__item" type="button" role="menuitem" @click="run(() => emit('share'))">
           <Link2 class="ic" :size="14" /> 复制协作链接

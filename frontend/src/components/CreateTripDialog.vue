@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 
 import AppModal from '@/components/AppModal.vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
-import { ArrowRight, Check, ChevronDown, Link2, LoaderCircle, MapPin } from '@/components/icons'
+import { ArrowRight, Check, ChevronDown, ImagePlus, Link2, LoaderCircle, MapPin } from '@/components/icons'
 import { useCopy } from '@/composables/useCopy'
-import type { TravelMode, TripCreateResult } from '@/types/domain'
+import type { TravelMode, Trip, TripCreateResult } from '@/types/domain'
 import { ApiError, apiFetch, postJson } from '@/utils/api'
+import { shrinkToCover } from '@/utils/coverImage'
 import { TRAVEL_MODE_OPTIONS, TRAVEL_MODE_TEXT } from '@/utils/tripmodes'
 import { parseHHMM } from '@/utils/time'
 
@@ -58,7 +59,8 @@ const hasOptions = computed(
   () =>
     Boolean(city.value.trim() || startDate.value)
     || days.value > 1
-    || dayStart.value !== DEFAULT_DAY_START,
+    || dayStart.value !== DEFAULT_DAY_START
+    || coverBlob.value !== null,
 )
 
 /** 分享链接和裸 ID 都收：用户从微信里复制出来的往往是整条 URL。 */
@@ -118,6 +120,8 @@ async function submitCreate() {
     }))
     created.value = data
     emit('created', data.trip_id)
+    // 补传不挡成功页：分享链接才是这一屏的主角，海报慢一拍或干脆失败都不该拖住它。
+    void uploadCreatedCover(data.trip_id)
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : String(err)
   } finally {
@@ -144,6 +148,67 @@ function enter() {
 function openPasted() {
   if (pastedId.value) emit('done', pastedId.value)
 }
+
+/* ---------- 海报位（决策 9：先缩先预览，建完立刻补传） ---------- */
+
+const coverInput = ref<HTMLInputElement | null>(null)
+const coverBlob = ref<Blob | null>(null)
+const coverPreview = ref('')
+/** 补传的结果只在成功页那一段说话：表单页那一刻已经换掉了。 */
+const coverNotice = ref('')
+
+function setCover(blob: Blob) {
+  if (coverPreview.value) URL.revokeObjectURL(coverPreview.value)
+  coverBlob.value = blob
+  coverPreview.value = URL.createObjectURL(blob)
+  coverNotice.value = ''
+}
+
+function clearCover() {
+  if (coverPreview.value) URL.revokeObjectURL(coverPreview.value)
+  coverPreview.value = ''
+  coverBlob.value = null
+  coverNotice.value = ''
+}
+
+function onCoverPickFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  // 连选同一张文件时浏览器不会报 change，所以取完就把 value 清掉。
+  input.value = ''
+  if (!file) return
+  void shrinkCover(file)
+}
+
+async function shrinkCover(file: File) {
+  try {
+    setCover(await shrinkToCover(file))
+  } catch {
+    // 预缩这一步整个坏掉也不该吞掉这张图：原样留着，后端的 4 MB 硬闸会给出人话。
+    setCover(file)
+  }
+}
+
+/** 补传失败不改成功页的主线：行程已经建出来了，海报随时能在行程页重来一次。 */
+async function uploadCreatedCover(tripId: string) {
+  const blob = coverBlob.value
+  if (!blob) return
+  const body = new FormData()
+  body.append('file', blob)
+  try {
+    await apiFetch<Trip>(`/api/trips/${tripId}/cover`, { method: 'POST', body })
+    coverNotice.value = '封面已附上。'
+  } catch (err) {
+    coverNotice.value =
+      err instanceof ApiError
+        ? `封面没有传上去：${err.message}。可在行程页「更多」里的「封面」那一行重来。`
+        : '封面没有传上去，可在行程页「更多」里的「封面」那一行重来。'
+  }
+}
+
+onBeforeUnmount(() => {
+  if (coverPreview.value) URL.revokeObjectURL(coverPreview.value)
+})
 </script>
 
 <template>
@@ -167,6 +232,7 @@ function openPasted() {
         </button>
       </div>
       <p class="tiny muted done__hint">同一条链接多人同时编辑，改动实时同步。</p>
+      <p v-if="coverNotice" class="tiny muted done__cover" role="status">{{ coverNotice }}</p>
     </div>
 
     <!-- ---------- 表单态 ---------- -->
@@ -252,6 +318,41 @@ function openPasted() {
           <div class="opt__cell">
             <span class="opt__label">默认交通方式</span>
             <SegmentedControl v-model="travelMode" :options="TRAVEL_MODE_OPTIONS" label="默认交通方式" />
+          </div>
+
+          <!-- 只给本机上传这一档：创建那一刻行程里还没有地点图片，城市图片也不再是自动档，
+               摆两档空的在这里只会让人以为「选了没反应」。 -->
+          <div class="poster">
+            <span class="opt__label">行程封面</span>
+            <div class="poster__row">
+              <button
+                class="poster__slot"
+                :class="{ 'poster__slot--filled': coverPreview }"
+                type="button"
+                :aria-label="coverPreview ? '更换封面图片' : '添加封面图片'"
+                @click="coverInput?.click()"
+              >
+                <img v-if="coverPreview" :src="coverPreview" alt="" />
+                <span v-else class="poster__empty">
+                  <ImagePlus class="ic" :size="15" /> 添加封面
+                </span>
+              </button>
+              <div class="poster__side">
+                <p class="tiny muted">
+                  不添加则先用内置的默认封面，行程页里随时可以换。支持 JPEG、PNG 与 WebP，单张不超过 4 MB。
+                </p>
+                <button v-if="coverBlob" class="btn btn--sm" type="button" @click="clearCover">
+                  移除封面
+                </button>
+              </div>
+            </div>
+            <input
+              ref="coverInput"
+              class="poster__file"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              @change="onCoverPickFile"
+            />
           </div>
 
           <p class="tiny muted opt__note">
@@ -500,6 +601,85 @@ function openPasted() {
   }
 }
 
+/* ---------- 海报位 ---------- */
+.poster {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.poster__row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.poster__slot {
+  position: relative;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 132px;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  color: var(--text-2);
+  cursor: pointer;
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    transform var(--dur) var(--ease-pop);
+}
+
+.poster__slot:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px) scale(1.015);
+}
+
+.poster__slot--filled {
+  border-style: solid;
+}
+
+.poster__slot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.poster__empty {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  font-size: calc(12px * var(--fs-scale));
+  font-weight: 600;
+}
+
+.poster__side {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.poster__side p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+/* 保留在渲染树里：`display: none` 的 file input 收不到程序塞进去的 files。 */
+.poster__file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ---------- 打开已有：降级成一条底部细链接 ---------- */
 .opener {
   display: flex;
@@ -590,7 +770,8 @@ function openPasted() {
   white-space: nowrap;
 }
 
-.done__hint {
+.done__hint,
+.done__cover {
   margin: 0;
 }
 

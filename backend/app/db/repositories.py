@@ -33,6 +33,7 @@ from app.models.domain import (
     TripStatus,
     TripSummary,
 )
+from app.uploads import drop_cover_file
 from app.util.ids import new_id
 from app.util.timefmt import clamp_min, now_iso
 
@@ -200,8 +201,8 @@ async def get_trip_summaries(db: Database, trip_ids: Sequence[str]) -> list[Trip
 
     def _load(conn: sqlite3.Connection) -> list[TripSummary]:
         rows = conn.execute(
-            f"""SELECT t.id, t.title, t.city, t.travel_mode, t.status, t.budget_cents,
-                       t.created_at,
+            f"""SELECT t.id, t.title, t.city, t.cover_url, t.travel_mode, t.status,
+                       t.budget_cents, t.created_at,
                        (SELECT COUNT(*) FROM days d WHERE d.trip_id = t.id) AS day_count,
                        (SELECT COUNT(*) FROM places p WHERE p.trip_id = t.id) AS place_count,
                        (SELECT COUNT(DISTINCT pc.client_id) FROM participants pc
@@ -227,23 +228,13 @@ async def get_trip_summaries(db: Database, trip_ids: Sequence[str]) -> list[Trip
             params,
         ).fetchall()
 
-        # 封面：第一个真的带图的地点。按 (trip_id, day_index, sort_index) 排好后在
-        # Python 里取每程首条命中，省掉窗口函数，也不必为每程单发一条查询。
-        photo_rows = conn.execute(
-            f"""SELECT p.trip_id, p.photo_url FROM places p
-                JOIN days d ON d.id = p.day_id
-                WHERE p.trip_id IN ({placeholders}) AND p.photo_url <> ''
-                ORDER BY p.trip_id, d.day_index, p.sort_index""",
-            params,
-        ).fetchall()
-        covers: dict[str, str] = {}
-        for row in photo_rows:
-            covers.setdefault(str(row["trip_id"]), str(row["photo_url"]))
-
         by_id: dict[str, TripSummary] = {}
         for row in rows:
             item = dict(row)
-            item["cover_photo"] = covers.get(item["id"], "")
+            # 只带用户亲手那一张（决策 3 的 M37 修订）：没传图时首页显示的内置默认封面由前端按
+            # `trip_id` 现算——那份清单是打包在前端里的静态资产，后端要跟着挑就得抄一份规则，
+            # 而两处规则一旦分叉，首页与行程页就会各显示一张，看着像两个不同的行程。
+            item["cover_photo"] = str(item.pop("cover_url", "") or "")
             by_id[item["id"]] = TripSummary.model_validate(item)
         return [by_id[trip_id] for trip_id in trip_ids if trip_id in by_id]
 
@@ -539,9 +530,31 @@ def _coerce_budget_cents(value: object) -> int:
     return max(0, min(int(value), MAX_BUDGET_CENTS))  # type: ignore[arg-type]
 
 
+def _coerce_cover_url(value: object) -> str:
+    """封面值会被同行者的 ``<img src>`` 直接渲染，所以这一列不是自由文本。
+
+    只收四类：站内上传路径（``/uploads/...``）、内置海报（``/covers/...``——M37 决策 3 说
+    「点中任意一张会固定为本行程的封面」，固定下来就是要写进这一列，所以它的形状必须过这道闸）、
+    http(s) 直链、以及空串——空串是「恢复默认封面」这个动作的落点，不是「没填」。``data:`` 能塞
+    进几百 KB 的整张图，``javascript:`` 与裸文本会在图上留一个永远读不出来的破图，一律拒（抛
+    ValueError，整笔 patch 被拒）。站内两条只认前缀与形状，不去查文件在不在：破图由海报头自己
+    兜，这里要拦的是任意文本；``..`` 单独挡掉，因为这两条都是拼进静态目录的路径。
+    """
+    if value is None:
+        return ""
+    url = str(value).strip()
+    if not url:
+        return ""
+    in_app = url.startswith(("/uploads/", "/covers/"))
+    if not ((in_app or url.startswith(("http://", "https://"))) and ".." not in url):
+        raise ValueError("bad_cover_url")
+    return url
+
+
 TRIP_PATCH_FIELDS: dict[str, Callable[[object], object]] = {
     "title": _text,
     "city": _text,
+    "cover_url": _coerce_cover_url,
     "travel_mode": str,
     "cost_model": str,
     "day_start_min": _coerce_day_start_min,
@@ -694,22 +707,32 @@ async def update_day(db: Database, day_id: str, patch: dict[str, object]) -> Day
 
 
 async def update_trip(db: Database, trip_id: str, patch: dict[str, object]) -> TripOut | None:
+    """Apply a whitelisted trip patch.
+
+    换封面时旧文件的回收也在这里：`cover_url` 的三个写入口（上传端点、REST patch、WS 的
+    `trip_update`）都经过本函数，删文件放进其中一处就另外两条路漏孤儿。放在事务**之后**是
+    必要的——提交失败回滚时库里仍指着那张图，删了就是一张永久坏链。
+    """
     if _validate_patched_trip(patch) is not None:
         return None
 
-    def _update(conn: sqlite3.Connection) -> dict | None:
+    def _update(conn: sqlite3.Connection) -> tuple[dict | None, str]:
         row = conn.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
         if row is None:
-            return None
+            return None, ""
         assignments = _patch_assignments(patch, TRIP_PATCH_FIELDS)
         if assignments is None:
-            return None
+            return None, ""
         columns, values = assignments
         sets = ", ".join(f"{col} = ?" for col in columns)
+        stale = str(row["cover_url"] or "") if "cover_url" in columns else ""
         conn.execute(f"UPDATE trips SET {sets} WHERE id = ?", [*values, trip_id])
-        return dict(conn.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone())
+        fresh = dict(conn.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone())
+        return fresh, "" if fresh["cover_url"] == stale else stale
 
-    row = await db.run(_update)
+    row, stale = await db.run(_update)
+    if stale:
+        drop_cover_file(stale, trip_id)
     return TripOut.model_validate(row) if row is not None else None
 
 

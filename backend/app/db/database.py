@@ -125,6 +125,10 @@ class Database:
         user_cols = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
         if user_cols and "prefs" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN prefs TEXT NOT NULL DEFAULT '{}'")
+        # M36 封面：老库补一列空串。空串不是「海报被清空过」的标记，就是「没设过海报」，
+        # 两者在自动链上行为一致，所以不必回填。
+        if "cover_url" not in columns:
+            conn.execute("ALTER TABLE trips ADD COLUMN cover_url TEXT NOT NULL DEFAULT ''")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=5.0)

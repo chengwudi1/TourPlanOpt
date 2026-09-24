@@ -6,6 +6,7 @@ import RouteArt from '@/components/RouteArt.vue'
 import { useCountUp } from '@/composables/useCountUp'
 import { useNow } from '@/composables/useNow'
 import type { TripSummary } from '@/types/domain'
+import { summaryCover } from '@/utils/builtinCovers'
 import { formatMoney } from '@/utils/money'
 import { formatDateRange, countdownOf, needsWrapUp, parseDateOnly, phaseOf, readinessHints } from '@/utils/tripstatus'
 import { formatAgo } from '@/utils/time'
@@ -23,6 +24,8 @@ const emit = defineEmits<{ open: []; finish: [] }>()
 
 const countdown = computed(() => countdownOf(props.trip.start_date, props.trip.end_date))
 const range = computed(() => formatDateRange(props.trip.start_date, props.trip.end_date))
+/** 与网格卡同一条两档链：自己那张 > 按 trip_id 挑的内置默认那张。 */
+const cover = computed(() => summaryCover(props.trip))
 const hints = computed(() => readinessHints(props.trip))
 const wrapUp = computed(() => needsWrapUp(props.trip.status, phaseOf(props.trip.start_date, props.trip.end_date)))
 const money = computed(() => {
@@ -71,9 +74,9 @@ const statusText = computed(() =>
 </script>
 
 <template>
-  <section class="hero" :class="{ 'hero--nophoto': !trip.cover_photo }">
-    <div v-if="trip.cover_photo" class="hero__photo">
-      <img :src="trip.cover_photo" :alt="`${trip.title || '未命名行程'}的封面`" decoding="async" referrerpolicy="no-referrer" />
+  <section class="hero" :class="{ 'hero--nophoto': !cover }">
+    <div v-if="cover" class="hero__photo">
+      <img :src="cover" :alt="`${trip.title || '未命名行程'}的封面`" decoding="async" referrerpolicy="no-referrer" />
     </div>
     <div v-else class="hero__fallback" aria-hidden="true">
       <RouteArt />

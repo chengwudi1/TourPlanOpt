@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     version: str = "0.1.0"
     db_path: Path = DATA_DIR / "tourplan.db"
 
+    # --- M36 行程封面 ---------------------------------------------------------------
+    # 后端今天唯一真正落盘的用户内容。备份范围因此从「一个 db 文件」变成「整个 data 目录」。
+    uploads_dir: Path = DATA_DIR / "uploads"
+    # 前端已经把图压到 200–400KB，这一条是绕开前端直接打接口时的硬闸，不是体验限制。
+    cover_max_bytes: int = 4 * 1024 * 1024
+
     # --- Amap: Web服务 key (backend REST). Never sent to the browser. ---
     amap_web_key: str = ""
     # --- Amap: Web端(JS API) key + security code (frontend map) ---

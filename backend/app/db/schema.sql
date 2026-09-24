@@ -22,6 +22,11 @@ CREATE TABLE IF NOT EXISTS trips (
     id            TEXT PRIMARY KEY,           -- 8-char base32, URL-safe
     title         TEXT NOT NULL DEFAULT '',
     city          TEXT NOT NULL DEFAULT '',
+    -- M36 行程封面。**只装用户亲手选或传的那一张**：自动来源一律不落这一列——「恢复默认封面」
+    -- 这个动作要求「系统挑的」与「我挑的」能分开，而 M37 之后系统挑的那一张是前端打包的六张
+    -- 风景照之一（按 trip_id 稳定散列），后端既不需要、也不该再抄一份挑法。
+    -- 空串 = 没设过封面，海报头与首页各自去取那张内置默认图。
+    cover_url     TEXT NOT NULL DEFAULT '',
     travel_mode   TEXT NOT NULL DEFAULT 'driving'
                   CHECK (travel_mode IN ('driving', 'walking', 'straight')),
     cost_model    TEXT NOT NULL DEFAULT 'haversine'

@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 
 import type {
   ChecklistItem,
+  CoverSource,
   Day,
   DayTimeline,
   Expense,
@@ -20,6 +21,7 @@ import type { OpBroadcastFrame } from '@/types/protocol'
 import { Ops } from '@/types/protocol'
 import { colorForClient, getClientId, useClientIdentity } from '@/composables/useClientIdentity'
 import { apiFetch, postJson } from '@/utils/api'
+import { builtinCoverFor } from '@/utils/builtinCovers'
 import { formatMoney } from '@/utils/money'
 import { useSocketStore } from '@/stores/socket'
 import { useFeedbackStore } from '@/stores/feedback'
@@ -248,25 +250,35 @@ export const useTripStore = defineStore('trip', () => {
   const spentCents = computed(() => expenses.value.reduce((sum, e) => sum + e.amount_cents, 0))
 
   /**
-   * 海报头的封面：第一个真的带图的地点。
+   * 带图的地点，按「天在前、天内按 `sort_index`」排好，只给封面面板的「行程图片」那一档列。
    *
-   * 规则与 `backend/app/db/repositories.py` 里摘要接口那条 `covers` 一致——天按
-   * `day_index`、天内按 `sort_index`，取首条非空 `photo_url`。两处必须挑同一张图，
-   * 否则首页卡片与行程页顶上各显示一张，看着像两个不同的行程。服务端是一次 SQL 排好
-   * 序在 Python 里取首条；这里的数据本来就在手，按同一个顺序现算就行。
+   * M36 时这份清单还兼着海报头自动档的挑图顺序（与摘要接口那次批量挑图同源），M37 起自动档
+   * 换成了内置海报，这里就只是面板里的一个列表——顺序仍然按行程读下来的样子排。
    */
-  const coverPhoto = computed(() => {
+  const placeCovers = computed(() => {
     const dayIndex = new Map(days.value.map((d) => [d.id, d.day_index]))
-    const hit = places.value
+    return places.value
       .filter((p) => p.photo_url)
       .slice()
       .sort(
         (a, b) =>
           (dayIndex.get(a.day_id) ?? 0) - (dayIndex.get(b.day_id) ?? 0) ||
           a.sort_index - b.sort_index,
-      )[0]
-    return hit?.photo_url ?? ''
+      )
+      .map((p) => ({ url: p.photo_url, name: p.name }))
   })
+
+  /**
+   * 海报头那两档：自己那张 > 内置默认那张。
+   *
+   * M36 曾经在中间插过城市图与行程首图两级自动档，实测下来不可用：高德的候选图是别人上传的
+   * 评论配图，苏州那一趟的海报头因此显示了一张酒店客房。内置海报是打包进前端的静态资产，
+   * 按 `trip_id` 稳定散列挑一张——同趟永远同一张，协同两端不需要协商也不会漂。
+   */
+  const coverPhoto = computed(() => trip.value?.cover_url || builtinCoverFor(trip.value?.id ?? ''))
+  /** 出的是哪一档。票券与封面面板都要据此决定给「换封面」还是「恢复默认封面」，
+   *  而 CSS 类名不算一个能读到的事实。 */
+  const coverSource = computed<CoverSource>(() => (trip.value?.cover_url ? 'custom' : 'builtin'))
 
   function selectPlace(placeId: string | null) {
     selectedPlaceId.value = placeId
@@ -613,6 +625,23 @@ export const useTripStore = defineStore('trip', () => {
   function updateTripFields(patch: Partial<Trip>) {
     if (trip.value) Object.assign(trip.value, patch)
     useSocketStore().sendOp(Ops.TRIP_UPDATE, { patch })
+  }
+
+  /**
+   * 上传本机封面。走 REST 而不是 op：文件落盘与写 `cover_url` 必须在同一次请求里完成，
+   * 拆成「先传拿 URL、再发 op」会留下一个没人负责回收的半截状态（决策 6）。
+   *
+   * 成功后端点会朝房间广播 `trip_updated`，本页也会收到那条回声；这里仍就地合并，是为了
+   * socket 恰好没连上时海报不会停在旧图——回声写的是同一个值，不存在谁盖谁。
+   */
+  async function uploadCover(file: Blob): Promise<string> {
+    const tripId = trip.value?.id
+    if (!tripId) return ''
+    const body = new FormData()
+    body.append('file', file)
+    const saved = await apiFetch<Trip>(`/api/trips/${tripId}/cover`, { method: 'POST', body })
+    if (trip.value) trip.value.cover_url = saved.cover_url
+    return saved.cover_url
   }
 
   /** Append a new day to the trip. `title`/`date` are optional; the server appends after
@@ -1789,6 +1818,8 @@ export const useTripStore = defineStore('trip', () => {
     expensesNewestFirst,
     spentCents,
     coverPhoto,
+    coverSource,
+    placeCovers,
     selectPlace,
     applySnapshot,
     load,
@@ -1800,6 +1831,7 @@ export const useTripStore = defineStore('trip', () => {
     reorderDay,
     nudgePlace,
     updateTripFields,
+    uploadCover,
     addDay,
     updateDay,
     deleteDay,

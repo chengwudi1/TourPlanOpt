@@ -183,6 +183,17 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(assistant_router)
 
+    # M36 封面文件。必须注册在下面 "/" 那个 SPA catch-all **之前**：Starlette 按注册顺序
+    # 匹配 mount，反过来所有 /uploads/... 都会先撞上 SPA 处理器，拿回一个 index.html。
+    # StaticFiles 遇到不存在的目录是直接抛的，而抛在这里等于因为一个可选功能拒绝启动。
+    from fastapi.staticfiles import StaticFiles
+
+    try:
+        settings.uploads_dir.mkdir(parents=True, exist_ok=True)
+        app.mount("/uploads", StaticFiles(directory=settings.uploads_dir), name="uploads")
+    except Exception:
+        logger.exception("封面目录不可用（上传的图片将读不到）")
+
     @app.websocket("/ws/trips/{trip_id}")
     async def ws_trip_endpoint(websocket: WebSocket, trip_id: str) -> None:
         from app.db.database import get_db
@@ -211,7 +222,6 @@ def create_app() -> FastAPI:
     # Registered LAST: the catch-all mount must not shadow /api or the WS endpoint
     # above (Starlette matches in registration order).
     if settings.frontend_dist.is_dir() and (settings.frontend_dist / "index.html").is_file():
-        from fastapi.staticfiles import StaticFiles
 
         class SPAStaticFiles(StaticFiles):
             """Serve index.html for client-side routes (/trip/xxx) while keeping real

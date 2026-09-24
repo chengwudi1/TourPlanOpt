@@ -7,10 +7,11 @@ repository functions, so there is one implementation of every mutation.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, status
 
 from app.amap.client import fetch_photo_best_effort
 from app.auth.routes_auth import current_user
+from app.config import settings
 from app.db.database import get_db
 from app.db.repositories import (
     add_place,
@@ -35,6 +36,7 @@ from app.models.domain import (
     TripPatch,
     TripSummaryList,
 )
+from app.uploads import CoverReject, drop_cover_file, save_cover, sweep_covers
 
 router = APIRouter(prefix="/api/trips", tags=["trips"])
 
@@ -122,12 +124,31 @@ async def read_trip(trip_id: str, request: Request) -> Snapshot:
     return snapshot
 
 
+async def _broadcast_trip_updated(db, trip_id: str, updated: TripOut) -> None:
+    """写完必须朝房间广播一条 `trip_updated`，否则同时开着的行程页会停在旧状态，而且它下次
+    自己发 `trip_update` 时按 LWW 会把刚写下的值盖回去——那边根本不知道有人改过。
+    """
+    from app.models.protocol import broadcast_op_frame
+    from app.ws.hub import get_hub
+
+    hub = get_hub().peek(trip_id)
+    if hub is None:
+        return
+    seq = await next_seq(db, trip_id)
+    hub.broadcast(
+        broadcast_op_frame(
+            seq,
+            "trip_updated",
+            origin="server",
+            op_id=f"patch-{trip_id}-{seq}",
+            data={"trip": updated.model_dump(mode="json")},
+        )
+    )
+
+
 @router.patch("/{trip_id}", response_model=TripOut)
 async def patch_trip(trip_id: str, body: TripPatch) -> TripOut:
     """HTTP 侧改行程：首页没有 WebSocket，「标记完成 / 归档 / 设预算」只能走这条路。
-
-    写完必须朝房间广播一条 `trip_updated`，否则同时开着的行程页会停在旧状态，而且它下次
-    自己发 `trip_update` 时按 LWW 会把首页刚写下的值盖回去——那边根本不知道有人改过。
 
     `exclude_unset` 是必要的：``{"city": null}`` 是一次真实的清空意图，而字段缺席意味着
     「这一项别碰」，两者不能都读成「改成空」。
@@ -141,22 +162,44 @@ async def patch_trip(trip_id: str, body: TripPatch) -> TripOut:
     updated = await update_trip(db, trip_id, patch)
     if updated is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "提交的内容无效")
+    await _broadcast_trip_updated(db, trip_id, updated)
+    return updated
 
-    from app.models.protocol import broadcast_op_frame
-    from app.ws.hub import get_hub
 
-    hub = get_hub().peek(trip_id)
-    if hub is not None:
-        seq = await next_seq(db, trip_id)
-        hub.broadcast(
-            broadcast_op_frame(
-                seq,
-                "trip_updated",
-                origin="server",
-                op_id=f"patch-{trip_id}-{seq}",
-                data={"trip": updated.model_dump(mode="json")},
-            )
-        )
+@router.post("/{trip_id}/cover", response_model=TripOut)
+async def upload_cover(trip_id: str, file: UploadFile) -> TripOut:
+    """M36 本机上传封面：落文件 + 写 `trips.cover_url` + 广播，一步做完。
+
+    分两步（先上传拿 URL、再由前端发 op 写库）会留下「文件已经在磁盘上却没人引用」的半截
+    状态，而失败的那一次没人负责回收。被换下的旧图由 `update_trip` 在写库成功后删（三个
+    写入口共用那一处）；这里只负责本次上传自己写出来、却没能落库的那一个。
+    """
+    db = get_db()
+    if await db.fetch_one("SELECT id FROM trips WHERE id = ?", (trip_id,)) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "这份行程不存在，可能已被删除")
+    try:
+        url = await save_cover(trip_id, await file.read())
+    except CoverReject as exc:
+        limit_mb = settings.cover_max_bytes // (1024 * 1024)
+        code, message = {
+            "type": (
+                status.HTTP_400_BAD_REQUEST,
+                "不是可识别的图片文件，支持 JPEG、PNG 与 WebP",
+            ),
+            "too_large": (
+                status.HTTP_413_CONTENT_TOO_LARGE,
+                f"图片超过 {limit_mb} MB",
+            ),
+            "id": (status.HTTP_404_NOT_FOUND, "这份行程不存在，可能已被删除"),
+        }[exc.kind]
+        raise HTTPException(code, message) from exc
+    updated = await update_trip(db, trip_id, {"cover_url": url})
+    if updated is None:
+        # 走到这里 patch 一定合法（值是自己刚生成的 /uploads/ 路径），留这一手只为不静默吞掉失败。
+        drop_cover_file(url, trip_id)
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "提交的内容无效")
+    await sweep_covers(trip_id, url)
+    await _broadcast_trip_updated(db, trip_id, updated)
     return updated
 
 
