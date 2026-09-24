@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { X } from '@/components/icons'
+import { useNarrowView } from '@/composables/useNarrowView'
 import { useReduceMotion } from '@/composables/useReduceMotion'
 import { isTopModalLayer, popModalLayer, pushModalLayer } from '@/utils/modalStack'
 import { trapTab } from '@/utils/focusTrap'
@@ -47,10 +48,9 @@ let pointerStartY = 0
 let pointerStartTime = 0
 let pointerId = -1
 
-/** 手机上才有的「可下滑关闭」。断点与 CSS 的 860px 对齐。 */
-const canSwipe = computed(
-  () => props.variant === 'sheet' && window.matchMedia('(max-width: 860px)').matches,
-)
+/** 手机上才有的「可下滑关闭」。断点走 useNarrowView 单例，与 CSS 的 860px 同源。 */
+const narrow = useNarrowView()
+const canSwipe = computed(() => props.variant === 'sheet' && narrow.value)
 
 /**
  * 位移写 CSS 变量而不是 style.transform：后者要连带关掉入场动画，而 class 一撤
@@ -333,7 +333,7 @@ defineExpose({ close: requestClose })
     border: 0;
     border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     border-bottom: 0;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-bottom: var(--sab);
   }
   .modal--sheet .modal__head {
     padding-top: 4px;

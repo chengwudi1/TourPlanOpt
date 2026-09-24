@@ -549,6 +549,32 @@ defineExpose({
   border-radius: var(--radius-sm);
 }
 
+/* ---------- 手机 ---------- */
+@media (max-width: 860px) {
+  /* 展开体以前不限高：十几条结果把当天的行程整个推出视口，「看一眼推荐」
+     变成「滚回行程」。列表自己限高内滚，外层那一栏不再被撑长。 */
+  .reco__list {
+    max-height: 42dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .reco__tab {
+    min-height: 34px;
+    padding: 5px 12px;
+  }
+
+  .reco__need-text {
+    flex-basis: 100%;
+  }
+}
+
+@media (hover: none) {
+  .reco__item:hover {
+    background: transparent;
+  }
+}
+
 .reco__amap {
   color: var(--accent);
   text-decoration: none;

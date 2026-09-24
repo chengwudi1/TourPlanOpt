@@ -339,7 +339,7 @@ watch(
 }
 
 .set__h {
-  font-size: calc(11px * var(--fs-scale));
+  font-size: var(--t-micro);
   font-weight: 700;
   letter-spacing: var(--ls-label);
   color: var(--text-3);
@@ -398,5 +398,16 @@ watch(
   display: flex;
   gap: var(--s3);
   align-items: center;
+}
+
+/* ---------- 手机：宿主已是底部抽屉，内部别再按宽屏尺度排 ---------- */
+@media (max-width: 860px) {
+  .set {
+    gap: var(--s4);
+    padding: var(--s3) var(--s4) var(--s4);
+  }
+  .set__row {
+    min-height: 44px;
+  }
 }
 </style>

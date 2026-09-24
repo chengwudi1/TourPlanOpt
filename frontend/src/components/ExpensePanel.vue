@@ -531,10 +531,21 @@ function drop(expense: Expense) {
   padding: 2px 8px;
 }
 
-/* 手机上这些 chip 是「谁来摊」的唯一开关，26px 高的落点按不准（O6）。 */
+/* 手机上这些 chip 是「谁来摊」的唯一开关，26px 高的落点按不准（O6）。
+   触屏档输入字号抬到 16px 后，84px 的金额框装不下五位数——给一点余量，
+   并允许录入行换行，别让「标题 + 提交」被挤成一条省略号。 */
 @media (max-width: 860px) {
   .chip {
-    min-height: 30px;
+    min-height: 34px;
+  }
+  .exp__form {
+    flex-wrap: wrap;
+  }
+  .exp__amount {
+    flex: 0 0 96px;
+  }
+  .exp__title-input {
+    flex: 1 1 150px;
   }
 }
 

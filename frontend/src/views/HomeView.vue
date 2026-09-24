@@ -583,9 +583,10 @@ onMounted(() => {
   display: flex;
   gap: 10px;
   align-items: center;
-  flex: 0 0 var(--header-h);
-  height: var(--header-h);
-  padding: 0 20px;
+  /* 与行程页顶栏同一条规则：实占含状态栏让位，内容行高仍是 --header-h。 */
+  flex: 0 0 var(--header-total-h);
+  height: var(--header-total-h);
+  padding: var(--sat) 20px 0;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   box-shadow: var(--shadow-sm);
@@ -762,7 +763,7 @@ onMounted(() => {
   align-self: flex-start;
   padding: 1px 8px;
   margin-bottom: 2px;
-  font-size: calc(11px * var(--fs-scale));
+  font-size: var(--t-micro);
   font-weight: 600;
   color: var(--text-2);
   background: var(--surface-2);
@@ -786,6 +787,15 @@ onMounted(() => {
 .board__item:hover .board__go {
   opacity: 1;
   transform: translateX(3px);
+}
+/* 触屏没有 hover：箭头常驻，否则这一行看起来不像能点。 */
+@media (hover: none) {
+  .board__go {
+    opacity: 1;
+  }
+  .board__item:hover .board__go {
+    transform: none;
+  }
 }
 
 /* ---------- 首次来的欢迎卡 ---------- */
@@ -1001,7 +1011,8 @@ onMounted(() => {
 .fab {
   position: fixed;
   right: 22px;
-  bottom: 22px;
+  /* 22px 的裸底距正好落进全面屏 Home 条的手势带——上滑返回桌面会先摸到它。 */
+  bottom: calc(22px + var(--sab));
   z-index: var(--z-bar);
   display: inline-flex;
   gap: 6px;
@@ -1049,10 +1060,20 @@ onMounted(() => {
   }
 }
 
+/* ---------- 手机：390–860 此前是「缩小的桌面页」，这一档收进手指尺度 ---------- */
+@media (max-width: 860px) {
+  .home__wrap {
+    padding: 12px 10px 20px;
+  }
+  .home__foot {
+    padding: 10px 14px calc(18px + var(--sab));
+  }
+}
+
 /* 窄屏顶栏放不下两个按钮，文字让给图标，FAB 已经是主入口了。 */
 @media (max-width: 620px) {
   .homebar {
-    padding: 0 14px;
+    padding: var(--sat) 14px 0;
   }
   .homebar__right .btn--primary {
     display: none;

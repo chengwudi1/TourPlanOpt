@@ -138,7 +138,7 @@ const mood = computed(() => (speaking.value ? 'talk' : assistant.mood))
    让位高度与 dock 共用 --dock-h，安全区另加——两处必须同涨同落。 */
 @media (max-width: 860px) {
   .sprite {
-    bottom: calc(var(--dock-h) + env(safe-area-inset-bottom, 0px) + var(--s4));
+    bottom: calc(var(--dock-total-h) + var(--s4));
     transition: opacity var(--dur) var(--ease-out), transform var(--dur) var(--ease-out);
   }
 

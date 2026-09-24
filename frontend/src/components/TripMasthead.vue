@@ -158,7 +158,7 @@ onBeforeUnmount(() => {
     <div class="mast__ticket">
       <h1 class="mast__title">
         <button
-          class="mast__name"
+          class="mast__name tap-pad"
           type="button"
           :title="title ? '点击重命名行程' : '点击设置行程名'"
           @click="emit('rename')"
@@ -357,7 +357,7 @@ onBeforeUnmount(() => {
   color: var(--kick-ink);
   background: var(--kick-bg);
   font-family: var(--mono);
-  font-size: calc(11.5px * var(--fs-scale));
+  font-size: var(--t-micro);
   font-weight: 600;
   letter-spacing: var(--ls-caps);
   text-overflow: ellipsis;
@@ -425,7 +425,7 @@ onBeforeUnmount(() => {
   padding: 3px 10px;
   color: #fff;
   font-family: system-ui, sans-serif;
-  font-size: calc(11.5px * var(--fs-scale));
+  font-size: var(--t-micro);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;

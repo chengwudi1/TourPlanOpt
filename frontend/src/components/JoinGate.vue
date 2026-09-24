@@ -79,9 +79,12 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .gate {
-  position: absolute;
+  /* 明确钉在视口上：原来 absolute + inset:0 靠「没有定位祖先」侥幸等同铺满文档，
+     键盘弹起时文档没缩，居中的输入框会落到键盘背后。 */
+  position: fixed;
   z-index: var(--z-overlay);
   inset: 0;
+  height: 100dvh;
   display: grid;
   place-items: center;
   /* 雾从 --bg 调出来：原来那枚冷白 rgba(246,247,249) 既不属于亮色纸面也不属于深色，

@@ -661,6 +661,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
 .apanel__log {
   max-height: 46vh;
+  max-height: 46dvh;
   overflow-y: auto;
   padding: var(--s3) var(--s4);
   display: flex;
@@ -966,12 +967,26 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   }
 }
 
-@media (max-width: 640px) {
+/* 手机档跟全项目统一在 860（原来挂在孤儿 640 上，iPad 竖屏与小折叠屏两头不靠）。
+   bottom 读 dock 总高，不再手算 122/132；面板自己封顶在视口内，键盘弹起时靠
+   dvh 的日志高度收缩。 */
+@media (max-width: 860px) {
   .apanel {
     right: var(--s3);
     left: var(--s3);
-    bottom: 122px;
+    bottom: calc(var(--dock-total-h) + var(--s3));
     width: auto;
+    max-height: calc(100dvh - var(--dock-total-h) - var(--header-total-h) - var(--s4));
+  }
+
+  .apanel__chip {
+    min-width: 34px;
+    min-height: 34px;
+  }
+
+  .apanel__mic {
+    width: 40px;
+    height: 40px;
   }
 }
 </style>

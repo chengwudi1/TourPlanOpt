@@ -728,5 +728,19 @@ function runOptimize() {
       inset 4px 0 0 var(--dc),
       var(--shadow-sm);
   }
+
+  /* 触屏落点：这三颗都是 20~26px 的裸图标/文字钮，拇指按不准（O6 同族）。 */
+  .daysec__del {
+    width: 30px;
+    height: 30px;
+  }
+
+  .daysec__add {
+    min-height: 34px;
+  }
+
+  .daysec__precise {
+    min-height: 34px;
+  }
 }
 </style>

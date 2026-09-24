@@ -648,4 +648,22 @@ const bubble = computed(() => dragging.value || hovered.value || focused.value)
 .rail__hour--last {
   transform: translateX(-100%);
 }
+
+/* ---------- 手机：轨道是这一屏的主控件，热区按手指来 ---------- */
+@media (max-width: 860px) {
+  /* 细条配大热区这条不动，只是 26px 对拇指偏小：撑到 34。 */
+  .rail__track::before {
+    height: 34px;
+  }
+
+  .rail__hours {
+    height: 18px;
+  }
+
+  /* 11px 的刻度字不随 --t-micro 抬（这里是裸写的），单独跟一档。 */
+  .rail__hour {
+    padding: 2px 5px;
+    font-size: calc(12px * var(--fs-scale));
+  }
+}
 </style>

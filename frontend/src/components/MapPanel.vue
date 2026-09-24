@@ -466,10 +466,24 @@ defineExpose({
 }
 
 /* 桌面端右下角是精灵的（88px 宽、离边 24px），工具条让到它左边去。
-   手机端不用让：那边精灵已经抬到 dock 之上（Sprite.vue 的 --dock-h 那条）。 */
+   手机端精灵停在 dock 之上（bottom = dock 总高 + 16，头像 56），
+   工具条同样挤在右下象限——抬到精灵头顶上，S1 的同族问题。 */
 @media (min-width: 861px) {
   .map-panel__tools {
     right: 124px;
+  }
+}
+@media (max-width: 860px) {
+  /* 右下象限是精灵的地盘（≤640 头像 56、641–860 仍是 88，右侧让不开），
+     工具条整体挪到左下；bottom 抬高是避开 AMap 比例尺（它钉在左下 ~10px）。 */
+  .map-panel__tools {
+    right: auto;
+    left: 12px;
+    bottom: 64px;
+    align-items: flex-start;
+  }
+  .map-panel__locate {
+    min-height: 38px;
   }
 }
 .map-panel__locate {

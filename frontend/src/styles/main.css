@@ -236,6 +236,17 @@
   --header-h: min(68px, calc(56px * var(--fs-scale)));
   /* 移动端底部 dock 的整条高度（不含安全区）。精灵靠它让位，所以两边共用这一个数。 */
   --dock-h: min(65px, calc(53px * var(--fs-scale)));
+  /* 安全区预留：刘海/状态栏与 Home 条的让位量。全项目只在这一处调 env()，
+     顶栏、dock、右下浮层一律读这两个令牌——之前 safe-area 只落了 6 处，
+     其余 fixed 件（FAB、选点卡、助手面板）全在裸写魔法数。
+     --dock-total-h 是「dock + Home 条」的总占位，任何要浮在 dock 之上的
+     件（地图选点、精灵、聊天跳底钮）都减这一个数，不许再算第二遍。 */
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --dock-total-h: calc(var(--dock-h) + var(--sab));
+  /* 顶栏的实占高度（含刘海/状态栏让位）。两条顶栏（行程页 TripHeader、
+     首页 homebar）与压在它下面的 Toast 都读这一个数。 */
+  --header-total-h: calc(var(--header-h) + var(--sat));
   /* 窄屏地点抽屉的高度：抽屉自己按它长，地图按它的一半抬起（选中的那一站要落在
      抽屉上方那条可见带里，而不是正好处在抽屉背后）。两处必须是同一个数。 */
   --place-sheet-h: 72dvh;
@@ -356,6 +367,24 @@ body,
 #app {
   height: 100%;
   margin: 0;
+}
+
+/* 框架高度必须是 dvh：iOS 的地址栏一收放，`100%` 链算出来的仍是「大视口」，
+   底部 dock 会整条滑到工具栏背后（此前只有 --place-sheet-h 和 AppModal 用了
+   dvh，等于全 App 的宪法没改）。不认识 dvh 的老浏览器保持 100%，行为不变。 */
+@supports (height: 100dvh) {
+  html,
+  body,
+  #app {
+    height: 100dvh;
+  }
+}
+
+html {
+  /* 触屏点击不再叠一层系统灰底方块——描边贴纸风自己会做按下反馈。 */
+  -webkit-tap-highlight-color: transparent;
+  /* 首页在顶部下拉不该触发「刷新页面」的橡皮筋。 */
+  overscroll-behavior-y: none;
 }
 
 body {
@@ -566,6 +595,52 @@ textarea {
   }
 }
 
+/* ---------- 触屏档（pointer: coarse） ----------
+   手指带来三件事：落点要更大、输入字要更大（<16px 时 iOS 聚焦会整页放大，
+   用户得横拖才能看完这一行）、hover 效果要拿掉（触屏的粘滞 hover 是 bug 不是效果）。
+   这一档按「输入设备」而不是宽度断点生效——触屏平板与小屏笔记本一并覆盖，
+   而桌面窄窗口不会误伤密度。 */
+@media (pointer: coarse) {
+  :root {
+    /* 11px 的手机下限抬到 12px；组件里裸写的 10/11px 在各自文件内跟调。 */
+    --t-micro: calc(12px * var(--fs-scale));
+  }
+  /* 组件普遍在 scoped 里把输入写小（行程页的「点」是 13px），scoped 选择器权重更高，
+     只有 !important 压得住——这是全文件唯一一处 !important，它守的是「聚焦不放大」
+     这条行为底线，不是美观偏好。勾选框/单选框不吃字号，排除掉免得被拉大。 */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  textarea,
+  select {
+    font-size: max(16px, var(--t-body)) !important;
+  }
+  .btn {
+    min-height: 38px;
+  }
+  .btn--sm {
+    min-height: 34px;
+    padding: 6px 10px;
+  }
+  .iconbtn {
+    width: 34px;
+    height: 34px;
+  }
+}
+
+/* 触屏没有悬停停留：把「抬起/缩放」类 hover 反馈原地作废，免得点完一个按钮
+   它一直浮着不回位。视觉底色反馈保留——按下态与选中态本来就走别的类。 */
+@media (hover: none) {
+  .btn:hover:not(:disabled),
+  .btn:active:not(:disabled) {
+    transform: none;
+  }
+  .iconbtn:hover:not(:disabled) {
+    transform: none;
+  }
+  .avatar:hover {
+    transform: none;
+  }
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -687,7 +762,9 @@ textarea {
 .panel__scroll {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  /* 只写 overflow-y 时另一轴会被计算成 auto——内层一旦有超宽行，整栏就能左右拖。
+     主滚动容器横向必须钉死。 */
+  overflow: hidden auto;
 }
 /* 一栏里同时摆四五张卡时，每张都带 --shadow-md 就等于没有层次——糊影会互相叠。
    面板内的卡一律降一档，靠描边分层；浮层（卡片菜单、顶栏菜单、地图选点）不在
@@ -728,10 +805,10 @@ textarea {
     display: flex;
     gap: 4px;
     flex: 0 0 auto;
-    /* 高度写死成令牌（精灵按同一个数让位，S1），安全区在下面另加。 */
-    height: calc(var(--dock-h) + env(safe-area-inset-bottom, 0px));
+    /* 高度写死成令牌（精灵按同一个数让位，S1），安全区读 --sab。 */
+    height: calc(var(--dock-h) + var(--sab));
     align-items: stretch;
-    padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
+    padding: 8px 12px calc(8px + var(--sab));
     background: var(--surface);
     border-top: 1px solid var(--border);
   }
@@ -921,7 +998,7 @@ textarea {
   border: 2px solid var(--avatar-ring);
   border-radius: 50%;
   color: var(--warp-ink);
-  font-size: calc(11px * var(--fs-scale));
+  font-size: var(--t-micro);
   font-weight: 700;
   /* 挂在 animation 而不是 transition 上：Vue 移动已有节点不会重放动画，所以只有
      「新加入的那个人」会弹一下，别人进出不会让整排头像集体重播。 */

@@ -407,9 +407,10 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 8px;
   align-items: center;
-  flex: 0 0 var(--header-h);
-  height: var(--header-h);
-  padding: 0 12px;
+  /* 实占含刘海让位；内容行仍是 --header-h（padding-top 吃安全区）。 */
+  flex: 0 0 var(--header-total-h);
+  height: var(--header-total-h);
+  padding: var(--sat) 12px 0;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   box-shadow: var(--shadow-sm);
@@ -657,7 +658,12 @@ onBeforeUnmount(() => {
 @media (max-width: 860px) {
   .triphead {
     gap: 6px;
-    padding: 0 8px;
+    padding: var(--sat) 8px 0;
+  }
+
+  .tripmenu__item {
+    min-height: 40px;
+    padding: 8px 10px;
   }
 
   /* 手机上行程名要拿到尽可能宽的余量：这些次要控件统一进「更多」。

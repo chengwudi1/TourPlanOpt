@@ -1298,6 +1298,8 @@ onBeforeUnmount(() => {
   .login {
     grid-template-columns: 1fr;
     grid-template-rows: 38vh 1fr;
+    /* svh = 工具栏展开时的「小视口」：画带只是门面，按大视口给高会把表单整段推出首屏。 */
+    grid-template-rows: 38svh 1fr;
   }
 
   .canvas {
@@ -1336,7 +1338,7 @@ onBeforeUnmount(() => {
   }
 
   .panel {
-    padding: var(--s5) var(--s4) var(--s6);
+    padding: var(--s5) var(--s4) calc(var(--s6) + var(--sab));
   }
 
   .panel::before {

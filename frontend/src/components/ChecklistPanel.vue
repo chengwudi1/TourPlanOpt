@@ -345,11 +345,36 @@ function remove(item: ChecklistItem) {
   opacity: 1;
 }
 
-/* 触屏没有 hover：删除与拖动把手常驻，否则这一项既删不掉也挪不动。 */
+/* 触屏没有 hover：删除与拖动把手常驻，否则这一项既删不掉也挪不动；
+   行洗色是 hover 的副产品，触屏上会粘在最后点过的一行上，作废。 */
 @media (hover: none) {
   .chk__drag,
   .chk__drop {
     opacity: 1;
+  }
+  .chk:hover {
+    background: transparent;
+  }
+  .chk--done:hover .chk__box {
+    background: var(--accent);
+  }
+}
+
+/* ---------- 手机：清单是「勾一下」的屏，落点按手指来 ---------- */
+@media (max-width: 860px) {
+  .chk {
+    min-height: 38px;
+    padding: 6px 6px 6px 2px;
+  }
+  /* 20px 的复选框是这一屏最高频的靶子，按不准等于功能没有。 */
+  .chk__box {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+  }
+  .chk__drag,
+  .chk__drop {
+    padding: 7px;
   }
 }
 

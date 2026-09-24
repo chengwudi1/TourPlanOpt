@@ -778,6 +778,10 @@ function openAnchor(a: Anchor) {
   .chat__bubble {
     max-width: 84%;
   }
+  /* 触屏档输入字号抬到 16px 后输入条变高，74 会压住 textarea——跟着抬。 */
+  .chat__jump {
+    bottom: 88px;
+  }
   .chat__mic {
     width: 34px;
     height: 34px;

@@ -272,6 +272,22 @@ onBeforeUnmount(() => {
   color: var(--text);
 }
 
+/* ---------- 手机 ---------- */
+@media (max-width: 860px) {
+  /* 320px 的裸限高假设了桌面视口：键盘弹起后下拉的下半段整个沉进键盘背后，
+     看得见的位置只剩前几条。按视口收一档。 */
+  .search__list {
+    max-height: min(320px, 42dvh);
+  }
+  .search__item {
+    min-height: 44px;
+  }
+  .search__stash {
+    min-height: 32px;
+    padding: 4px 10px;
+  }
+}
+
 .search__meta {
   margin-top: 2px;
   overflow: hidden;

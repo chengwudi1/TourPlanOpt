@@ -117,4 +117,15 @@ const store = useTripStore()
 .stash__drop {
   padding: 4px 7px;
 }
+
+/* 手机上「放回行程 / 彻底删除」是这一屏仅有的两个动作，落点要按手指来。 */
+@media (max-width: 860px) {
+  .stash__item {
+    min-height: 56px;
+  }
+  .stash__drop {
+    min-height: 34px;
+    padding: 4px 10px;
+  }
+}
 </style>

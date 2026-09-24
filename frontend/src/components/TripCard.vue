@@ -346,7 +346,7 @@ onBeforeUnmount(closeMenu)
   gap: 3px;
   align-items: center;
   padding: 1px 7px;
-  font-size: calc(11px * var(--fs-scale));
+  font-size: var(--t-micro);
   color: var(--text-2);
   background: var(--surface-2);
   border: 1px solid var(--border-faint);
@@ -446,5 +446,35 @@ onBeforeUnmount(closeMenu)
 }
 .tripcard__menu-item--danger .ic {
   color: var(--danger);
+}
+
+/* ---------- 触屏 ---------- */
+/* 「进入」箭头原来只有 hover 显形——手机上主行动提示等于不存在。
+   同时作废卡片浮起与封面推近：触屏的粘滞 hover 会让最后点过的卡一直浮着。 */
+@media (hover: none) {
+  .tripcard__go {
+    opacity: 1;
+    transform: none;
+  }
+  .tripcard:hover {
+    transform: none;
+  }
+  .tripcard:hover .tripcard__cover img {
+    transform: none;
+  }
+}
+
+@media (max-width: 860px) {
+  .tripcard__more {
+    width: 32px;
+    height: 32px;
+  }
+  .tripcard__menu {
+    width: min(180px, calc(100vw - 16px));
+  }
+  .tripcard__menu-item {
+    min-height: 40px;
+    padding: 8px 9px;
+  }
 }
 </style>

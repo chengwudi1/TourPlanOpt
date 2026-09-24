@@ -623,11 +623,11 @@ const orderHint = computed(() => {
 @media (max-width: 860px) {
   .edit__foot {
     /* 抽屉与列表两端都要够按：完成是这一屏唯一的收束动作。 */
-    padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+    padding-bottom: max(8px, var(--sab));
   }
 
   .chip {
-    min-height: 30px;
+    min-height: 34px;
   }
 }
 </style>

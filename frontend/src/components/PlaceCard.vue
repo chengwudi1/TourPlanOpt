@@ -541,14 +541,47 @@ onBeforeUnmount(() => esc(false))
 
 /* 这三颗挨着，用 .tap-pad 向外撑会互相盖住落点——直接加高更诚实。 */
 @media (max-width: 860px) {
+  .place {
+    padding: 8px;
+  }
+
+  /* 390px 实测（_trip-layout-probe）：一行里 drag 28 + 照片 34 + 4×gap 32 +
+     时间列 ~70 + 常显按钮 ~60 之后，正文只剩 64–90px——旧注释「正文列 218px 起」
+     不成立，地名被省略号吃成两三个字。窄屏改为两行制：body 的 basis 直接占满
+     第一行剩余（98 > drag+照片+gap 的 94，时间列与按钮必然折到第二行），
+     地名拿到 ~214px；时间横排在左、操作在右。 */
+  .place__row {
+    row-gap: 2px;
+    /* 长按行卡不该弹文字选择柄；就地改名的输入框在下面豁免回来。 */
+    user-select: none;
+  }
+
+  .place__row input,
+  .place__row textarea {
+    -webkit-user-select: auto;
+    user-select: auto;
+  }
+
+  .place__body {
+    flex-basis: calc(100% - 98px);
+  }
+
+  .place__time {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 8px;
+    margin-right: auto;
+    padding-top: 0;
+  }
+
   .place__close,
   .place__menu,
   .place__delete {
-    min-height: 30px;
+    min-height: 34px;
+    padding: 2px 8px;
   }
 
-  /* 竖叠在桌面上省的是宽度，手机上正相反：宽度富余（正文列 218px 起），高度才贵——
-     两颗 30px 摞起来会把每一行都撑高 12px。所以手机上回到横排。 */
+  /* 第二行右端横排：竖叠是桌面上省宽度的方案，手机上宽度已经还给地名了。 */
   .place__side {
     flex-direction: row;
     gap: 2px;
@@ -573,11 +606,15 @@ onBeforeUnmount(() => esc(false))
   border-top: 1px dashed var(--border);
 }
 
-/* 触屏没有 hover：把手与行内按钮常驻，否则无法拖动或删除。 */
+/* 触屏没有 hover：把手与行内按钮常驻，否则无法拖动或删除；hover 的浮起位移作废，
+   否则最后点过的那张卡一直「浮」着不回位。 */
 @media (hover: none) {
   .place__drag,
   .place__side {
     opacity: 1;
+  }
+  .place:hover:not(.place--ghost) {
+    transform: none;
   }
 }
 

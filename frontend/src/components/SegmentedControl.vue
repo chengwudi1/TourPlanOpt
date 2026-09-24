@@ -43,7 +43,9 @@ const emit = defineEmits<{ 'update:modelValue': [string] }>()
 .seg {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: 1fr;
+  /* 1fr 的隐式最小是 min-content：一句长提示能把整个等宽列撑破（设置抽屉 358px 里
+     六组这控件全撞这条）。minmax(0,1fr) 把下限压回 0，让文字自己折行。 */
+  grid-auto-columns: minmax(0, 1fr);
   gap: 3px;
   padding: 3px;
   background: var(--surface-2);
@@ -55,6 +57,7 @@ const emit = defineEmits<{ 'update:modelValue': [string] }>()
   display: flex;
   flex-direction: column;
   gap: 1px;
+  min-width: 0;
   padding: 6px 8px;
   color: var(--text-2);
   text-align: center;
@@ -87,5 +90,15 @@ const emit = defineEmits<{ 'update:modelValue': [string] }>()
 
 .seg__hint {
   color: var(--text-3);
+}
+
+/* ---------- 手机 ---------- */
+@media (max-width: 860px) {
+  .seg__opt {
+    min-height: 38px;
+  }
+  .seg__hint {
+    overflow-wrap: anywhere;
+  }
 }
 </style>

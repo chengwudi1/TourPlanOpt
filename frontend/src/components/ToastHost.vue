@@ -113,8 +113,9 @@ function runAction(toast: Toast) {
 @media (max-width: 860px) {
   .toasts {
     /* 底部是 dock 与精灵的地盘（M26e 刚把精灵抬到 dock 之上），压在它们上面等于少一个按钮；
-       顶部除了页头没有常驻交互，而且不管滚到哪一屏都保证看得见——这正是 S5 缺的性质。 */
-    top: calc(env(safe-area-inset-top, 0px) + 62px);
+       顶部除了页头没有常驻交互，而且不管滚到哪一屏都保证看得见——这正是 S5 缺的性质。
+       62px 的手算在最大字号档会把 toast 骑进顶栏，统一读含安全区的 --header-total-h。 */
+    top: calc(var(--header-total-h) + 8px);
     bottom: auto;
     align-items: flex-start;
   }

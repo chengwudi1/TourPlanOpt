@@ -780,4 +780,32 @@ onBeforeUnmount(() => {
   flex: 1;
   justify-content: center;
 }
+
+/* ---------- 手机：抽屉宽度只有 ~390，一切按「装得下手指与完整日期」重排 ---------- */
+@media (max-width: 860px) {
+  /* 116px 的格子里放 16px 字号的原生 date，年份被裁掉一半；一行一格。 */
+  .opt__grid {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+  /* 长标签（「开始日期与时长」这类）在 nowrap 下把 1fr 列压成 0。 */
+  .opt__label {
+    white-space: normal;
+  }
+  .stepper {
+    grid-template-columns: 38px minmax(0, 1fr) 38px;
+  }
+  .stepper__btn {
+    height: 38px;
+  }
+  /* 132px 海报位与右侧文案列在 330px 内容宽里挤成两条省略号——换行，各占整行。 */
+  .poster__row {
+    flex-wrap: wrap;
+  }
+  .poster__side {
+    flex: 1 1 100%;
+  }
+  .paste {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
 </style>

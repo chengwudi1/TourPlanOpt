@@ -1203,6 +1203,8 @@ if (import.meta.env.DEV) {
   display: flex;
   flex-direction: column;
   min-width: 170px;
+  /* anchorMenu 只能夹 left；菜单自身比视口还宽时右缘照样出界，宽度必须自己封顶。 */
+  max-width: min(320px, calc(100vw - 16px));
   padding: 4px;
   box-shadow: var(--shadow-lg);
   animation: cardmenu-in var(--dur-slow) var(--ease-pop);
@@ -1212,6 +1214,7 @@ if (import.meta.env.DEV) {
   display: flex;
   gap: 6px;
   align-items: center;
+  min-height: 34px;
   padding: 8px 10px;
   font-size: calc(13px * var(--fs-scale));
   color: var(--text);
@@ -1324,6 +1327,8 @@ if (import.meta.env.DEV) {
 .chatsheet {
   display: flex;
   height: min(58vh, 520px);
+  /* 键盘收起/地址栏伸缩时 vh 是「大视口」，抽屉会把输入框顶到看不见的地方。 */
+  height: min(58dvh, 520px);
   padding: 0 14px 14px;
 }
 
@@ -1346,6 +1351,12 @@ if (import.meta.env.DEV) {
 @media (max-width: 860px) {
   .map-host {
     transition: transform var(--dur-slow) var(--ease-out);
+  }
+
+  /* 选点卡浮在 dock 之上：88px 是「dock 65 + 23」的一次性手算，
+     没算 Home 条安全区，也没跟 --dock-h 的字号上限联动。统一读令牌。 */
+  .mappick {
+    bottom: calc(var(--dock-total-h) + 16px);
   }
 }
 
