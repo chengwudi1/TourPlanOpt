@@ -131,7 +131,8 @@ async function probe(force = false): Promise<void> {
   backendError.value = ''
   try {
     // 这一发是要花钱的（后端会真打一次高德），所以一个会话只打一次，绝不挂定时器。
-    const res = await fetch('/api/amap/health')
+    // 用户主动点「重新检查」时带 fresh=1 绕开后端的结果缓存，否则拿到的可能是几分钟前的旧结论。
+    const res = await fetch(force ? '/api/amap/health?fresh=1' : '/api/amap/health')
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     webKey.value = data.web_key
