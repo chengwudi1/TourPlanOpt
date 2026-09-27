@@ -47,6 +47,8 @@ const emit = defineEmits<{
   cover: []
   copyText: []
   chat: []
+  /** 按某个同伴的头像：跳到此刻他正看着的那一站。 */
+  goto: [placeId: string]
 }>()
 
 const auth = useAuthStore()
@@ -111,14 +113,38 @@ const chatBadge = computed(() =>
 )
 
 const initials = computed(() =>
-  props.presence.map((p) => ({
-    client_id: p.client_id,
-    name: p.name,
-    color: p.color,
-    letter: (p.name || '?').slice(0, 1).toUpperCase(),
-    isSelf: p.client_id === props.selfId,
-  })),
+  props.presence.map((p) => {
+    const where = store.presenceWhere.get(p.client_id) ?? null
+    const isSelf = p.client_id === props.selfId
+    /** 「第 3 天 · 浅草寺」；只报了天没点站时它自己就是一句完整的话。 */
+    const whereText = where ? [where.dayLabel, where.placeName].filter(Boolean).join(' · ') : ''
+    return {
+      client_id: p.client_id,
+      name: p.name,
+      color: p.color,
+      letter: (p.name || '?').slice(0, 1).toUpperCase(),
+      isSelf,
+      placeId: where?.placeId ?? null,
+      whereText,
+      /** 悬停就说清「这个人此刻在哪」，不必先点一下试。没停在任何一站要如实说，
+       *  留空会被读成「坏了」。 */
+      tip: isSelf
+        ? `${p.name}（你）`
+        : `${p.name || '同伴'} · ${whereText || '未选中任何一站'}`,
+    }
+  }),
 )
+
+/**
+ * 不含自己的那几位。头像按下去要跳得过去，是因为地图只画当前这一天的标记——一个停在
+ * 第 5 天的同伴在地图上彻底隐身，顶栏这一行是唯一能找到他的地方。
+ */
+const others = computed(() => initials.value.filter((p) => !p.isSelf))
+
+function jumpTo(person: { placeId: string | null }) {
+  if (!person.placeId) return
+  emit('goto', person.placeId)
+}
 
 /** 手机上「几个人在线」要说成人话：原来只有一个色点，连点都没有（O2）。 */
 const presenceLabel = computed(() => {
@@ -283,19 +309,23 @@ onBeforeUnmount(() => {
     </RouterLink>
 
     <div v-if="initials.length" class="avatars" title="此刻在线">
-      <span
+      <button
         v-for="(p, i) in initials"
         :key="p.client_id"
         class="avatar"
+        :class="{ 'avatar--jump': !p.isSelf && p.placeId }"
         :style="{
           background: p.color || 'var(--accent)',
           '--ring': p.color || 'var(--accent)',
           '--i': i,
         }"
-        :title="p.isSelf ? `${p.name}（你）` : p.name"
+        :title="p.tip"
+        :aria-label="p.tip"
+        :disabled="p.isSelf || !p.placeId"
+        @click="jumpTo(p)"
       >
         {{ p.letter }}
-      </span>
+      </button>
     </div>
 
     <button
@@ -344,10 +374,22 @@ onBeforeUnmount(() => {
         role="menu"
         aria-label="行程操作"
       >
-        <p class="tripmenu__meta tiny muted">
-          {{ presenceLabel }}
-          <template v-if="presenceNames"> · {{ presenceNames }}</template>
-        </p>
+        <p class="tripmenu__meta tiny muted">{{ presenceLabel }}</p>
+        <button
+          v-for="p in others"
+          :key="p.client_id"
+          class="tripmenu__item tripmenu__who"
+          type="button"
+          role="menuitem"
+          :disabled="!p.placeId"
+          @click="run(() => jumpTo(p))"
+        >
+          <span class="tripmenu__whodot" :style="{ background: p.color || 'var(--accent)' }" />
+          <span class="tripmenu__whoname">{{ p.name || '同伴' }}</span>
+          <span class="tripmenu__whowhere tiny muted">
+            {{ p.whereText || '未选中任何一站' }}
+          </span>
+        </button>
         <p class="tripmenu__meta tiny muted">协作状态：{{ statusLabel }}</p>
         <button class="tripmenu__item" type="button" role="menuitem" @click="run(() => emit('rename'))">
           <Pencil class="ic" :size="14" /> 重命名行程
@@ -548,11 +590,30 @@ onBeforeUnmount(() => {
   place-items: center;
   width: 26px;
   height: 26px;
+  padding: 0;
+  font-family: inherit;
   font-size: calc(12px * var(--fs-scale));
   font-weight: 700;
   color: var(--warp-ink);
+  appearance: none;
   border: 2px solid var(--surface);
   border-radius: 50%;
+}
+
+/* 头像从纯展示变成可点：按下去跳到那个人正看着的那一站。自己那一位与没停在任何一站的
+   同伴是禁用的，但禁用不许显灰——它仍然要读出「这个人在这儿」。 */
+.avatar:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.avatar--jump {
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-pop);
+}
+
+.avatar--jump:hover {
+  transform: translateY(-1px) scale(1.1);
 }
 
 /* 头像外圈＝「这个人此刻在页面里」。全局的 pulse-ring 放大到 2.6 倍，在这里是 68px 的一圈
@@ -649,6 +710,35 @@ onBeforeUnmount(() => {
 
 .tripmenu__meta {
   margin: 4px 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 在场这一段：一行一个人，右边写他此刻在哪一天哪一站。站名可以很长，所以位置那一列
+   自己封顶截断，人名不许被它挤没——认不出是谁的一行没有意义。 */
+.tripmenu__who {
+  gap: 6px;
+}
+
+.tripmenu__whodot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.tripmenu__whoname {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tripmenu__whowhere {
+  flex: none;
+  max-width: 46%;
+  margin-left: auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

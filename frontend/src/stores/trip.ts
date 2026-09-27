@@ -1716,15 +1716,57 @@ export const useTripStore = defineStore('trip', () => {
   })
 
   /**
-   * 谁（非自己）停在哪一个地点上：place_id -> 提示信息，卡片的光环与「在这张卡上」都读这里。
+   * 每个地点上有谁（不含自己）：place_id -> 在场者。地图标记上的头像堆叠读这一位，
+   * 卡片的那圈光环从它派生——两处各数一遍人，就会出现「地图上两个人、卡片上一个人」。
    * 服务端把自己那份 presence 也广播回来了，所以按 client_id 摘掉自己不是可选项：
    * 否则我一选中一张卡，界面就自称「有人在这张卡上」，那圈颜色还正好是我自己的色。
    */
-  const viewersByPlace = computed(() => {
-    const map = new Map<string, { name: string; color: string }>()
+  const presenceOnPlace = computed(() => {
+    const map = new Map<string, Presence[]>()
     for (const p of presence.value) {
       if (p.client_id === getClientId() || !p.focusing_place_id) continue
-      map.set(p.focusing_place_id, { name: p.name, color: p.color })
+      const list = map.get(p.focusing_place_id)
+      if (list) list.push(p)
+      else map.set(p.focusing_place_id, [p])
+    }
+    return map
+  })
+
+  /** 谁（非自己）停在哪一个地点上：place_id -> 提示信息，卡片的光环与「在这张卡上」都读这里。 */
+  const viewersByPlace = computed(() => {
+    const map = new Map<string, { name: string; color: string }>()
+    for (const [placeId, list] of presenceOnPlace.value) {
+      const first = list[0]
+      map.set(placeId, { name: first.name, color: first.color })
+    }
+    return map
+  })
+
+  /**
+   * 同伴此刻在哪：client_id -> 那一天那一站。顶栏的在场列表要说得出「第 3 天 · 浅草寺」，
+   * 而地图只画得下当前这一天的标记——所以这一位必须独立存在，别天的人才不至于彻底隐身。
+   *
+   * 只报了天、没停在任何一站是合法状态（刚切到天头还没点站），此时 `placeId` 为 null：
+   * 列表仍要说他在那一天，不能退化成「不知道」。
+   */
+  const presenceWhere = computed(() => {
+    const map = new Map<
+      string,
+      { dayId: string | null; placeId: string | null; dayLabel: string; placeName: string }
+    >()
+    for (const p of presence.value) {
+      if (p.client_id === getClientId()) continue
+      const place = p.focusing_place_id
+        ? (places.value.find((x) => x.id === p.focusing_place_id) ?? null)
+        : null
+      const dayId = place?.day_id ?? p.current_day_id ?? null
+      const day = dayId ? (days.value.find((d) => d.id === dayId) ?? null) : null
+      map.set(p.client_id, {
+        dayId,
+        placeId: place?.id ?? null,
+        dayLabel: day ? `第 ${day.day_index + 1} 天` : '',
+        placeName: place?.name ?? '',
+      })
     }
     return map
   })
@@ -1906,6 +1948,8 @@ export const useTripStore = defineStore('trip', () => {
     removePresence,
     draggersByDay,
     viewersByPlace,
+    presenceOnPlace,
+    presenceWhere,
     creatorColorOf,
     clearPendingOps,
     applyOrder,

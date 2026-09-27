@@ -274,6 +274,26 @@ const chatBadge = computed(() =>
 )
 
 /**
+ * 跳到某一站：切到他所在的那一天、选中这张卡。聊天气泡的「关于某一站」与顶栏的同伴头像
+ * 都要这一件事，各写一份就会出现「一处记得切天、另一处忘了」。
+ */
+function focusPlace(placeId: string) {
+  const place = store.places.find((p) => p.id === placeId)
+  if (!place) return
+  selectDay(place.day_id)
+  store.selectPlace(placeId)
+}
+
+/**
+ * 顶栏点同伴的头像。比聊天那一路多一步：要把行程面抬回前台，否则窄屏上跳是跳过去了，
+ * 屏幕上显示的仍是清单或聊天，人还压在别的页签后面。
+ */
+function gotoTeammatePlace(placeId: string) {
+  focusPlace(placeId)
+  showPane('trip')
+}
+
+/**
  * 气泡上那行「关于：某一站」按下去：切到那一天、选中那张卡，抽屉顺手关掉。
  *
  * 窄屏的选中会把地点编辑器抬起来（这是点卡片本来的行为），所以这里不额外解释「为什么
@@ -286,9 +306,7 @@ function openChatRef(ref: { placeId?: string; dayId?: string }) {
   }
   const placeId = ref.placeId
   if (!placeId) return
-  const place = store.places.find((p) => p.id === placeId)
-  if (place) selectDay(place.day_id)
-  store.selectPlace(placeId)
+  focusPlace(placeId)
   if (chatSheetShown.value) chatSheetEl.value?.close()
 }
 
@@ -804,6 +822,7 @@ if (import.meta.env.DEV) {
       @cover="openCoverPicker"
       @copy-text="copyTextItinerary"
       @chat="showPane('chat')"
+      @goto="gotoTeammatePlace"
     />
 
     <!-- 海报头（D1）：名字的大字这一屏说了两遍，所以它开着的时候顶栏那行标题让位，

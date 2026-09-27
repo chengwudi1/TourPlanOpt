@@ -24,6 +24,10 @@ interface MarkerEntry {
   pill: HTMLElement
   /** 已挂进 pill 的锚点图标。图标只在锚点种类变化时重挂，不做无谓的 mount 抖动。 */
   pillKind: AnchorKind
+  /** 同伴头像容器：别人停在这一站上时挂在左下角。 */
+  who: HTMLElement
+  /** 上一次画进 who 的内容签名。在场心跳每 250ms 一趟，没有这一位就会反复重建子树。 */
+  whoSig: string
   /** 照片热链加载失败过 → 这个标记永久回落成实心圆。 */
   photoBroken: boolean
 }
@@ -216,7 +220,9 @@ function createMarker(AMap: AMapNS, m: AMapNS, place: Place, index: number): Mar
   num.className = 'tp-marker__num'
   const pill = document.createElement('span')
   pill.className = 'tp-marker__pill'
-  el.append(img, num, pill)
+  const who = document.createElement('span')
+  who.className = 'tp-marker__who'
+  el.append(img, num, pill, who)
 
   // 圆标没有尖，指的就是坐标本身 → anchor 从 teardrop 的 bottom-center 回到 center。
   const marker = new AMap.Marker({
@@ -225,7 +231,17 @@ function createMarker(AMap: AMapNS, m: AMapNS, place: Place, index: number): Mar
     anchor: 'center',
     zIndex: 100 + index,
   })
-  const entry: MarkerEntry = { marker, el, img, num, pill, pillKind: '', photoBroken: false }
+  const entry: MarkerEntry = {
+    marker,
+    el,
+    img,
+    num,
+    pill,
+    who,
+    whoSig: '',
+    pillKind: '',
+    photoBroken: false,
+  }
   el.addEventListener('click', () => store.selectPlace(place.id))
   // 热链挂过一次就把这个标记永久降级成实心圆：反复重试只会一直亮破图。
   img.addEventListener('error', () => {
@@ -242,6 +258,40 @@ function anchorKindOf(placeId: string): AnchorKind {
   if (!day) return ''
   if (day.start_place_id === placeId) return 'start'
   return day.end_place_id === placeId ? 'end' : ''
+}
+
+/** 一枚标记上最多画两头像：34px 的圆里第三枚开始就只是噪点，多出来的人收成 +n。 */
+const WHO_MAX_CHIPS = 2
+
+/**
+ * 同伴此刻停在这一站上 → 标记左下角挂他的头像。协同原先只在顶栏报一个人数，
+ * 「谁在改哪一站」在地图上完全看不出来，而地图正是这一群人共同盯着的那一块。
+ */
+function paintWho(entry: MarkerEntry, placeId: string) {
+  const viewers = store.presenceOnPlace.get(placeId) ?? []
+  const shown = viewers.slice(0, WHO_MAX_CHIPS)
+  const extra = viewers.length - shown.length
+  const sig = `${shown.map((v) => `${v.client_id}:${v.name}:${v.color}`).join('|')}#${extra}`
+  if (entry.whoSig === sig) return
+  entry.whoSig = sig
+
+  entry.who.textContent = ''
+  for (const v of shown) {
+    const chip = document.createElement('i')
+    chip.className = 'tp-marker__whoitem'
+    chip.style.setProperty('--tp-who', v.color || FALLBACK_ACCENT)
+    chip.textContent = (v.name || '?').slice(0, 1).toUpperCase()
+    chip.title = `${v.name || '同伴'} 在这一站`
+    entry.who.append(chip)
+  }
+  if (extra > 0) {
+    const more = document.createElement('i')
+    more.className = 'tp-marker__whoitem tp-marker__whoitem--more'
+    more.textContent = `+${extra}`
+    more.title = `还有 ${extra} 人在这一站`
+    entry.who.append(more)
+  }
+  entry.el.classList.toggle('tp-marker--watched', viewers.length > 0)
 }
 
 /** 把 store 里这一行投影到已存在的标记节点上：顺序、创建者色、照片、锚点、选中态。 */
@@ -272,6 +322,7 @@ function paintMarker(entry: MarkerEntry, place: Place, index: number) {
     // 图标要出现在命令式建的 DOM 里，只能走 Vue 的低层 render；单一出口规则照旧不破。
     render(icon ? h(icon, { size: 11, strokeWidth: 2.6 }) : null, entry.pill)
   }
+  paintWho(entry, place.id)
 }
 
 /** Make markers / current-day / selection agree with the store. Idempotent. */
@@ -408,6 +459,15 @@ watch(
 watch(
   () => [store.currentPlaces, store.selectedPlaceId] as const,
   () => syncMarkers(),
+)
+
+// 在场变化只重画头像那一层。presence 每 250ms 就可能动一趟，跟着跑 syncMarkers 会把
+// 照片热链与锚点子树反复重建——地图上一站站地闪，而地点数据其实一点没变。
+watch(
+  () => store.presenceOnPlace,
+  () => {
+    for (const [id, entry] of markers) paintWho(entry, id)
+  },
 )
 
 defineExpose({
@@ -602,6 +662,41 @@ defineExpose({
 
 .tp-marker--anchored .tp-marker__pill {
   display: grid;
+}
+
+/* 同伴头像：挂在左下角——右下角在有照片时是序号角标的地盘，两个都挤在那一侧就叠成
+   一坨。默认不显示，只有这一站确实有人时父元素才带上 --watched。 */
+.tp-marker__who {
+  position: absolute;
+  bottom: -5px;
+  left: -5px;
+  display: none;
+  gap: 1px;
+}
+
+.tp-marker--watched .tp-marker__who {
+  display: flex;
+}
+
+.tp-marker__whoitem {
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  font-size: calc(9px * var(--fs-scale));
+  font-style: normal;
+  font-weight: 700;
+  color: #fff;
+  background: var(--tp-who, var(--accent));
+  border: 1.5px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(24, 34, 30, 0.35);
+}
+
+/* 「+n」不是一个人，是一串人，所以它不穿任何成员的颜色。 */
+.tp-marker__whoitem--more {
+  --tp-who: var(--text-2);
+  font-size: calc(8px * var(--fs-scale));
 }
 
 .tp-marker--sel {
