@@ -86,7 +86,11 @@ class Settings(BaseSettings):
 
     # WebSocket hygiene
     ws_max_payload_bytes: int = 64 * 1024
-    ws_silence_timeout_s: float = 60.0
+    # 判死必须**大于**「隐藏页面里心跳到达的最小间隔」，否则切到后台的标签页必被踢、协同失效：
+    # 前端心跳 25 秒（frontend/src/stores/socket.ts），而 Chrome 把隐藏页的定时器节流到约
+    # 1 次/分钟 —— 60 秒窗口下 60s 才到的心跳永远踩线（线上实测每分钟一条 silence 超时）。
+    # 150 = 6 个心跳周期，容得下节流；代价只是半开连接（合盖/断网）要多占 2.5 分钟房间内存。
+    ws_silence_timeout_s: float = 150.0
     ws_rate_limit_messages: int = 30
     ws_rate_limit_window_s: float = 10.0
     ws_rate_limit_frames: int = 200
