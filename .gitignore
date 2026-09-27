@@ -15,6 +15,12 @@ backend/data/
 .env.local
 .env.*.local
 !.env.example
+# 生产密钥只在服务器上存在一份；模板（prod.env.example）照常入库
+deploy/prod.env
+# 上传包里带着同一批密钥（见 deploy/upload-bundle.sh），是人肉搬运的临时件
+tourplanopt-bundle.tar.gz
+# 临时阿里云 AccessKey 明文，只在部署这几天存在，用完去 RAM 删掉
+deploy/aliyun-ak.local
 # httpx 在 INFO 级会把带 AMAP_WEB_KEY 的完整请求 URL 打进 stdout，
 # 而 dev.sh / 手动起服务都会把它重定向到这个文件
 .dev-backend.log
