@@ -348,3 +348,100 @@ def test_join_frame_carries_the_late_night_warning(client) -> None:
     with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws2:
         joined = timelines(join(ws2))[day_id]
     assert joined["warnings"] == broadcast["warnings"]
+
+
+# -- 天级交通方式覆盖（行程页每一天那个选择器）-------------------------------------------
+
+
+def set_day_mode(ws, day_id: str, mode, op_id: str) -> dict:
+    """发一笔 day_update 只改这一天的交通方式，返回 ``day_updated`` 帧。"""
+    ws.send_json(
+        protocol.op_frame(
+            protocol.Ops.DAY_UPDATE,
+            op_id,
+            {"day_id": day_id, "patch": {"travel_mode": mode}},
+        )
+    )
+    return read_op(ws, "day_updated")
+
+
+def day_after_mode_change(ws, day_id: str, mode, op_id: str) -> tuple[dict, dict]:
+    """改这一天的交通方式，返回 (落库的 day 行, 重排后的这一天)。
+
+    重排帧用封顶读取，不用 ``read_op``：后者在「这一笔改动压根没触发重排」时的表现是
+    永久阻塞在 ``receive_json`` 上——测试不红，只是把整条 CI 挂住，比红更难查。所以
+    这一笔之后紧跟一帧 ping，pong 先于重排帧到达就说明没有重排，当场判红。
+    """
+    day = set_day_mode(ws, day_id, mode, op_id)["data"]["day"]
+    ws.send_json(protocol.ping_frame())
+    for _ in range(8):
+        frame = ws.receive_json()
+        if frame.get("op") == "timeline_updated":
+            return day, timelines(frame)[day_id]
+        if frame.get("type") == "pong":
+            break
+    raise AssertionError(f"改交通方式 {mode} 之后没有重排帧")
+
+
+def test_day_mode_override_retimes_the_day(client) -> None:
+    """改了这一天怎么走，这一天的时刻必须跟着重算。
+
+    这是那个选择器唯一的意义。``travel_mode`` 一旦从 ``_TIMELINE_DAY_FIELDS`` 里被拿掉，
+    用户看到的是图标换了、时间一分没动——而时间才是这一路的主角，图标只是它的说明。
+    """
+    testclient, trip_id, day_id = client
+    with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
+        join(ws)
+        add_place(ws, day_id, "甲", *COORDS[0])
+        _, frame = add_place(ws, day_id, "乙", *COORDS[2])
+        by_car = timelines(frame)[day_id]
+
+        day, by_foot = day_after_mode_change(ws, day_id, "walking", "op-mode")
+        assert day["travel_mode"] == "walking"
+
+        # 同一段路：30km/h 与 4.5km/h，差的是七倍量级，不是四舍五入能抹平的。
+        assert by_foot["travel_min"] > by_car["travel_min"] * 3, by_foot
+        assert by_foot["end_min"] > by_car["end_min"]
+
+
+def test_clearing_the_day_mode_falls_back_to_trip_default(client) -> None:
+    """「跟随默认」在天里存的是 null，重算之后这一天要回到行程默认那一档。
+
+    null 不是「没交通方式」，它是「这一级不作主」——所以它必须和没设过时一模一样。
+    """
+    testclient, trip_id, day_id = client
+    with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
+        join(ws)
+        add_place(ws, day_id, "甲", *COORDS[0])
+        _, frame = add_place(ws, day_id, "乙", *COORDS[2])
+        by_car = timelines(frame)[day_id]
+
+        _, by_foot = day_after_mode_change(ws, day_id, "walking", "op-mode")
+        assert by_foot["travel_min"] > by_car["travel_min"]
+
+        day, back = day_after_mode_change(ws, day_id, None, "op-clear")
+        assert day["travel_mode"] is None
+        assert back["travel_min"] == by_car["travel_min"]
+        assert back["end_min"] == by_car["end_min"]
+
+
+def test_bad_day_mode_is_rejected_and_the_socket_survives(client) -> None:
+    """认不出的交通方式要回一帧 op_reject，而不是让 SQLite 的 CHECK 掀掉整条连接。
+
+    抛出去的 symptoms 是同伴那边「重连中」而刚改的东西原地消失——那一笔到底有没有生效，
+    界面上一个字都没有。
+    """
+    testclient, trip_id, day_id = client
+    with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
+        join(ws)
+        add_place(ws, day_id, "甲", *COORDS[0])
+
+        rejected = set_day_mode(ws, day_id, "boat", "op-boat")
+        assert rejected["type"] == "op_reject", rejected
+        assert rejected["reason"] == "bad_patch" and rejected["op_id"] == "op-boat"
+
+        ws.send_json(protocol.ping_frame())
+        assert ws.receive_json()["type"] == "pong"
+        assert set_day_mode(ws, day_id, "walking", "op-after-bad")["data"]["day"][
+            "travel_mode"
+        ] == "walking", "坏值之后这条连接再也写不进任何东西"

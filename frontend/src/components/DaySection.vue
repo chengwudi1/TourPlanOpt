@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 
 import PlaceCard from '@/components/PlaceCard.vue'
+import SegmentedControl from '@/components/SegmentedControl.vue'
 import type { RailMark } from '@/components/TimeRail.vue'
 import { BedDouble, Car, ChevronDown, Flag, Footprints, Navigation, Plus, Ruler, X, Zap } from '@/components/icons'
 import { useDragSort } from '@/composables/useDragSort'
@@ -13,6 +14,13 @@ import type { OptimizeResult } from '@/stores/trip'
 import type { Day, Place } from '@/types/domain'
 import { formatDistance, haversineM } from '@/utils/coords'
 import { formatDuration, formatMin } from '@/utils/time'
+import {
+  DAY_MODE_FOLLOW,
+  DAY_TRAVEL_MODE_OPTIONS,
+  effectiveTravelMode,
+  isDayModeChoice,
+} from '@/utils/tripmodes'
+import type { DayModeChoice } from '@/utils/tripmodes'
 
 /**
  * TREK 式「一天一个可折叠区块」。选中态（加地点/优化的目标）与展开态分离：
@@ -80,7 +88,22 @@ const rangeText = computed(() => {
 const AMAP_URI_MODE = { driving: 'car', walking: 'walk', straight: 'car' } as const
 const MODE_ICONS = { driving: Car, walking: Footprints, straight: Ruler } as const
 
-const modeIcon = computed(() => MODE_ICONS[store.trip?.travel_mode ?? 'driving'])
+/** 这一天实际生效的交通方式。后端排程与优化按 `day.travel_mode or trip.travel_mode`
+ *  取值，界面上原先只读行程那一级——于是图标可能正在说一件算路没做的事。 */
+const dayMode = computed(() => effectiveTravelMode(props.day, store.trip))
+const modeIcon = computed(() => MODE_ICONS[dayMode.value])
+
+/** 选择器显示的是「有没有单独设过」，不是生效值：跟随与「恰好和默认一样」必须分得开。 */
+const dayModeChoice = computed<DayModeChoice>(() => props.day.travel_mode ?? DAY_MODE_FOLLOW)
+
+function setDayMode(value: string) {
+  if (!isDayModeChoice(value)) return
+  const next = value === DAY_MODE_FOLLOW ? null : value
+  if ((props.day.travel_mode ?? null) === next) return
+  // travel_mode 在后端的 _TIMELINE_DAY_FIELDS 里：这一笔发出去会自动重排当天时刻并广播，
+  // 这里不需要自己再调一次排程。
+  store.updateDay(props.day.id, { travel_mode: next })
+}
 
 function legText(place: Place, index: number): string {
   const parts: string[] = []
@@ -97,7 +120,7 @@ function legText(place: Place, index: number): string {
 function dayNavUrl(): string | null {
   const list = places.value
   if (list.length < 2) return null
-  const mode = AMAP_URI_MODE[store.trip?.travel_mode ?? 'driving']
+  const mode = AMAP_URI_MODE[dayMode.value]
   const common = `mode=${mode}&src=tourplanopt&coordinate=gaode&callnative=0`
   const point = (p: { lng: number; lat: number; name: string }) =>
     `${p.lng},${p.lat},${encodeURIComponent(p.name)}`
@@ -109,7 +132,7 @@ function dayNavUrl(): string | null {
 
 /** 卡片↔卡片导航链接（URI API：前一站 → 这一站）。 */
 function navHref(place: Place, index: number): string | null {
-  const mode = AMAP_URI_MODE[store.trip?.travel_mode ?? 'driving']
+  const mode = AMAP_URI_MODE[dayMode.value]
   const common = `mode=${mode}&src=tourplanopt&coordinate=gaode&callnative=0`
   const to = `${place.lng},${place.lat},${encodeURIComponent(place.name)}`
   if (index === 0) return `https://uri.amap.com/navigation?to=${to}&${common}`
@@ -223,6 +246,19 @@ function runOptimize() {
     <div class="daysec__fold" :class="{ 'is-open': expanded }">
       <div class="daysec__foldclip">
         <div class="daysec__body">
+          <div class="daysec__mode">
+            <span class="daysec__modelabel tiny">交通方式</span>
+            <SegmentedControl
+              :model-value="dayModeChoice"
+              :options="DAY_TRAVEL_MODE_OPTIONS"
+              label="这一天的交通方式"
+              @update:model-value="setDayMode"
+            />
+            <span v-if="dayModeChoice === DAY_MODE_FOLLOW" class="daysec__modehint tiny muted">
+              跟随设置里的默认交通方式
+            </span>
+          </div>
+
           <div v-if="startPlace" class="bookend tiny">
             <Flag class="ic" :size="12" />
             从「{{ startPlace.name }}」出发
@@ -560,6 +596,26 @@ function runOptimize() {
 /* 终点那一枚右对齐，左侧凹槽里不该再留它的节点。 */
 .bookend--end::before {
   display: none;
+}
+
+/* 天级交通方式与起点锚共用那条 20px 轨道凹槽基线，否则它会比下面的站整体左移一截。
+   整行可折：窄栏里四档控件优先保住，提示文字自己折到下一行去。 */
+.daysec__mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+  padding: 2px 2px 6px 20px;
+}
+
+.daysec__modelabel {
+  color: var(--text-3);
+}
+
+.daysec__mode :deep(.seg) {
+  /* 分段控件默认是 1fr 等宽，作为弹性项会被内容撑开——这里要的是「贴着标签的一小条」，
+     不是横跨整行的工具条。 */
+  flex: 0 1 auto;
 }
 
 .daysec__list {
