@@ -239,3 +239,24 @@ CREATE TABLE IF NOT EXISTS messages (
 -- 只按 trip_id 建索引：rowid 不许出现在索引定义里（SQLite 直接报 no such column），
 -- 而「一个行程的最近 N 句」本来就是过滤完再按 rowid 倒着数，剩不了几行。
 CREATE INDEX IF NOT EXISTS idx_messages_trip ON messages(trip_id);
+
+-- -- 日头天气：两张各自过期的缓存 -------------------------------------------------------
+
+-- 天气接口只认 6 位 adcode，而 trips.city 存的是中文名，所以每次看天气要先换一次 adcode。
+-- 行政区划几乎不变，命中给 30 天；查无此城也存（ok=0，1 小时），否则每次开页都重问一遍。
+CREATE TABLE IF NOT EXISTS city_adcode_cache (
+    city       TEXT PRIMARY KEY,
+    adcode     TEXT NOT NULL DEFAULT '',
+    ok         INTEGER NOT NULL DEFAULT 1,
+    fetched_at TEXT NOT NULL
+);
+
+-- 预报本身几小时才刷一次，命中给 6 小时。**按城市存一条，不按天存**：一趟 5 天的行程
+-- 共用这一份，绝不会出现「为每一天各发一次请求」。ok=0（上游失败/返回空）只顶 5 分钟，
+-- 免得一次偶发的限流把这座城市的天气冻死半天。
+CREATE TABLE IF NOT EXISTS weather_cache (
+    adcode     TEXT PRIMARY KEY,
+    payload    TEXT NOT NULL,                  -- JSON array of WeatherCast
+    ok         INTEGER NOT NULL DEFAULT 1,
+    fetched_at TEXT NOT NULL
+);

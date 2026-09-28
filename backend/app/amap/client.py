@@ -101,6 +101,21 @@ class PoiPage:
     pois: list[Poi]
 
 
+@dataclass(slots=True)
+class WeatherCast:
+    """预报里的一天。天气是中文文案（「阴」「阵雨」），图标在前端按关键字归类——
+    高德一共就那么几十个取值，为它建一张枚举表不如一次 `includes`。"""
+
+    date: str
+    week: str
+    day_weather: str
+    night_weather: str
+    day_temp: int | None
+    night_temp: int | None
+    day_wind: str
+    day_power: str
+
+
 def _origin_id_offset(raw_ids: list[str], n: int) -> int:
     """Detect whether Amap's ``origin_id`` is 0-based or 1-based.
 
@@ -351,6 +366,67 @@ class AmapWebClient:
         )
         return _first_photo_url(body.get("pois") or [])
 
+    async def district_adcode(self, city: str) -> str:
+        """城市中文名 -> 6 位 adcode；查无此城返回空串，不抛。
+
+        这一跳是必需的，不是优化：**/v3/weather/weatherInfo 的 city 只认 adcode**。
+        把「成都」直接填进去会返回 status=1 / info=OK 而 forecasts 为空——和「权限
+        没开通」长得一模一样（本项目就在这上面误判过一次）。直辖市在这条接口里回的是
+        省级 adcode（北京 110000），天气接口照样收，所以取第一条能用的即可，
+        不必按 level 挑。
+        """
+        body = await self._get(
+            "/v3/config/district",
+            {"keywords": city, "subdistrict": 0},
+        )
+        for node in body.get("districts") or []:
+            adcode = str(node.get("adcode") or "") if isinstance(node, dict) else ""
+            if len(adcode) == 6 and adcode.isdigit():
+                return adcode
+        return ""
+
+    async def weather_forecast(self, adcode: str) -> list[WeatherCast]:
+        """未来 4 天预报（今天起，含今天）。空 adcode 或高德没给 casts 都是空列表。
+
+        一次调用换一整座城市的 4 天，所以调用方**必须按城市缓存**，绝不能按天各发一次。
+        """
+        if not adcode:
+            return []
+        body = await self._get(
+            "/v3/weather/weatherInfo",
+            {"city": adcode, "extensions": "all"},
+        )
+        forecasts = body.get("forecasts") or []
+        first = forecasts[0] if isinstance(forecasts[0], dict) else {}
+        out: list[WeatherCast] = []
+        for raw in first.get("casts") or []:
+            cast = _to_cast(raw)
+            if cast is not None:
+                out.append(cast)
+        return out
+
+
+def _to_cast(raw: Any) -> WeatherCast | None:
+    if not isinstance(raw, dict):
+        return None
+    date = str(raw.get("date") or "")
+    if not date:
+        return None
+    return WeatherCast(
+        date=date,
+        week=_as_str(raw.get("week")),
+        day_weather=_as_str(raw.get("dayweather")),
+        night_weather=_as_str(raw.get("nightweather")),
+        day_temp=_as_int(raw.get("daytemp")),
+        night_temp=_as_int(raw.get("nighttemp")),
+        day_wind=_as_str(raw.get("daywind")),
+        day_power=_as_str(raw.get("daypower")),
+    )
+
+
+def _as_int(value: Any) -> int | None:
+    return int(value) if _is_int(value) else None
+
 
 async def fetch_photo_best_effort(poi_id: str) -> str:
     """POI id → 首张实拍图 URL。照片是锦上添花：任何失败（没配 Key、限流、超时、
@@ -471,6 +547,7 @@ __all__ = [
     "DistanceResult",
     "Poi",
     "PoiPage",
+    "WeatherCast",
     "close_amap_client",
     "fmt_coord",
     "get_amap_client",

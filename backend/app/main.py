@@ -185,6 +185,7 @@ def create_app() -> FastAPI:
     from app.api.routes_optimize import router as optimize_router
     from app.api.routes_poi import router as poi_router
     from app.api.routes_trips import router as trips_router
+    from app.api.routes_weather import router as weather_router
     from app.auth.routes_auth import router as auth_router
 
     @app.exception_handler(AmapError)
@@ -208,6 +209,7 @@ def create_app() -> FastAPI:
     app.include_router(poi_router)
     app.include_router(optimize_router)
     app.include_router(city_router)
+    app.include_router(weather_router)
     app.include_router(auth_router)
     app.include_router(assistant_router)
 

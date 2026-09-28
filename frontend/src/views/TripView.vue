@@ -49,6 +49,7 @@ import { useFeedbackStore } from '@/stores/feedback'
 import { useSettingsStore } from '@/stores/settings'
 import { useSocketStore } from '@/stores/socket'
 import { useTripStore } from '@/stores/trip'
+import { useWeatherStore } from '@/stores/weather'
 import type { Place, Poi } from '@/types/domain'
 import { ApiError, apiFetch } from '@/utils/api'
 import { anchorMenu, type MenuPosition } from '@/utils/anchorMenu'
@@ -63,6 +64,7 @@ const auth = useAuthStore()
 const settings = useSettingsStore()
 const feedback = useFeedbackStore()
 const dialog = useDialogStore()
+const weather = useWeatherStore()
 const copy = useCopy()
 
 /** Per-tab: sessionStorage identity means a reload keeps your name, a new tab asks
@@ -646,6 +648,16 @@ watch(
   },
 )
 
+/** 天气按城市问一次：一发换整座城市未来 4 天，按天各发一次是把同一件事问五遍。
+ *  改了目的地城市跟着重问——不同城市不是同一格缓存。 */
+watch(
+  () => store.trip?.city ?? '',
+  (city) => {
+    void weather.ensure(city)
+  },
+  { immediate: true },
+)
+
 async function onPoiPicked(poi: Poi) {
   store.opError = null
   store.addPlace({
@@ -802,6 +814,7 @@ if (typeof window !== 'undefined') {
 if (import.meta.env.DEV) {
   ;(window as unknown as Record<string, unknown>).__trip = store
   ;(window as unknown as Record<string, unknown>).__socket = socket
+  ;(window as unknown as Record<string, unknown>).__weather = weather
   ;(window as unknown as Record<string, unknown>).__client_id = selfId
 }
 </script>
@@ -983,6 +996,7 @@ if (import.meta.env.DEV) {
                 @remove="removeDay(day.id)"
                 @menu="openCardMenu"
                 @add-here="askAddHere(day.id)"
+                @set-city="setTripCity"
               />
               <!-- 添加一天留在末尾，但改成通栏虚线行：它不是又一张卡，是这一列的收口。 -->
               <button class="addday" type="button" @click="store.addDay()">

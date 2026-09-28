@@ -4,13 +4,25 @@ import { computed, ref } from 'vue'
 import PlaceCard from '@/components/PlaceCard.vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
 import type { RailMark } from '@/components/TimeRail.vue'
-import { BedDouble, Car, ChevronDown, Flag, Footprints, Navigation, Plus, Ruler, X, Zap } from '@/components/icons'
+import {
+  BedDouble,
+  Car,
+  ChevronDown,
+  Flag,
+  Footprints,
+  Navigation,
+  Plus,
+  Ruler,
+  X,
+  Zap,
+} from '@/components/icons'
 import { useDragSort } from '@/composables/useDragSort'
 import { useFlipList } from '@/composables/useFlipList'
 import { usePlaceDrag } from '@/composables/usePlaceDrag'
 import { useSocketStore } from '@/stores/socket'
 import { useTripStore } from '@/stores/trip'
 import type { OptimizeResult } from '@/stores/trip'
+import { useWeatherStore } from '@/stores/weather'
 import type { Day, Place } from '@/types/domain'
 import { formatDistance, haversineM } from '@/utils/coords'
 import { formatDuration, formatMin } from '@/utils/time'
@@ -21,6 +33,15 @@ import {
   isDayModeChoice,
 } from '@/utils/tripmodes'
 import type { DayModeChoice } from '@/utils/tripmodes'
+import {
+  castOnDate,
+  dateSlash,
+  dateWithWeekday,
+  tempRange,
+  weatherIcon,
+  weatherNote,
+  weatherSentence,
+} from '@/utils/weather'
 
 /**
  * TREK 式「一天一个可折叠区块」。选中态（加地点/优化的目标）与展开态分离：
@@ -39,10 +60,13 @@ const emit = defineEmits<{
   remove: []
   menu: [place: Place, pos: { x: number; y: number }]
   addHere: []
+  /** 天头那句「先填写目的地城市」的落点：城市编辑的键在海报头那儿，这里只负责把人送过去。 */
+  setCity: []
 }>()
 
 const store = useTripStore()
 const socket = useSocketStore()
+const weather = useWeatherStore()
 
 const places = computed(() =>
   store.places
@@ -82,6 +106,30 @@ const rangeText = computed(() => {
     (last ? (last.start_min ?? 0) + last.duration_min : null)
   return end === null || end === undefined ? '' : `${formatMin(start)}–${formatMin(end)}`
 })
+
+// -- 这一天是几号、天气怎么样 ------------------------------------------------------------
+
+/** 高德的预报一次给 4 天，按日期查而不是按「第几天」查：第 3 天可能根本没有日期，
+ *  而有日期的第 3 天也可能已经过去了。查不到就是不画，不猜。 */
+const city = computed(() => store.trip?.city ?? '')
+const cast = computed(() => castOnDate(weather.castsOf(city.value), props.day.date))
+const wxIcon = computed(() => weatherIcon(cast.value))
+const wxSentence = computed(() => weatherSentence(cast.value, props.day.date))
+const wxTemp = computed(() => tempRange(cast.value))
+/** 天头那一枚只放得下「9/28 ☁ 21~29°」，整句（含风向）与没天气的原因都挂在这里。 */
+const wxTitle = computed(() => wxSentence.value || dateWithWeekday(props.day.date))
+const wxNote = computed(() =>
+  weatherNote(weather.castsOf(city.value), props.day.date, {
+    cityFilled: !!city.value.trim(),
+    reason: weather.reasonOf(city.value),
+  }),
+)
+
+function setDayDate(event: Event) {
+  const raw = (event.target as HTMLInputElement).value
+  // 空值是一句真话：清空就是「这一天没定日期」，不是 1970-01-01。
+  store.updateDay(props.day.id, { date: raw || null })
+}
 
 // -- 行内路线连接（RouteConnector）：时间来自排程，距离前端 haversine 现算。 ----------
 
@@ -219,6 +267,15 @@ function runOptimize() {
         <ChevronDown :size="15" />
       </button>
       <span class="daysec__badge">第 {{ day.day_index + 1 }} 天</span>
+      <!-- 有日期才说话。没日期的天在海报头的倒计时里已经是「日期未定」了，这里再挂一个
+           空胶囊等于把同一件缺失渲染两次。 -->
+      <span v-if="day.date" class="daysec__when tiny" :title="wxTitle">
+        <span class="daysec__whendate">{{ dateSlash(day.date) }}</span>
+        <template v-if="cast">
+          <component :is="wxIcon" class="daysec__wxicon" :size="12" />
+          <span>{{ wxTemp }}</span>
+        </template>
+      </span>
       <span class="daysec__title">
         <template v-if="day.title">{{ day.title }}</template>
         <span v-if="warnings.length && !expanded" class="daysec__warnbit" title="这一天有排程提醒">
@@ -246,6 +303,39 @@ function runOptimize() {
     <div class="daysec__fold" :class="{ 'is-open': expanded }">
       <div class="daysec__foldclip">
         <div class="daysec__body">
+          <div class="daysec__when-row">
+            <span class="daysec__rowlabel tiny">日期</span>
+            <!-- 日期是天气的钥匙：没日期的天既排不进倒计时也查不到预报，所以这一格
+                 在展开态里常驻，而不是只给「有日期的天」看一眼。 -->
+            <input
+              class="input daysec__dateinput"
+              type="date"
+              :value="day.date ?? ''"
+              :aria-label="`第 ${day.day_index + 1} 天的日期`"
+              @change="setDayDate"
+            />
+            <span v-if="cast" class="daysec__wxline tiny">{{ wxSentence }}</span>
+            <span v-else-if="wxNote.text" class="daysec__wxnote tiny muted">
+              {{ wxNote.text }}
+              <button
+                v-if="wxNote.action === 'city'"
+                class="daysec__wxact"
+                type="button"
+                @click="emit('setCity')"
+              >
+                填写城市
+              </button>
+              <button
+                v-else-if="wxNote.action === 'retry'"
+                class="daysec__wxact"
+                type="button"
+                @click="weather.refresh(city)"
+              >
+                重试
+              </button>
+            </span>
+          </div>
+
           <div class="daysec__mode">
             <span class="daysec__modelabel tiny">交通方式</span>
             <SegmentedControl
@@ -598,6 +688,80 @@ function runOptimize() {
   display: none;
 }
 
+/* 天头那一枚：`9/28 ☁ 21~29°`。整句（含风向）在 title 里——窄栏放不下，也不该放下：
+   这一枚回答的是「那天要不要带伞」，不是天气详情。底色走 --surface-2 而不是天色，
+   否则三色同屏时它读起来像序号牌的一部分。 */
+.daysec__when {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  align-items: center;
+  padding: 1px 7px;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border-radius: var(--radius-pill);
+  font-variant-numeric: tabular-nums;
+}
+
+.daysec__whendate {
+  font-weight: 600;
+  color: var(--dc-deep);
+}
+
+.daysec__wxicon {
+  flex: 0 0 auto;
+}
+
+/* 日期与天气共用展开态的第一行。左缩进对齐下面那条 20px 轨道凹槽，否则这一行会比
+   下面的站整体左移一截（交通方式那一行同一条规矩）。 */
+.daysec__when-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+  padding: 2px 2px 0 20px;
+}
+
+.daysec__rowlabel {
+  color: var(--text-3);
+}
+
+.daysec__dateinput {
+  /* 原生 date 要按「年月日」三段的实际内容给宽，窄了会把年份裁掉一半；
+     高度跟着分段控件那一档走，一行里两个控件不该一高一矮。 */
+  width: 148px;
+  min-height: 28px;
+  padding: 3px 8px;
+  font-size: calc(12px * var(--fs-scale));
+  font-variant-numeric: tabular-nums;
+}
+
+.daysec__wxline {
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.daysec__wxnote {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* 「为什么没有天气」后面必须跟一个走得通的键，光解释没用。 */
+.daysec__wxact {
+  min-height: 24px;
+  padding: 2px 9px;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border: 0;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+
+.daysec__wxact:hover {
+  text-decoration: underline;
+}
+
 /* 天级交通方式与起点锚共用那条 20px 轨道凹槽基线，否则它会比下面的站整体左移一截。
    整行可折：窄栏里四档控件优先保住，提示文字自己折到下一行去。 */
 .daysec__mode {
@@ -796,6 +960,12 @@ function runOptimize() {
   }
 
   .daysec__precise {
+    min-height: 34px;
+  }
+
+  /* 日期与「填写城市/重试」都落在触屏上：24~28px 的落点拇指按不准（O6 同族）。 */
+  .daysec__dateinput,
+  .daysec__wxact {
     min-height: 34px;
   }
 }
