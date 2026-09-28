@@ -470,7 +470,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   width: min(420px, calc(100vw - 32px));
   z-index: calc(var(--z-sprite) + 1);
   background: var(--surface);
-  border: 2px solid var(--ink);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-pop);
   display: flex;
@@ -550,7 +550,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 .about {
   padding: var(--s3) var(--s4);
   background: var(--surface-2);
-  border-bottom: 1.5px solid var(--ink);
+  border-bottom: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   gap: var(--s2);
@@ -692,7 +692,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   font: 800 var(--t-micro)/1 var(--font);
   background: var(--ramp-4-soft);
   color: var(--ramp-4-deep);
-  border: 1.5px solid var(--ink);
+  border: 1px solid var(--border);
 }
 
 .msg--me .who {
@@ -746,7 +746,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
 /* 行动确认卡：一句话被翻译成哪几条 op，说清楚了才动手。 */
 .act {
-  border: 1.5px solid var(--ink);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
   box-shadow: var(--shadow-sm);
@@ -879,7 +879,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   display: flex;
   gap: var(--s2);
   padding: var(--s3) var(--s4);
-  border-top: 2px solid var(--ink);
+  border-top: 1px solid var(--border);
   background: var(--surface-2);
 }
 
@@ -888,8 +888,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   min-width: 0;
   padding: 10px var(--s3);
   border-radius: var(--radius-pill);
-  border: 1.5px solid var(--ink);
+  border: 1px solid var(--border);
   background: var(--surface);
+  box-shadow: var(--edge);
   font: inherit;
   font-size: var(--t-meta);
   color: var(--text);
@@ -913,8 +914,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   border-radius: 50%;
   display: grid;
   place-items: center;
-  border: 1.5px solid var(--ink);
+  border: 1px solid var(--border);
   background: var(--surface);
+  box-shadow: var(--edge);
   color: var(--text-2);
   cursor: pointer;
   transition: color var(--dur-fast), border-color var(--dur-fast);

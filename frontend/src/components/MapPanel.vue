@@ -193,12 +193,12 @@ onBeforeUnmount(() => {
 
 /** 描边跟底图走、不跟界面令牌走：亮底图用墨色压边把亮芯抬起来，暗底图反过来要一条浅色边，
  * 否则同一条深色描边压在夜航图上就是「没有描边」。芯色始终读 --accent。 */
-const CASING_LIGHT = '#2e3132'
+const CASING_LIGHT = '#1b1d1f'
 const CASING_DARK = '#dbe6ef'
-const FALLBACK_ACCENT = '#1670c2'
+const FALLBACK_ACCENT = '#2f6a99'
 
 function basemapStyle(): string {
-  return settings.basemapDark ? 'amap://styles/dark' : 'amap://styles/normal'
+  return settings.basemapDark ? 'amap://styles/dark' : 'amap://styles/whitesmoke'
 }
 
 function cssColor(name: string, fallback: string): string {
@@ -551,9 +551,9 @@ defineExpose({
   font-size: calc(13px * var(--fs-scale));
   color: var(--text);
   background: var(--surface);
-  border: 1px solid var(--ink);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-sm), var(--edge);
   cursor: pointer;
 }
 .map-panel__locate:hover:not(:disabled) {
@@ -603,7 +603,7 @@ defineExpose({
   border-radius: 50%;
   box-shadow: 0 0 0 1.5px var(--tp-fill), var(--shadow-sm);
   cursor: pointer;
-  transition: transform var(--dur) var(--ease-pop), box-shadow var(--dur) var(--ease-out);
+  transition: transform var(--dur) var(--ease-pop), box-shadow var(--dur) var(--ease);
 }
 
 .tp-marker__img {

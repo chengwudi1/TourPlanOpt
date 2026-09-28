@@ -3,10 +3,25 @@ import { nextTick, watch } from 'vue'
 
 import { useReduceMotion } from '@/composables/useReduceMotion'
 
-/** 一次重排走 340ms：够看清「谁换到哪去了」，又不至于让人觉得系统在磨蹭。
- *  曲线就是 --ease-out 那一条，JS 里读不到 CSS 变量，只能抄一份。 */
-const DURATION_MS = 340
-const EASING = 'cubic-bezier(0.16, 1, 0.3, 1)'
+/**
+ * 令牌 → WAAPI 的取值口。
+ *
+ * 为什么在 JS 里读 CSS 变量而不是抄一份字面量：这条重排走的是**指针时钟**（用户对一次
+ * 点击的响应），而指针时钟的数值全站只有一处真源，就是 `main.css` 那组 `--ease` / `--dur`。
+ * 抄在 JS 里的话，改令牌的那次提交就会让 CSS 与 JS 的曲线分家——这条已经有过先例
+ * （`useMotion` 的 `MOTION` 常量同一条口径）。读不到才退回字面量，一次改名不该把动画整个弄没。
+ */
+function token(name: string, fallback: string): string {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return v || fallback
+}
+/** `--dur-slow` 这类是 `220ms`，WAAPI 要的是毫秒数。 */
+function tokenMs(name: string, fallback: number): number {
+  const raw = token(name, `${fallback}ms`)
+  const n = Number.parseFloat(raw)
+  if (!Number.isFinite(n)) return fallback
+  return raw.includes('s') && !raw.includes('ms') ? n * 1000 : n
+}
 /** 与 main.css 里 .flash-in 的那 900ms 同步：类留着只是为了让动画跑完，摘晚了没人管。 */
 const FLASH_MS = 900
 
@@ -44,6 +59,11 @@ export function useFlipList(container: Ref<HTMLElement | null>, keys: () => stri
       const el = container.value
       if (!el || reduceMotion.value) return
 
+      // 一次重排内只读一遍：这些值不该在同一批行的动画之间变卦。
+      const ease = token('--ease', 'cubic-bezier(0.4, 0, 0.2, 1)')
+      const swapMs = tokenMs('--dur-slow', 220)
+      const enterMs = tokenMs('--dur', 180)
+
       const before = new Map<string, DOMRect>()
       for (const node of Array.from(el.children)) {
         const key = rowKey(node)
@@ -75,7 +95,7 @@ export function useFlipList(container: Ref<HTMLElement | null>, keys: () => stri
                 { opacity: 0, transform: 'scale(0.97)' },
                 { opacity: 1, transform: 'none' },
               ],
-              { duration: 220, easing: EASING },
+              { duration: enterMs, easing: ease },
             )
             continue
           }
@@ -88,7 +108,7 @@ export function useFlipList(container: Ref<HTMLElement | null>, keys: () => stri
               { transform: `translate(${dx}px, ${dy}px)` },
               { transform: 'translate(0, 0)' },
             ],
-            { duration: DURATION_MS, easing: EASING },
+            { duration: swapMs, easing: ease },
           )
         }
       })

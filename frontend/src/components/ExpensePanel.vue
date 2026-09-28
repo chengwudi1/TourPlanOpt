@@ -441,7 +441,7 @@ function drop(expense: Expense) {
   flex: 0 0 84px;
   align-items: center;
   background: var(--surface);
-  border: 1.5px solid var(--ink);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   box-shadow: var(--edge);
 }
@@ -511,8 +511,8 @@ function drop(expense: Expense) {
   border-radius: var(--radius-pill);
   cursor: pointer;
   transition:
-    background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 
 .chip:hover {

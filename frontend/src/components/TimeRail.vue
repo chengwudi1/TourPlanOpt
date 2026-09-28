@@ -575,8 +575,8 @@ const bubble = computed(() => dragging.value || hovered.value || focused.value)
   transform: translate(-50%, -50%);
   transition:
     left var(--dur) var(--ease-pop),
-    background var(--dur-fast) var(--ease-out),
-    transform var(--dur-fast) var(--ease-out);
+    background var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
 }
 
 .rail--drag .rail__knob {
@@ -626,8 +626,8 @@ const bubble = computed(() => dragging.value || hovered.value || focused.value)
   border-radius: 4px;
   transform: translateX(-50%);
   transition:
-    color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
+    color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
 }
 
 .rail__hour:hover {

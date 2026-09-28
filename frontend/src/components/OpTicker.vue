@@ -97,7 +97,7 @@ const who = computed(() => actor(latest.value?.origin ?? ''))
   border: 0;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out);
+  transition: background var(--dur-fast) var(--ease);
 }
 
 .ot__bar:hover {
@@ -164,7 +164,7 @@ const who = computed(() => actor(latest.value?.origin ?? ''))
 
 .ot__caret {
   flex: 0 0 auto;
-  transition: transform var(--dur) var(--ease-out);
+  transition: transform var(--dur) var(--ease);
 }
 
 .ot--open .ot__caret {
@@ -174,7 +174,7 @@ const who = computed(() => actor(latest.value?.origin ?? ''))
 .ot__body {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows var(--dur) var(--ease-out);
+  transition: grid-template-rows var(--dur) var(--ease);
 }
 
 .ot--open .ot__body {
@@ -186,7 +186,7 @@ const who = computed(() => actor(latest.value?.origin ?? ''))
   /* 0fr 只是把它剪掉，读屏照样念第二遍：收起时整段移出可访问性树。
      visibility 参与过渡，所以淡出那一下内容还在，收尾才真的藏掉。 */
   visibility: hidden;
-  transition: visibility var(--dur) var(--ease-out);
+  transition: visibility var(--dur) var(--ease);
 }
 
 .ot--open .ot__clip {

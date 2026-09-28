@@ -298,10 +298,10 @@ function onCardKeydown(e: KeyboardEvent) {
   padding: 8px 10px;
   cursor: pointer;
   transition:
-    border-color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur) var(--ease-out),
-    transform var(--dur) var(--ease-out);
+    border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
 }
 
 /* 正文行＝拖拽把手（`useDragSort` 的 handle 就指这里）。编辑面板故意不在这行里：
@@ -313,11 +313,13 @@ function onCardKeydown(e: KeyboardEvent) {
   align-items: flex-start;
 }
 
-/* 描边与阴影由宿主递变量：日色带（DaySection）把这一档换成票券——不描边、只留一道
-   近影。选择器要多带一枚 `.card`：全局那条 `.panel .card` 也是两类的权重，
-   只写 `.place` 会被它压掉，兜底跟着它降过的那一档，别的宿主看到的还是原来那层影。 */
+/* 描边与阴影由宿主递变量：日卡（DaySection）是中性纸，不覆写这两枚，票券就靠
+   一道发丝边 + 一层近影浮起来。选择器要多带一枚 `.card`：全局那条 `.panel .card`
+   也是两类的权重，只写 `.place` 会被它压掉，兜底跟着它降过的那一档，
+   别的宿主看到的还是原来那层影。 */
 .place.card {
-  border-color: var(--place-edge, var(--ink));
+  background: var(--ticket);
+  border-color: var(--place-edge, var(--border));
   box-shadow: var(--place-shadow, var(--shadow-sm));
 }
 
@@ -457,8 +459,8 @@ function onCardKeydown(e: KeyboardEvent) {
   border-radius: var(--radius-sm);
   cursor: text;
   transition:
-    border-color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
+    border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
 }
 
 .place__name--edit:hover {
@@ -530,7 +532,7 @@ function onCardKeydown(e: KeyboardEvent) {
   gap: 0;
   align-items: center;
   opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease-out);
+  transition: opacity var(--dur-fast) var(--ease);
 }
 
 .place:hover .place__side,

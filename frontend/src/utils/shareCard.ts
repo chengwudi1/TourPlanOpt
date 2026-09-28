@@ -11,11 +11,11 @@ import type { Place, Trip } from '@/types/domain'
 // 改色板时这一份要跟着改——它不参与主题，别改成 getComputedStyle。
 const W = 1080
 const H = 1440
-const SEA = '#1670c2'
-const SEA_DEEP = '#0b4f8f'
-const INK = '#26282a'
-const GRAY = '#4f5053'
-const BG = '#fcf9f2'
+const SEA = '#2f6a99'
+const SEA_DEEP = '#24517a'
+const INK = '#1b1d1f'
+const GRAY = '#4a4d50'
+const BG = '#f7f7f6'
 
 const FONT = `-apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif`
 

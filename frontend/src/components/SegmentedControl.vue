@@ -65,9 +65,9 @@ const emit = defineEmits<{ 'update:modelValue': [string] }>()
   border: 1px solid transparent;
   border-radius: calc(var(--radius-sm) - 3px);
   transition:
-    background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out);
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
 }
 
 .seg__opt:hover:not(.seg__opt--on) {

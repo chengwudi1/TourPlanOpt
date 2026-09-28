@@ -235,8 +235,8 @@ function remove(item: ChecklistItem) {
   stroke-linecap: round;
   stroke-dasharray: 100;
   transition:
-    stroke-dashoffset var(--dur-slow) var(--ease-out),
-    stroke var(--dur-fast) var(--ease-out);
+    stroke-dashoffset var(--dur-slow) var(--ease),
+    stroke var(--dur-fast) var(--ease);
 }
 
 /* 环是读数不是控件，所以备齐了可以换 --ok：这一档不邀请点击。 */
@@ -282,13 +282,17 @@ function remove(item: ChecklistItem) {
   padding: 0;
   color: transparent;
   background: var(--surface);
-  border: 2px solid var(--ink);
-  border-radius: 6px;
+  /* 这一枚是全站唯一不许用发丝边的描边：20px 的空方框里没有一个字，可交互性全靠这条线本身，
+     而 `--hairline` 压在白纸上只有约 1.25:1，远低于 WCAG 对控件边界的 3:1。
+     --text-3 是现有令牌里最浅的一档能过 3:1 的灰（对白 5.3:1、对 --surface-2 4.68:1），
+     1.5px 的它读起来仍是"淡灰方框"而不是原来那枚墨线贴纸。 */
+  border: 1.5px solid var(--text-3);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   place-items: center;
   transition:
-    border-color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
+    border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
 }
 
 .chk__box:hover {
@@ -370,7 +374,7 @@ function remove(item: ChecklistItem) {
   .chk__box {
     width: 28px;
     height: 28px;
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
   }
   .chk__drag,
   .chk__drop {

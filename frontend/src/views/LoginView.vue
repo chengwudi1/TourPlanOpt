@@ -745,7 +745,7 @@ onBeforeUnmount(() => {
   scale: 1;
   transition:
     scale var(--dur) var(--ease-pop),
-    box-shadow var(--dur) var(--ease-out);
+    box-shadow var(--dur) var(--ease);
   animation: drop 420ms var(--ease-pop) calc(480ms + var(--i, 0) * 220ms) backwards;
 }
 
@@ -1084,9 +1084,9 @@ onBeforeUnmount(() => {
   pointer-events: none;
   transform: translateY(-50%);
   transition:
-    top var(--dur-fast) var(--ease-out),
-    transform var(--dur-fast) var(--ease-out),
-    font-size var(--dur-fast) var(--ease-out),
+    top var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease),
+    font-size var(--dur-fast) var(--ease),
     color var(--dur-fast) linear;
 }
 
@@ -1160,13 +1160,15 @@ onBeforeUnmount(() => {
   box-shadow: 0 2px 0 var(--ink), var(--edge);
   transition:
     transform var(--dur) var(--ease-pop),
-    box-shadow var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease),
     background var(--dur-fast) linear;
 }
 
 .go:hover:not(:disabled) {
   background: var(--accent-strong);
-  box-shadow: var(--shadow-lift), var(--edge);
+  /* 这一页是夜航图插画，故意保留贴纸的硬偏移；全局 --shadow-lift 已经改成软影，
+     所以这里就地写死，不去借界面令牌。 */
+  box-shadow: 3px 3px 0 var(--ink), var(--edge);
   transform: translate(-1px, -1px);
 }
 

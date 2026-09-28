@@ -556,12 +556,12 @@ const orderHint = computed(() => {
   white-space: nowrap;
   color: var(--text-2);
   background: var(--surface);
-  border: 1px solid var(--ink);
+  border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   transition:
-    background var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
     transform var(--dur) var(--ease-pop);
 }
 

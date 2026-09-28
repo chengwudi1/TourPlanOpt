@@ -451,7 +451,7 @@ onBeforeUnmount(() => {
   border: 0;
   border-bottom: 1px solid var(--hairline);
   border-radius: 0;
-  transition: border-color var(--dur-fast) var(--ease-out);
+  transition: border-color var(--dur-fast) var(--ease);
 }
 .tf__input::placeholder {
   font-weight: 500;
@@ -532,8 +532,9 @@ onBeforeUnmount(() => {
   grid-template-columns: 30px 1fr 30px;
   align-items: center;
   background: var(--surface);
-  border: 1px solid var(--ink);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+  box-shadow: var(--edge);
 }
 
 .stepper__btn {
@@ -546,8 +547,8 @@ onBeforeUnmount(() => {
   border: 0;
   border-radius: calc(var(--radius-sm) - 2px);
   transition:
-    background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
     transform var(--dur) var(--ease-pop);
 }
 .stepper__btn:hover:not(:disabled) {
@@ -628,7 +629,7 @@ onBeforeUnmount(() => {
   border: 1px dashed var(--border);
   border-radius: var(--radius-sm);
   transition:
-    border-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease),
     transform var(--dur) var(--ease-pop);
 }
 
@@ -701,13 +702,13 @@ onBeforeUnmount(() => {
   color: var(--text-2);
   background: transparent;
   border: 0;
-  transition: color var(--dur-fast) var(--ease-out);
+  transition: color var(--dur-fast) var(--ease);
 }
 .opener__btn:hover {
   color: var(--accent-strong);
 }
 .opener__btn .ic {
-  transition: transform var(--dur) var(--ease-out);
+  transition: transform var(--dur) var(--ease);
 }
 .opener__btn--up {
   transform: rotate(180deg);

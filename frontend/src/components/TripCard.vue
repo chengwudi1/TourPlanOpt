@@ -225,9 +225,9 @@ onBeforeUnmount(closeMenu)
   position: relative;
   overflow: hidden;
   transition:
-    border-color var(--dur) var(--ease-out),
-    box-shadow var(--dur) var(--ease-out),
-    transform var(--dur) var(--ease-out);
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
 }
 .tripcard:hover {
   border-color: var(--accent);
@@ -265,7 +265,7 @@ onBeforeUnmount(closeMenu)
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: transform var(--dur-slow) var(--ease-out);
+  transition: transform var(--dur-slow) var(--ease);
 }
 /* 封面推近：整卡只抬 2px 太客气，照片往里走一步才有「点开看看」的邀请感。
    圆角靠 .tripcard 的 overflow 兜，但封面带自己的 overflow 才挡得住放大后的下沿。 */
@@ -370,8 +370,8 @@ onBeforeUnmount(closeMenu)
   /* 带方向地进来：它指着「往右走」，所以从左边 4px 滑回原位，比凭空显形更读得懂。 */
   transform: translateX(-4px);
   transition:
-    opacity var(--dur) var(--ease-out),
-    transform var(--dur) var(--ease-out);
+    opacity var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
 }
 
 .tripcard__hit:hover .tripcard__go,
@@ -396,8 +396,8 @@ onBeforeUnmount(closeMenu)
   border-radius: 50%;
   backdrop-filter: blur(4px);
   transition:
-    background var(--dur-fast) var(--ease-out),
-    transform var(--dur-fast) var(--ease-out);
+    background var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
 }
 .tripcard__more:hover {
   background: rgba(24, 16, 9, 0.8);
@@ -432,8 +432,8 @@ onBeforeUnmount(closeMenu)
   border: 0;
   border-radius: var(--radius-sm);
   transition:
-    background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 .tripcard__menu-item:hover {
   background: var(--surface-2);

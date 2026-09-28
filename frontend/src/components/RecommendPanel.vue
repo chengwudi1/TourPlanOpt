@@ -519,7 +519,7 @@ defineExpose({
   width: 44px;
   height: 44px;
   object-fit: cover;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   background: var(--surface-2);
 }
 

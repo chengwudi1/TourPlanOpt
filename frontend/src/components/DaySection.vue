@@ -248,7 +248,6 @@ function runOptimize() {
     :class="{ 'daysec--open': expanded, 'daysec--on': isSelected }"
     :style="{
       '--dc': `var(--ramp-${ramp})`,
-      '--dc-soft': `var(--ramp-${ramp}-soft)`,
       '--dc-deep': `var(--ramp-${ramp}-deep)`,
     }"
   >
@@ -455,33 +454,25 @@ function runOptimize() {
 </template>
 
 <style scoped>
-/* 选择器多带一枚 `.card`：全局那条 `.panel .card { box-shadow: var(--shadow-sm) }` 也是
-   两类的权重，只写 `.daysec` 会被它压掉——左脊就再也画不出来。既然要压过它，外阴影
-   跟着它降的那一档走：一列里同时摆三块色带，每张都拿 --shadow-md 就等于没有层次。 */
+/* 天层是一页纸，不是一张色带：底色走中性的 `--paper`，不带外阴影。三级层次在这儿
+   只靠一个事实分工——天是纸，地点卡是浮在纸上的票（--ticket + 一道近影）。整块铺天色
+   时这两级是同一件事，三块天同屏就连成一张日历；身份只剩左边那条 4px 书脊。
+   选择器多带一枚 `.card` 是为了压过全局 `.panel .card { box-shadow: var(--shadow-sm) }`——
+   这一层要的就是「不投影」。 */
 .daysec.card {
-  /* 色带底：这一天的天色按 55% 混进卡片色。混色而不是直接铺 ramp-soft，是因为
-     三块天同屏时纯色带会连成一张日历；混过一档之后它是「垫了一层颜色」，
-     票券（地点卡）压在上面才分得清谁浮着。 */
-  --band: color-mix(in oklab, var(--dc-soft) 55%, var(--surface));
   position: relative;
   /* clip 而不是 hidden：hidden 会造出一个滚动容器，卡片里那条 `position: sticky` 的吸底
      栏就会以这一层为参照——它永远不滚，于是吸底栏永远吸不住。clip 裁得一样干净，
      但不接管滚动，也不产生层叠上下文之外的新参照系。 */
   overflow: clip;
-  background: var(--band);
-  /* 交给地点卡的三枚变量（PlaceCard 只认变量，不认谁是宿主）：
-     票券不描边、只靠一道近影浮起来；轨道上那枚站点圆的环要跟着色带走，
-     否则它会在这块天色上开一个白洞。 */
-  --place-edge: transparent;
-  --place-shadow:
-    0 1px 0 var(--hairline),
-    0 2px 6px color-mix(in oklab, var(--ink) 8%, transparent);
-  --place-ring: var(--band);
-  /* 左脊：6px 实心天色。用 inset 阴影而不是 border-left——描边会跟着圆角拐，
-     而这一条要贴着盒子内侧直直地拉到底。 */
-  box-shadow:
-    inset 6px 0 0 var(--dc),
-    var(--shadow-sm);
+  background: var(--paper);
+  /* 交给地点卡的变量（PlaceCard 只认变量，不认谁是宿主）：站点圆的环要贴着天纸的
+     底色走，否则它会在纸上开一个白洞。 */
+  --place-ring: var(--paper);
+  /* 书脊：4px 深天色。用 inset 阴影而不是 border-left——描边会跟着圆角拐，
+     而这一条要贴着盒子内侧直直地拉到底。用 --dc-deep 而不是 --dc：
+     浅天色离开色带垫底之后，在中性纸上根本认不出是一条脊。 */
+  box-shadow: inset 4px 0 0 var(--dc-deep);
 }
 
 .daysec--on {
@@ -495,12 +486,33 @@ function runOptimize() {
   padding: 9px 10px;
   cursor: pointer;
   user-select: none;
-  transition: background var(--dur-fast) var(--ease-out);
+  transition: background var(--dur-fast) var(--ease);
 }
 
-/* 悬停的洗色跟着色带走：直接铺 --surface-hover 会在天色上开一块灰矩形。 */
+/* 悬停的洗色仍跟着这一天的色走：中性纸上铺 --surface-hover 是一块没有身份的灰矩形，
+   而这一行正是那一天的身份所在。 */
 .daysec__head:hover {
   background: color-mix(in oklab, var(--dc) 9%, transparent);
+}
+
+/* 吸顶行：滚到一天中间时，「第 N 天 + 日期/天气」留在顶上，长列表里不会看着看着
+   忘了自己在哪天。只在 ≥768px 开——窄屏一屏就是一天，吸顶只是多占一行。
+   不透明 --paper 加一条下发丝线，不用 blur：这一栏本身就在滚，再叠 backdrop-filter
+   等于把每一帧滚动变成一次全区域模糊。
+   书脊在这一层用 inset 阴影重画一遍：头部的不透明底会盖住天层那条 4px 脊，
+   重画之后吸附时脊跟着头部一起留着，看着像是同一条。 */
+@media (min-width: 768px) {
+  .daysec__head {
+    position: sticky;
+    /* 滚动容器自己带一圈 --pane-pad 内圈，而 sticky 钉的是「视口扣掉 padding」那条线：
+       top: 0 会把吸顶行停在圈里侧，上沿漏出一条刚滚过的内容。按同一个数往回抬才贴住边线。 */
+    top: calc(var(--pane-pad) * -1);
+    z-index: 4;
+    background: var(--paper);
+    box-shadow:
+      inset 4px 0 0 var(--dc-deep),
+      0 1px 0 var(--border-faint);
+  }
 }
 
 .daysec__arrow {
@@ -513,7 +525,7 @@ function runOptimize() {
   color: var(--text-3);
   background: none;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
 }
 
 .daysec__arrow svg {
@@ -673,7 +685,7 @@ function runOptimize() {
   width: 10px;
   height: 10px;
   content: "";
-  background: var(--band);
+  background: var(--paper);
   border: 2px solid var(--dc);
   border-radius: 50%;
   transform: translateY(-50%);
@@ -689,8 +701,8 @@ function runOptimize() {
 }
 
 /* 天头那一枚：`9/28 ☁ 21~29°`。整句（含风向）在 title 里——窄栏放不下，也不该放下：
-   这一枚回答的是「那天要不要带伞」，不是天气详情。底色走 --surface-2 而不是天色，
-   否则三色同屏时它读起来像序号牌的一部分。 */
+   这一枚回答的是「那天要不要带伞」，不是天气详情。底色走 --ticket（票券那一档），
+   天纸已经是 --paper 了，再同色就是一个看不见的胶囊。 */
 .daysec__when {
   display: inline-flex;
   flex: 0 0 auto;
@@ -698,7 +710,7 @@ function runOptimize() {
   align-items: center;
   padding: 1px 7px;
   color: var(--text-2);
-  background: var(--surface-2);
+  background: var(--ticket);
   border-radius: var(--radius-pill);
   font-variant-numeric: tabular-nums;
 }

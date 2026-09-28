@@ -165,7 +165,7 @@ const statusText = computed(() =>
 /* hover 推进挂在这层容器、呼吸挂在 img 上：同一元素的 animation 会永久压过 transition，
    两个都写在一起就只剩一个能动。 */
 .hero__photo {
-  transition: transform var(--dur-entrance) var(--ease-out);
+  transition: transform var(--dur-slow) var(--ease);
 }
 .hero:hover .hero__photo {
   transform: scale(1.045);

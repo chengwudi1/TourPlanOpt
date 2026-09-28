@@ -584,14 +584,14 @@ function openAnchor(a: Anchor) {
   padding: 6px 10px;
   background: var(--surface-2);
   border: 1px solid var(--hairline);
-  border-radius: 12px 12px 12px 3px;
+  border-radius: var(--radius-sm) var(--radius-sm) var(--radius-sm) 3px;
 }
 
 .chat__bubble--mine {
   color: var(--accent-ink);
   background: var(--accent);
   border-color: transparent;
-  border-radius: 12px 12px 3px 12px;
+  border-radius: var(--radius-sm) var(--radius-sm) 3px var(--radius-sm);
 }
 
 .chat__text {
@@ -735,9 +735,9 @@ function openAnchor(a: Anchor) {
   border-radius: 50%;
   cursor: pointer;
   transition:
-    color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out);
+    color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
 }
 
 .chat__mic:hover {

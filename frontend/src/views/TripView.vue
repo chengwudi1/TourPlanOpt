@@ -1288,7 +1288,7 @@ if (import.meta.env.DEV) {
   padding: 8px 10px;
   font-size: calc(14px * var(--fs-scale));
   background: var(--surface-2);
-  border: 1px solid var(--ink);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
 
@@ -1327,8 +1327,9 @@ if (import.meta.env.DEV) {
   flex-direction: column;
   gap: 10px;
   /* 实测 padding 为 0 时卡片顶到面板边线，右边那条 1px 墨线被 border-right 切掉一半。
-     描边风最怕边线糊在一起：留一圈，让每张卡的轮廓是完整的一条。 */
-  padding: 10px 10px 0;
+     描边风最怕边线糊在一起：留一圈，让每张卡的轮廓是完整的一条。
+     这一圈由 `--pane-pad` 单一真源管着——天卡吸顶行要按同一个数往回抬（见 DaySection）。 */
+  padding: var(--pane-pad) var(--pane-pad) 0;
 }
 
 /* 收尾这一圈不敢写回容器自己的 padding-bottom：sticky 钉的是「滚动视口扣掉 padding」
@@ -1339,7 +1340,7 @@ if (import.meta.env.DEV) {
    得互补，中途只要「视口抬得比补白快」，可滚范围就会短暂变小，读数照样被夹一次。 */
 .panel__content::after {
   flex: 0 0 auto;
-  height: calc(10px + var(--tail-h, 0px));
+  height: calc(var(--pane-pad) + var(--tail-h, 0px));
   content: "";
   transition: height var(--dur-slow) var(--ease-inout);
 }
@@ -1389,7 +1390,7 @@ if (import.meta.env.DEV) {
 
 @media (max-width: 860px) {
   .map-host {
-    transition: transform var(--dur-slow) var(--ease-out);
+    transition: transform var(--dur-slow) var(--ease);
   }
 
   /* 选点卡浮在 dock 之上：88px 是「dock 65 + 23」的一次性手算，
@@ -1426,9 +1427,9 @@ if (import.meta.env.DEV) {
   border-radius: var(--radius-sm);
   white-space: nowrap;
   transition:
-    background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out);
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
 }
 
 .panebar__btn:hover:not(.panebar__btn--on) {
@@ -1530,9 +1531,9 @@ if (import.meta.env.DEV) {
   border: 1px dashed var(--border);
   border-radius: var(--radius);
   transition:
-    color var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
 }
 
 .addday:hover {
@@ -1550,14 +1551,16 @@ if (import.meta.env.DEV) {
 /* ---------- 添加地点：搜索框与「发现」共用一个描边 ---------- */
 
 .addbar {
-  border: 1px solid var(--ink);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  transition: border-color var(--dur) var(--ease-out);
+  box-shadow: var(--edge);
+  transition: border-color var(--dur) var(--ease);
 }
 
 .addbar:focus-within,
 .addbar--flash {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--edge);
 }
 
 /* 空天那一行点进来时的回声：整条栏亮一下。动画被 reduced-motion 掐掉时停在自然态
@@ -1606,8 +1609,8 @@ if (import.meta.env.DEV) {
   white-space: nowrap;
   cursor: pointer;
   transition:
-    color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
+    color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
 }
 
 .addbar__reco:hover {

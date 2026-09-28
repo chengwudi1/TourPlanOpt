@@ -177,7 +177,7 @@ const mood = computed(() => (speaking.value ? 'talk' : assistant.mood))
   display: grid;
   place-items: center;
   cursor: pointer;
-  transition: transform var(--dur) var(--ease-pop), box-shadow var(--dur) var(--ease-out);
+  transition: transform var(--dur) var(--ease-pop), box-shadow var(--dur) var(--ease);
 }
 
 .sprite__avatar:hover {

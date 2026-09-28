@@ -526,8 +526,8 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-pill);
   cursor: pointer;
   transition:
-    background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 
 .triphead__city:hover {

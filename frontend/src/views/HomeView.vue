@@ -798,8 +798,8 @@ onMounted(() => {
   color: var(--text-3);
   opacity: 0;
   transition:
-    opacity var(--dur) var(--ease-out),
-    transform var(--dur) var(--ease-out);
+    opacity var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
 }
 .board__item:hover .board__go {
   opacity: 1;
@@ -947,9 +947,9 @@ onMounted(() => {
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   transition:
-    background var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out),
-    transform var(--dur-fast) var(--ease-out);
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
 }
 .side__row:hover {
   background: var(--surface-2);
@@ -977,9 +977,9 @@ onMounted(() => {
   border: 2px dashed var(--hairline);
   border-radius: var(--radius);
   transition:
-    color var(--dur) var(--ease-out),
-    border-color var(--dur) var(--ease-out),
-    background var(--dur) var(--ease-out);
+    color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
 }
 .newcard:hover {
   color: var(--accent-strong);
@@ -1052,8 +1052,8 @@ onMounted(() => {
   border-radius: var(--radius-pill);
   box-shadow: var(--shadow-lg);
   transition:
-    background var(--dur-fast) var(--ease-out),
-    transform var(--dur-fast) var(--ease-out);
+    background var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
 }
 .fab:hover {
   background: var(--accent-strong);
