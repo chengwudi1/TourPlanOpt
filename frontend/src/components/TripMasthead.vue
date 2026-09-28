@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
+import MastCoverGl from '@/components/MastCoverGl.vue'
 import RouteArt from '@/components/RouteArt.vue'
 import { ImagePlus } from '@/components/icons'
 import { useReduceMotion } from '@/composables/useReduceMotion'
+import { MOTION, useMotion } from '@/composables/useMotion'
 import { useTripStore } from '@/stores/trip'
 import type { CoverSource } from '@/types/domain'
 import { formatMoney } from '@/utils/money'
@@ -47,6 +49,9 @@ const cover = computed(() => store.coverPhoto)
  *  按 URL 记，换一张就自动重新挂载重试——一次网络抖动不该把海报永久打死。 */
 const brokenUrl = ref('')
 const hasPhoto = computed(() => !!cover.value && brokenUrl.value !== cover.value)
+/** WebGL 档是否真的在画。它只由子组件的两条事件决定——`<img>` 一直在底下画着，
+ *  所以这里为假时不需要任何「回落动作」，CSS 那两条动画本来就是它的。 */
+const glLive = ref(false)
 /** 出的是两档链里的哪一档。屏幕上只有一处读它（下面那枚「换封面」键），复验时两条判据都要读它。 */
 const coverSource = computed<CoverSource>(() => store.coverSource)
 /** 还站在默认那张上：链头空着，或者内置资产读不出来（同一档的兜底形态，键照样要给）。 */
@@ -116,6 +121,25 @@ watch(reduceMotion, (off) => {
   if (off) onPointerLeave()
 })
 
+/* -- 行遮罩揭幕（lab D1）：行程名从一条线后面升上来，而不是整块淡入。 ------------- */
+// 遮罩由模板里那两层 span 承担（外层裁、内层跑 transform），GSAP 只碰内层那一枚。
+// 收尾必须 clearProps：票券里还有别的元素在量自己的位置，留一份 transform 在身上，
+// 下一次重排就会拿它当基准（M15 那轮 TransitionGroup 留尾巴的同一种错）。
+useMotion(rootEl, ({ q, gsap, reduce }) => {
+  gsap.fromTo(
+    q('.mast__masktext'),
+    { yPercent: 105, autoAlpha: 0 },
+    {
+      yPercent: 0,
+      autoAlpha: 1,
+      duration: reduce ? 0.001 : MOTION.reveal,
+      ease: reduce ? 'none' : MOTION.easeOut,
+      delay: reduce ? 0 : 0.1,
+      clearProps: 'transform,opacity,visibility',
+    },
+  )
+})
+
 onBeforeUnmount(() => {
   stageEl.value = null
 })
@@ -125,7 +149,7 @@ onBeforeUnmount(() => {
   <section
     ref="rootEl"
     class="mast"
-    :class="{ 'mast--photo': hasPhoto, 'mast--nophoto': !hasPhoto, 'mast--min': collapsed }"
+    :class="{ 'mast--photo': hasPhoto, 'mast--nophoto': !hasPhoto, 'mast--min': collapsed, 'mast--gl': glLive }"
     :data-cover-source="coverSource"
     :style="{ '--sy': sy, '--zoom': zoom }"
     aria-label="行程概要"
@@ -145,6 +169,13 @@ onBeforeUnmount(() => {
           referrerpolicy="no-referrer"
           @error="onImgError"
         />
+        <!-- 减少动效时这一档根本不挂载：CSS 那条全局兜底掐不掉 shader 自己的 rAF。 -->
+        <MastCoverGl
+          v-if="!reduceMotion"
+          :src="cover"
+          @live="glLive = true"
+          @dead="glLive = false"
+        />
       </div>
       <div v-else class="mast__art" aria-hidden="true">
         <RouteArt />
@@ -163,7 +194,8 @@ onBeforeUnmount(() => {
           :title="title ? '点击重命名行程' : '点击设置行程名'"
           @click="emit('rename')"
         >
-          {{ title || '未命名行程' }}
+          <!-- 两层：外层裁、内层被 GSAP 抬起来。文本本身仍是一行带省略号。 -->
+          <span class="mast__maskline"><span class="mast__masktext">{{ title || '未命名行程' }}</span></span>
         </button>
         <span v-if="countdown.label" class="mast__pill" :class="`mast__pill--${countdown.tone}`">
           {{ countdown.label }}
@@ -285,7 +317,7 @@ onBeforeUnmount(() => {
   transform: translate3d(0, var(--drift), 0);
   /* 视差跟的是滚轮，用 --dur 那档：慢到 --dur-slow 就变成「照片迟到了」，
      而 hover 推进也读这一条，两段共用一个时长才不会互相抢。 */
-  transition: transform var(--dur) var(--ease-out);
+  transition: transform var(--dur) var(--ease);
   animation: mast-settle var(--dur-photo) var(--ease-out) backwards;
 }
 
@@ -302,6 +334,12 @@ onBeforeUnmount(() => {
   /* 静止的照片最容易读出「贴图」，一个来回 22s 的缩放漂移慢到不会被注意，但画面活了。 */
   animation: ken-burns var(--dur-drift) var(--ease-inout) infinite alternate;
   transform-origin: 58% 44%;
+}
+
+/* WebGL 档接管照片时，这条呼吸要停下：同一条缩放两边各跑一次，读起来是照片在抽搐。
+   而 `.mast__ph` 那句 `mast-settle` 不许跟着停——它带着画布一起落，照片的入场收拢只有它一份。 */
+.mast--gl .mast__img {
+  animation: none;
 }
 
 /* 压暗层：这里原本担着「白字压在任意照片上也要 3:1」的活，那活已经搬走了——大字在
@@ -399,17 +437,33 @@ onBeforeUnmount(() => {
 .mast__name {
   min-width: 0;
   padding: 0;
-  overflow: hidden;
   color: inherit;
   font-family: var(--font-display);
   font-size: calc(clamp(22px, 3.2vw, 30px) * var(--fs-scale));
   letter-spacing: var(--ls-display);
   text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   background: none;
   border: 0;
   cursor: pointer;
+}
+
+/* 行遮罩：外层裁、内层被抬起来（GSAP 只碰内层那枚）。省略号从按钮搬到内层——
+   块级子元素不吃父级的 text-overflow。下缘 0.14em 是给拉丁字尾留的呼吸：展示字的
+   line-height 是 1.14，直接 clip 会把 g/j 的下半截切掉；外层用等量负 margin 还回去，
+   按钮的盒高与加遮罩之前一致，票券的几何不用重算。 */
+.mast__maskline {
+  display: block;
+  min-width: 0;
+  margin-bottom: -0.14em;
+  overflow: hidden;
+}
+
+.mast__masktext {
+  display: block;
+  padding-bottom: 0.14em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mast__name:hover {
