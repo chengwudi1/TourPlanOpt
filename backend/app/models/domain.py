@@ -58,6 +58,12 @@ EXPENSE_CATEGORIES: frozenset[str] = frozenset(
     {"transport", "lodging", "food", "ticket", "shopping", "other"}
 )
 
+# 一笔开销最多摊给多少人。op 层的拒绝理由、这里的字段上限、仓储层的清洗共用这一个数：
+# 从前它是写死在两处的 40，于是 40 人以上的「默认全员」要么被静默截成前 40 人（账记上了，
+# 但少摊了一批人），要么被拒之后 toast 说「标题或金额无效」——两种都比拒得干脆更坏。
+# 200 是「一次结伴出行」的上界，不是性能边界：真到那个量级，该做的是分组结算而不是记账。
+EXPENSE_SPLIT_LIMIT: int = 200
+
 
 class TripOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -430,7 +436,7 @@ class ExpenseCreate(BaseModel):
     category: str = Field(default="other", max_length=40)
     paid_by: str = Field(default="", max_length=64)
     paid_by_name: str = Field(default="", max_length=60)
-    split_ids: list[str] = Field(default_factory=list, max_length=40)
+    split_ids: list[str] = Field(default_factory=list, max_length=EXPENSE_SPLIT_LIMIT)
 
 
 class TripPatch(BaseModel):

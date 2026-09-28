@@ -21,7 +21,14 @@ from app.amap.client import fetch_photo_best_effort
 from app.db import repositories
 from app.db.database import get_db
 from app.models import protocol
-from app.models.domain import ChecklistAdd, ExpenseCreate, MessageIn, PlaceCreate, StashCreate
+from app.models.domain import (
+    EXPENSE_SPLIT_LIMIT,
+    ChecklistAdd,
+    ExpenseCreate,
+    MessageIn,
+    PlaceCreate,
+    StashCreate,
+)
 from app.routing.timeline import reschedule_days
 from app.ws.hub import TripHub
 
@@ -566,6 +573,13 @@ async def _expense_add(
 ) -> None:
     trip_id = conn.trip_id
     splits = data.get("split_ids")
+    # 先清洗再判长度：`bad_expense` 的文案说的是标题和金额，而「这趟人太多」是另一回事，
+    # 混在一起人只会反复改金额。判的也不能是原始条数——250 条去重后可能只剩 180 人，
+    # 那是一笔正当的账，不该被字段上限顶回去。
+    cleaned = repositories.clean_split_ids(splits, limit=None) if isinstance(splits, list) else []
+    if len(cleaned) > EXPENSE_SPLIT_LIMIT:
+        await _reject(conn, op_id, "expense_split_too_many", {"limit": EXPENSE_SPLIT_LIMIT})
+        return
     try:
         payload = ExpenseCreate(
             title=str(data.get("title") or "").strip(),
@@ -573,7 +587,7 @@ async def _expense_add(
             category=str(data.get("category") or "other"),
             paid_by=str(data.get("paid_by") or client_id),
             paid_by_name=str(data.get("paid_by_name") or ""),
-            split_ids=[str(s) for s in splits] if isinstance(splits, list) else [],
+            split_ids=cleaned,
         )
     except ValidationError:
         await _reject(conn, op_id, "bad_expense")

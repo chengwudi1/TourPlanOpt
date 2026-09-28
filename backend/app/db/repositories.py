@@ -16,6 +16,7 @@ from datetime import date, timedelta
 from app.db.database import Database
 from app.models.domain import (
     EXPENSE_CATEGORIES,
+    EXPENSE_SPLIT_LIMIT,
     ChecklistItemOut,
     CostModel,
     DayOut,
@@ -967,9 +968,14 @@ async def reorder_checklist(
 # -- expenses（费用与 AA）-----------------------------------------------------------------
 
 
-def _clean_split_ids(value: object) -> list[str]:
+def clean_split_ids(value: object, limit: int | None = EXPENSE_SPLIT_LIMIT) -> list[str]:
     """Dedupe, keep the caller's order, drop blanks. Accepts a JSON string (what the
-    column holds) or a list (what an op payload carries)."""
+    column holds) or a list (what an op payload carries).
+
+    截断到 `limit` 只是兜底：真超上限的意图由 op 层当场拒掉并说清原因，不该在这里悄悄
+    少摊一批人——账记上了而有人没摊上，比拒收更难发现。op 层要数「到底想摊给几个人」，
+    所以传 `limit=None` 拿不截断的那一份。
+    """
     if isinstance(value, str):
         try:
             value = json.loads(value)
@@ -982,7 +988,7 @@ def _clean_split_ids(value: object) -> list[str]:
         client_id = str(raw).strip()
         if client_id and client_id not in out:
             out.append(client_id)
-        if len(out) >= 40:
+        if limit is not None and len(out) >= limit:
             break
     return out
 
@@ -994,7 +1000,7 @@ def _clean_category(value: object) -> str:
 
 async def expense_add(db: Database, trip_id: str, payload: ExpenseCreate) -> ExpenseOut:
     expense_id = new_id()
-    splits = _clean_split_ids(payload.split_ids)
+    splits = clean_split_ids(payload.split_ids)
     payer = payload.paid_by.strip()
     # 没人分摊 = 付款人自己全担。留一份空名单会让「AA」这个词说谎，也会让结算少算一笔。
     if not splits and payer:
@@ -1029,7 +1035,7 @@ EXPENSE_PATCH_FIELDS: dict[str, Callable[[object], object]] = {
     "title": lambda v: str(v).strip()[:80],
     "amount_cents": lambda v: int(v),
     "category": _clean_category,
-    "split_ids": lambda v: json.dumps(_clean_split_ids(v), ensure_ascii=False),
+    "split_ids": lambda v: json.dumps(clean_split_ids(v), ensure_ascii=False),
     "paid_by": lambda v: str(v).strip()[:40],
     "paid_by_name": lambda v: str(v).strip()[:40],
 }

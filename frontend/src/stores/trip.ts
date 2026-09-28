@@ -1669,6 +1669,7 @@ export const useTripStore = defineStore('trip', () => {
       checklist_not_found: '该清单项已被删除',
       expense_not_found: '该笔开销已被删除',
       bad_expense: '记录添加失败：标题或金额无效',
+      expense_split_too_many: '记录添加失败：分摊的人太多，改为只摊给其中一部分',
       bad_message: '这句是空的',
       message_too_fast: '说得有点快，稍一下再发',
       message_not_found: '那句话已经不在了',

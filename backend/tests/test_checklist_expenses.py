@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 from app.db import repositories as repo
 from app.db.database import Database, set_db
 from app.models import protocol
-from app.models.domain import ExpenseCreate
+from app.models.domain import EXPENSE_SPLIT_LIMIT, ExpenseCreate
 from app.models.protocol import Ops
 from tests.frames import join, read_op
 
@@ -137,6 +137,24 @@ async def test_expense_add_defaults_to_the_payer_and_repairs_junk(db: Database) 
     assert mine.split_ids == ["c-2", "c-1"]  # 去重保序，空串丢掉
 
 
+async def test_expense_split_list_lands_in_full(db: Database) -> None:
+    """40 人以上结伴出行是一笔正当的账：清洗层从前把它截成前 40 人，账记上了而有人没摊上，
+    比拒收更难发现。截断只留作兜底，且必须与字段上限同一个数。"""
+    trip_id, _ = await repo.create_trip(db, title="甲")
+    everyone = [f"c-{i}" for i in range(EXPENSE_SPLIT_LIMIT)]
+
+    expense = await repo.expense_add(
+        db,
+        trip_id,
+        ExpenseCreate(title="包车", amount_cents=880000, paid_by="c-0", split_ids=everyone),
+    )
+    assert expense.split_ids == everyone  # 一份不少：上限之内的名单不该在落库前缩水
+
+    assert len(repo.clean_split_ids([f"x-{i}" for i in range(EXPENSE_SPLIT_LIMIT + 100)])) == (
+        EXPENSE_SPLIT_LIMIT
+    )
+
+
 async def test_expense_update_validates_the_amount(db: Database) -> None:
     trip_id, _ = await repo.create_trip(db, title="甲")
     expense = await repo.expense_add(
@@ -241,6 +259,53 @@ def test_expense_ops_and_rejections(client: tuple[TestClient, str]) -> None:
         snapshot = testclient.get(f"/api/trips/{trip_id}").json()
         assert [e["id"] for e in snapshot["expenses"]] == [added["id"]]
         assert snapshot["checklist"] == []
+
+
+def test_expense_split_over_limit_has_its_own_reason(client: tuple[TestClient, str]) -> None:
+    """超上限从前落在 `bad_expense` 上，而那句文案说的是「标题或金额无效」——人会反复改
+    金额，永远改不到点上。所以它要一条自己的理由，并且附上上限是多少。"""
+    testclient, trip_id = client
+    with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
+        join(ws, "c-1", "小明")
+
+        over = [f"c-{i}" for i in range(EXPENSE_SPLIT_LIMIT + 1)]
+        ws.send_json(
+            protocol.op_frame(
+                Ops.EXPENSE_ADD, "e-1", {"title": "包车", "amount_cents": 8800, "split_ids": over}
+            )
+        )
+        reject = read_op(ws, "op_reject")
+        assert reject["reason"] == "expense_split_too_many"
+        assert reject["data"]["limit"] == EXPENSE_SPLIT_LIMIT
+
+        ws.send_json(
+            protocol.op_frame(
+                Ops.EXPENSE_ADD,
+                "e-2",
+                {"title": "包车", "amount_cents": 8800, "split_ids": over[:-1]},
+            )
+        )
+        added = read_op(ws, "expense_added")["data"]["expense"]
+        assert len(added["split_ids"]) == EXPENSE_SPLIT_LIMIT
+
+        # 250 条原始 id 去重后只剩 180 人：这是一笔正当的账，不能被字段上限按原始条数顶回去。
+        ws.send_json(
+            protocol.op_frame(
+                Ops.EXPENSE_ADD,
+                "e-3",
+                {
+                    "title": "拼车",
+                    "amount_cents": 6000,
+                    "split_ids": [f"c-{i % 180}" for i in range(250)],
+                },
+            )
+        )
+        deduped = read_op(ws, "expense_added")["data"]["expense"]
+        assert len(deduped["split_ids"]) == 180
+
+        snapshot = testclient.get(f"/api/trips/{trip_id}").json()
+        # 被拒那笔没留下行
+        assert [e["id"] for e in snapshot["expenses"]] == [added["id"], deduped["id"]]
 
 
 # -- REST：首页要动的三件事 ---------------------------------------------------------------
