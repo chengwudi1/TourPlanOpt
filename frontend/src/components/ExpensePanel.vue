@@ -80,8 +80,20 @@ function toggleSplit(clientId: string) {
   // 补上自己还有一层：不补的话 chips 显示「没人摊」，而实际记下的是「我一个人摊」，
   // 界面和账各说一套。
   if (!next.size) next.add(selfId)
-  splitSel.value = [...next]
+  // 逐个点回全员与「没点过」是同一个意图，只留一个表示：名单一旦铺满就交回默认。
+  // 真正付代价的是新人：显式满名单是新人落地之前抄的快照，之后来的人会被静默排除，
+  // 界面照旧写「全员」，账上少摊一人。
+  splitSel.value = next.size >= roster.value.length ? null : [...next]
 }
+
+/** 状态小计挂在行首：这一行的默认是「全员」，默认态不值得每一枚都描一遍边，
+ *  所以把「现在摊给谁」说成一句话，chip 上只留「谁被移出了」这一个信息。 */
+const splitSummary = computed(() => {
+  const active = activeSplits.value
+  if (active.length >= roster.value.length) return '全员'
+  if (active.length === 1) return `只摊给 ${nameOf(active[0])}`
+  return `${active.length} 人`
+})
 
 const spent = computed(() => store.spentCents)
 const budget = computed(() => store.trip?.budget_cents ?? 0)
@@ -272,17 +284,23 @@ function drop(expense: Expense) {
         </button>
       </div>
       <div v-if="roster.length > 1" class="exp__pickrow exp__pickrow--split">
-        <span class="tiny muted exp__split-label"><Users class="ic" :size="12" /> 分摊</span>
+        <span class="tiny muted exp__split-label">
+          <Users class="ic" :size="12" /> 分摊 · {{ splitSummary }}
+        </span>
         <button
           v-for="p in roster"
           :key="p.client_id"
           class="chip chip--person"
-          :class="{ 'chip--on': activeSplits.includes(p.client_id) }"
+          :class="{ 'chip--off': !activeSplits.includes(p.client_id) }"
           type="button"
-          :title="activeSplits.length === roster.length ? '默认由全员均摊，可改为仅分摊给指定成员' : ''"
+          :title="
+            activeSplits.includes(p.client_id)
+              ? `把 ${p.client_id === selfId ? '我' : p.name} 移出这笔分摊`
+              : `把 ${p.client_id === selfId ? '我' : p.name} 加回这笔分摊`
+          "
           @click="toggleSplit(p.client_id)"
         >
-          {{ p.client_id === selfId ? '我' : p.name }}
+          <span class="chip__name">{{ p.client_id === selfId ? '我' : p.name }}</span>
         </button>
       </div>
     </div>
@@ -529,6 +547,26 @@ function drop(expense: Expense) {
 
 .chip--person {
   padding: 2px 8px;
+}
+
+/* 分摊行的极性是反的：这一枚枚是「谁来摊」的开关，而默认是全员。全员时每一枚都亮
+   accent，一整排描边既不遵守「强调色只用在极少的关键交互上」，也让「选中」不再携带
+   任何信息。所以默认态一枚都不亮，只用减法说「这个人被移出了」：去掉垫色、淡一档
+   字、名字上划。谁被排除一眼看得见，摊给谁由行首那句小计说。 */
+.chip--person.chip--off {
+  color: var(--text-3);
+  background: transparent;
+}
+
+.chip--person.chip--off .chip__name {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in oklab, var(--text-3) 60%, transparent);
+}
+
+/* 三条类的权重压过 `.chip:hover`，不补这一条的话被移出的人反而没有落点回声。 */
+.chip--person.chip--off:hover {
+  background: var(--surface-2);
 }
 
 /* 手机上这些 chip 是「谁来摊」的唯一开关，26px 高的落点按不准（O6）。
