@@ -64,8 +64,10 @@ async def _hello(conn: ClientConnection, frame: dict) -> Dispatch:
     client_id = str(data.get("client_id") or "").strip()
     name = str(data.get("name") or "").strip()
     color = str(data.get("color") or "").strip()
-    if not client_id or not (1 <= len(name) <= 40):
-        conn.send_json(error_frame("hello 缺少 client_id 或 name（1-40 字）"))
+    # client_id 的上限就是最窄那一列（messages.client_id 截到 40）：放行更长的 id 会让同一个
+    # 人在 participants 里是全名、在 messages 里是截名，「谁说的」从此对不上任何人。
+    if not client_id or len(client_id) > 40 or not (1 <= len(name) <= 40):
+        conn.send_json(error_frame("hello 的 client_id（≤40 字）或 name（1-40 字）不合法"))
         return Dispatch.CLOSED
 
     db = get_db()

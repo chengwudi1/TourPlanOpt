@@ -1020,7 +1020,7 @@ async def expense_add(db: Database, trip_id: str, payload: ExpenseCreate) -> Exp
                 payload.amount_cents,
                 _clean_category(payload.category),
                 payer,
-                payload.paid_by_name.strip()[:40],
+                payload.paid_by_name.strip()[:60],
                 json.dumps(splits, ensure_ascii=False),
                 now,
                 now,

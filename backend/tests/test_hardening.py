@@ -10,6 +10,8 @@
 - _resync 不消耗 seq（旧代码每 resync 烧一个号，给房里其他人留 seq 空洞）
 - 密码长度闸（旧代码 10MB 密码 = 一次免费钉死 CPU 的 PBKDF2）
 - 距离矩阵 single-flight（旧代码两人同刻 optimize 把同一批坐标烧两遍配额）
+- hello 的 client_id 长度闸（旧代码只判 name，41 字 id 会在两张表上变成两个身份）
+- paid_by_name 新增那侧的截断（旧代码截到 40，模型容 60，同一笔账改一次名字就长出 10 字）
 """
 
 from __future__ import annotations
@@ -352,3 +354,43 @@ async def test_concurrent_matrix_builds_share_inflight_calls(tmp_path: Path) -> 
         assert _inflight == {}  # 在途表必须清空，不泄漏任务
     finally:
         set_db(Database(":memory:"))
+
+
+# -- R6 身份长度：两个入口必须同数 --------------------------------------------------------
+
+
+def test_oversized_client_id_is_refused_at_hello(client) -> None:
+    """client_id 的天花板就是最窄那一列（messages.client_id 截到 40）。
+
+    修复前 hello 只判 name 的长度：一个 41 字的 id 会在 participants 里存全名、在 messages
+    里存截名，同一个人从此在两处不是同一个人——「谁说的」查无此人。宁可当场拒。
+    """
+    testclient, trip_id, _ = client
+    with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
+        ws.send_json(hello("c" * 41, "小明"))
+        assert ws.receive_json()["type"] == "error"
+        # 40 字是边界内：闸不许比那一列自己的宽度更严
+        ws2 = testclient.websocket_connect(f"/ws/trips/{trip_id}")
+        ws2.__enter__()
+        try:
+            join_and_sync(ws2, "c" * 40, "小明")
+        finally:
+            ws2.__exit__(None, None, None)
+
+
+def test_payer_name_survives_the_add_path(client) -> None:
+    """新增那侧从前把 paid_by_name 截到 40，而 ExpenseCreate 容 60、patch 侧现在也留 60：
+    同一笔账改一次名字就长出 10 个字，说明两把尺子里必有一把是错的。"""
+    testclient, trip_id, _ = client
+    with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
+        join_and_sync(ws, "c-1", "小明")
+        name = "名" * 50
+        ws.send_json(
+            protocol.op_frame(
+                protocol.Ops.EXPENSE_ADD,
+                "op-payer",
+                {"title": "包车", "amount_cents": 8800, "paid_by_name": name},
+            )
+        )
+        expense = read_op(ws, "expense_added")["data"]["expense"]
+        assert expense["paid_by_name"] == name

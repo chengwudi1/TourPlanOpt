@@ -366,7 +366,8 @@ class TripCreateResult(BaseModel):
 
 
 class ParticipantUpsert(BaseModel):
-    client_id: str = Field(min_length=1)
+    # 与 ws hello 同一条上限（= 最窄那列 messages.client_id）：两个入口必须同数。
+    client_id: str = Field(min_length=1, max_length=40)
     name: str = Field(min_length=1, max_length=40)
     color: str = ""
 
