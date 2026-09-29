@@ -1032,12 +1032,14 @@ async def expense_add(db: Database, trip_id: str, payload: ExpenseCreate) -> Exp
 
 
 EXPENSE_PATCH_FIELDS: dict[str, Callable[[object], object]] = {
+    # 截断长度就是 `ExpenseCreate` 的字段上限，两处必须同数：改一笔账时把 paid_by 截短，
+    # 它就不再对应任何在册同伴，应摊照算、垫付无处落账，而账面上看不出哪一行错了。
     "title": lambda v: str(v).strip()[:80],
     "amount_cents": lambda v: int(v),
     "category": _clean_category,
     "split_ids": lambda v: json.dumps(clean_split_ids(v), ensure_ascii=False),
-    "paid_by": lambda v: str(v).strip()[:40],
-    "paid_by_name": lambda v: str(v).strip()[:40],
+    "paid_by": lambda v: str(v).strip()[:64],
+    "paid_by_name": lambda v: str(v).strip()[:60],
 }
 
 

@@ -308,6 +308,74 @@ def test_expense_split_over_limit_has_its_own_reason(client: tuple[TestClient, s
         assert [e["id"] for e in snapshot["expenses"]] == [added["id"], deduped["id"]]
 
 
+def test_expense_update_split_over_limit_is_rejected_not_truncated(
+    client: tuple[TestClient, str],
+) -> None:
+    """改分摊从前没有这道判据：仓储层按默认上限截断后照发 `expense_updated`，于是界面写
+    「全员」，账上少摊人。截断只能是兜底，不能是这条路的结局。"""
+    testclient, trip_id = client
+    with testclient.websocket_connect(f"/ws/trips/{trip_id}") as ws:
+        join(ws, "c-1", "小明")
+        ws.send_json(
+            protocol.op_frame(
+                Ops.EXPENSE_ADD,
+                "e-1",
+                {"title": "包车", "amount_cents": 8800, "split_ids": ["c-1"]},
+            )
+        )
+        expense_id = read_op(ws, "expense_added")["data"]["expense"]["id"]
+
+        ws.send_json(
+            protocol.op_frame(
+                Ops.EXPENSE_UPDATE,
+                "u-1",
+                {
+                    "id": expense_id,
+                    "patch": {"split_ids": [f"c-{i}" for i in range(EXPENSE_SPLIT_LIMIT + 1)]},
+                },
+            )
+        )
+        reject = read_op(ws, "op_reject")
+        assert reject["reason"] == "expense_split_too_many"
+        assert reject["data"]["limit"] == EXPENSE_SPLIT_LIMIT
+
+        before = testclient.get(f"/api/trips/{trip_id}").json()["expenses"][0]
+        assert before["split_ids"] == ["c-1"]  # 被拒的那一份没沾上库
+
+        ws.send_json(
+            protocol.op_frame(
+                Ops.EXPENSE_UPDATE,
+                "u-2",
+                {
+                    "id": expense_id,
+                    "patch": {"split_ids": [f"c-{i}" for i in range(EXPENSE_SPLIT_LIMIT)]},
+                },
+            )
+        )
+        updated = read_op(ws, "expense_updated")["data"]["expense"]
+        assert len(updated["split_ids"]) == EXPENSE_SPLIT_LIMIT
+
+
+async def test_expense_update_keeps_a_long_payer_id(db: Database) -> None:
+    """新增允许 64 字的 client_id、改的时候从前只留 40 个：一笔正当的账过了那道裁剪就
+    指向一个不存在的同伴，AA 从此对不上而界面上一处错都看不见。两个入口必须同数。"""
+    trip_id, _ = await repo.create_trip(db, title="甲")
+    payer = "c" * 50  # 40 < 50 <= ExpenseCreate.paid_by 的 64
+    name = "名" * 50  # 40 < 50 <= ExpenseCreate.paid_by_name 的 60
+    expense = await repo.expense_add(
+        db,
+        trip_id,
+        ExpenseCreate(title="包车", amount_cents=8800, paid_by=payer, paid_by_name=name),
+    )
+    assert expense.paid_by == payer
+
+    renamed = await repo.update_expense(
+        db, expense.id, {"paid_by": payer, "paid_by_name": name, "title": "夜车"}
+    )
+    assert renamed is not None
+    assert (renamed.paid_by, renamed.paid_by_name) == (payer, name)
+
+
 # -- REST：首页要动的三件事 ---------------------------------------------------------------
 
 

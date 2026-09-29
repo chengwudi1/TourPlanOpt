@@ -615,6 +615,13 @@ async def _expense_update(
         await _reject(conn, op_id, "expense_not_found", {"id": expense_id})
         return
     patch = data.get("patch")
+    if isinstance(patch, dict) and "split_ids" in patch:
+        # 改分摊和记一笔新账是同一条红线：少了这道判据，`EXPENSE_PATCH_FIELDS` 里的
+        # `clean_split_ids` 会把名单悄悄截到上限——广播回的是「改好了」，账上却少摊了几个人。
+        wanted = repositories.clean_split_ids(patch["split_ids"], limit=None)
+        if len(wanted) > EXPENSE_SPLIT_LIMIT:
+            await _reject(conn, op_id, "expense_split_too_many", {"limit": EXPENSE_SPLIT_LIMIT})
+            return
     updated = (
         await repositories.update_expense(db, expense_id, patch)
         if isinstance(patch, dict)
