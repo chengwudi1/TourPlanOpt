@@ -350,10 +350,45 @@ function openAnchor(a: Anchor) {
   if (a.placeId) emit('openRef', { placeId: a.placeId })
   else if (a.dayId) emit('openRef', { dayId: a.dayId })
 }
+
+/* -- 指针回声：气泡与输入行跟手。和海报头同一套约定——JS 只写 --mx/--my 两个百分比，
+   光斑是纯 CSS 的合成层。坐标算在「发光的那块盒子」上而不是外层 group：group 还带着
+   名字行，拿它算出来的百分比落在气泡里就偏了，指针一动光斑像慢半拍。
+   挂一枚委托监听而不是每枚气泡各挂：读取窗口最长 60 条，逐条挂等于把开销乘在指针的采样频率上。 */
+let echoTarget: HTMLElement | null = null
+
+function clearEcho() {
+  echoTarget?.style.removeProperty('--mx')
+  echoTarget?.style.removeProperty('--my')
+  echoTarget = null
+}
+
+function onEchoMove(e: PointerEvent) {
+  if (reduceMotion.value) return
+  const el = (e.target as HTMLElement | null)?.closest<HTMLElement>('.chat__bubble, .chat__row')
+  if (!el) {
+    // 指针还在面板里、但两块之间都不算：不清就会留在最后一次采样的位置上，像一道没关的灯。
+    clearEcho()
+    return
+  }
+  const r = el.getBoundingClientRect()
+  if (!r.width || !r.height) return
+  if (echoTarget !== el) clearEcho()
+  echoTarget = el
+  el.style.setProperty('--mx', `${((e.clientX - r.left) / r.width) * 100}%`)
+  el.style.setProperty('--my', `${((e.clientY - r.top) / r.height) * 100}%`)
+}
+
+/** 偏好是中途能改的：关掉时要把已经写上去的光斑收掉，不然它会留在原地。 */
+watch(reduceMotion, (off) => {
+  if (off) clearEcho()
+})
+
+onBeforeUnmount(clearEcho)
 </script>
 
 <template>
-  <section class="chat">
+  <section class="chat" @pointermove="onEchoMove" @pointerleave="clearEcho">
     <div ref="flowEl" class="chat__flow" @scroll.passive="onScroll">
       <p v-if="!store.messages.length" class="chat__empty">
         还没有人说第一句。
@@ -546,6 +581,51 @@ function openAnchor(a: Anchor) {
   align-items: flex-end;
 }
 
+/* 指针回声。位移只落在 group 上——撤回键是 flex 项、不靠包含块定位，所以 transform
+   不会把它挪走；光斑落在气泡自己的盒子上，坐标也由 JS 写在同一枚气泡上。 */
+.chat__group {
+  transition: transform var(--dur) var(--ease);
+}
+
+.chat__group:hover {
+  transform: translateY(-1px);
+}
+
+.chat__bubble::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    84px 56px at var(--mx, 50%) var(--my, 50%),
+    color-mix(in oklab, var(--text) 10%, transparent),
+    transparent 70%
+  );
+  opacity: 0;
+  pointer-events: none;
+  content: '';
+  transition: opacity var(--dur) var(--ease);
+}
+
+.chat__group:hover .chat__bubble::after {
+  opacity: 1;
+}
+
+/* 自己那句是实底强调色，压墨色光斑只会让它发脏，所以这一档换成提亮。 */
+.chat__group--mine .chat__bubble::after {
+  background: radial-gradient(
+    84px 56px at var(--mx, 50%) var(--my, 50%),
+    color-mix(in oklab, #fff 18%, transparent),
+    transparent 70%
+  );
+}
+
+/* 减少动态那一档干脆不画光斑：JS 不写坐标，它就只能钉在盒子正中，一团跟指针无关的亮斑
+   看着像渲染坏了。这一档的 hover 反馈退回底色、描边和那道 1px 位移。 */
+:root[data-motion='off'] .chat__bubble::after,
+:root[data-motion='off'] .chat__row::after {
+  display: none;
+}
+
 .chat__head {
   display: flex;
   gap: 5px;
@@ -580,6 +660,7 @@ function openAnchor(a: Anchor) {
 }
 
 .chat__bubble {
+  position: relative;
   max-width: min(80%, 460px);
   padding: 6px 10px;
   background: var(--surface-2);
@@ -703,9 +784,33 @@ function openAnchor(a: Anchor) {
 }
 
 .chat__row {
+  position: relative;
   display: flex;
   gap: 6px;
   align-items: flex-end;
+}
+
+/* 输入行的回声画在下边缘那道 1px 光带上：往 textarea 里铺光斑会压着字，
+   而这一行本来只有一条 border-top 分隔，把跟手的亮段落在分隔线上刚好是「指着这儿写」。 */
+.chat__row::after {
+  position: absolute;
+  right: 0;
+  bottom: -3px;
+  left: 0;
+  height: 1px;
+  background: radial-gradient(
+    120px 1px at var(--mx, 50%) 50%,
+    color-mix(in oklab, var(--accent) 55%, transparent),
+    transparent 72%
+  );
+  opacity: 0;
+  pointer-events: none;
+  content: '';
+  transition: opacity var(--dur) var(--ease);
+}
+
+.chat__row:hover::after {
+  opacity: 1;
 }
 
 .chat__input {
@@ -715,6 +820,10 @@ function openAnchor(a: Anchor) {
   padding: 7px 10px;
   line-height: 1.45;
   resize: none;
+}
+
+.chat__input:hover {
+  border-color: color-mix(in oklab, var(--accent) 32%, var(--border));
 }
 
 .chat__count {

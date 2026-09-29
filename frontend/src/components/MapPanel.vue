@@ -4,6 +4,7 @@ import { h, onBeforeUnmount, onMounted, ref, render, shallowRef, watch } from 'v
 import { ensureAmap, useAmap } from '@/composables/useAmap'
 import type { AMapNS } from '@/composables/useAmap'
 import { BedDouble, Flag, LocateFixed } from '@/components/icons'
+import { useReduceMotion } from '@/composables/useReduceMotion'
 import { useSettingsStore } from '@/stores/settings'
 import { useTripStore } from '@/stores/trip'
 import type { Place } from '@/types/domain'
@@ -53,6 +54,7 @@ const emit = defineEmits<{ pick: [point: { lng: number; lat: number }] }>()
 
 const { status } = useAmap()
 const settings = useSettingsStore()
+const reduceMotion = useReduceMotion()
 const store = useTripStore()
 
 /** place id -> marker. Rebuilt against `currentPlaces` on every sync. */
@@ -180,6 +182,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  clearEcho()
   detachPickHandlers?.()
   detachPickHandlers = null
   // 标记 DOM 由地图销毁，但挂进 pill 的 lucide 子树得显式卸载，不然它的 effect 作用域
@@ -189,6 +192,38 @@ onBeforeUnmount(() => {
   route.value = null
   map.value?.destroy?.()
   map.value = null
+})
+
+/* -- 指针回声：定位键上那枚光斑跟手。坐标写在发光的那枚键上，和海报头、聊天区同一套约定
+   ——JS 只写 --mx/--my，光斑是纯 CSS 的合成层。
+   刻意不碰 .map-panel__host：AMap 的瓦片容器一加 transform/filter，整幅底图会跟着指针抖，
+   投影也被改写——那是要命的错，不是不够精致。 */
+let echoTarget: HTMLElement | null = null
+
+function clearEcho() {
+  echoTarget?.style.removeProperty('--mx')
+  echoTarget?.style.removeProperty('--my')
+  echoTarget = null
+}
+
+function onEchoMove(e: PointerEvent) {
+  if (reduceMotion.value) return
+  const el = (e.target as HTMLElement | null)?.closest<HTMLElement>('.map-panel__locate')
+  if (!el) {
+    clearEcho()
+    return
+  }
+  const r = el.getBoundingClientRect()
+  if (!r.width || !r.height) return
+  if (echoTarget !== el) clearEcho()
+  echoTarget = el
+  el.style.setProperty('--mx', `${((e.clientX - r.left) / r.width) * 100}%`)
+  el.style.setProperty('--my', `${((e.clientY - r.top) / r.height) * 100}%`)
+}
+
+/** 偏好中途能改：关掉动态时要把已经写上去的光斑收掉，不然它留在原地像一盏没关的灯。 */
+watch(reduceMotion, (off) => {
+  if (off) clearEcho()
 })
 
 /** 描边跟底图走、不跟界面令牌走：亮底图用墨色压边把亮芯抬起来，暗底图反过来要一条浅色边，
@@ -479,7 +514,12 @@ defineExpose({
   <div class="map-panel" :class="{ 'map-panel--dark-basemap': settings.basemapDark }">
     <div ref="host" class="map-panel__host" />
 
-    <div v-if="status === 'ready'" class="map-panel__tools">
+    <div
+      v-if="status === 'ready'"
+      class="map-panel__tools"
+      @pointermove="onEchoMove"
+      @pointerleave="clearEcho"
+    >
       <button
         class="map-panel__locate"
         type="button"
@@ -547,6 +587,7 @@ defineExpose({
   }
 }
 .map-panel__locate {
+  position: relative;
   padding: 7px 12px;
   font-size: calc(13px * var(--fs-scale));
   color: var(--text);
@@ -555,9 +596,38 @@ defineExpose({
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-sm), var(--edge);
   cursor: pointer;
+  transition:
+    transform var(--dur) var(--ease),
+    background var(--dur) var(--ease);
 }
 .map-panel__locate:hover:not(:disabled) {
   background: var(--surface-2);
+  /* 浮层可以挪，瓦片容器不许挪：这 1px 只落在键上。 */
+  transform: translateY(-1px);
+}
+
+/* 指针回声：光斑吃 JS 写在同一枚键上的 --mx/--my。 */
+.map-panel__locate::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    64px 34px at var(--mx, 50%) var(--my, 50%),
+    color-mix(in oklab, var(--text) 10%, transparent),
+    transparent 70%
+  );
+  opacity: 0;
+  pointer-events: none;
+  content: '';
+  transition: opacity var(--dur) var(--ease);
+}
+.map-panel__locate:hover:not(:disabled)::after {
+  opacity: 1;
+}
+/* 减少动态那一档不画光斑：JS 不写坐标，它只会钉在键的正中，看着像渲染坏了。
+   这一档的 hover 反馈退回底色和那道 1px 位移。 */
+:root[data-motion='off'] .map-panel__locate::after {
+  display: none;
 }
 .map-panel__locate:disabled {
   color: var(--text-3);
