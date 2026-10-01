@@ -232,8 +232,10 @@ const CASING_LIGHT = '#1b1d1f'
 const CASING_DARK = '#dbe6ef'
 const FALLBACK_ACCENT = '#2f6a99'
 
+/** 底图退回高德默认档。`whitesmoke` 那张灰白底压住了界面里那点暖中性纸，看上去像蒙了层
+ *  雾，观感上不如默认瓦片；换底图这件事到此为止，界面不再跟着它调。 */
 function basemapStyle(): string {
-  return settings.basemapDark ? 'amap://styles/dark' : 'amap://styles/whitesmoke'
+  return settings.basemapDark ? 'amap://styles/dark' : 'amap://styles/normal'
 }
 
 function cssColor(name: string, fallback: string): string {
