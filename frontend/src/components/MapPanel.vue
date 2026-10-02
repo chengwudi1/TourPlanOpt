@@ -231,6 +231,10 @@ watch(reduceMotion, (off) => {
 const CASING_LIGHT = '#1b1d1f'
 const CASING_DARK = '#dbe6ef'
 const FALLBACK_ACCENT = '#2f6a99'
+/** 无主标记（创建者不在名单：导入的模板行程、已退出的同伴）用身份盘里那颗中性色，
+ *  不再借用 --accent：accent 与 1 号身份色只差 0.034，一颗「谁都不是」的圆标长得像某个
+ *  具体的人，比没有颜色更误导。真值在 main.css 的 --warp-none，这里只是读不到令牌时的底。 */
+const NO_OWNER = '#4f5b66'
 
 /** 底图退回高德默认档。`whitesmoke` 那张灰白底压住了界面里那点暖中性纸，看上去像蒙了层
  *  雾，观感上不如默认瓦片；换底图这件事到此为止，界面不再跟着它调。 */
@@ -316,7 +320,7 @@ function paintWho(entry: MarkerEntry, placeId: string) {
   for (const v of shown) {
     const chip = document.createElement('i')
     chip.className = 'tp-marker__whoitem'
-    chip.style.setProperty('--tp-who', v.color || FALLBACK_ACCENT)
+    chip.style.setProperty('--tp-who', v.color || cssColor('--warp-none', NO_OWNER))
     chip.textContent = (v.name || '?').slice(0, 1).toUpperCase()
     chip.title = `${v.name || '同伴'} 在这一站`
     entry.who.append(chip)
@@ -331,10 +335,16 @@ function paintWho(entry: MarkerEntry, placeId: string) {
   entry.el.classList.toggle('tp-marker--watched', viewers.length > 0)
 }
 
+/** 创建者色单独一条：它读的是名单而不是这一行，所以名单一变就得重画（见下面的 watch）。 */
+function paintOwner(entry: MarkerEntry, place: Place) {
+  const ownerColor = store.creatorColorOf(place.added_by)
+  entry.el.style.setProperty('--tp-fill', ownerColor || cssColor('--warp-none', NO_OWNER))
+}
+
 /** 把 store 里这一行投影到已存在的标记节点上：顺序、创建者色、照片、锚点、选中态。 */
 function paintMarker(entry: MarkerEntry, place: Place, index: number) {
   const { el } = entry
-  el.style.setProperty('--tp-fill', store.creatorColorOf(place.added_by) || FALLBACK_ACCENT)
+  paintOwner(entry, place)
   el.title = place.name
 
   const photo = entry.photoBroken ? '' : place.photo_url
@@ -507,6 +517,19 @@ watch(
   },
 )
 
+// 名单一变（同伴改名、退出、重拉参与者）就重画创建者色。这一条以前没人管：
+// currentPlaces 只依赖 day_id，改 added_by 或改名单都不会让它脏，于是「已退出的同伴」
+// 那一站会一直穿着他生前的颜色——而 --warp-none 要接管的正是这一档。
+watch(
+  () => JSON.stringify(store.participants.map((p) => [p.name, p.color])),
+  () => {
+    for (const [id, entry] of markers) {
+      const place = store.currentPlaces.find((p) => p.id === id)
+      if (place) paintOwner(entry, place)
+    }
+  },
+)
+
 defineExpose({
   getMap: () => map.value,
 })
@@ -662,7 +685,7 @@ defineExpose({
 /* Global on purpose: marker nodes live inside the AMap container, outside this
    component's scoped tree, so scoped attributes would never match them. */
 .tp-marker {
-  --tp-fill: var(--accent);
+  --tp-fill: var(--warp-none, #4f5b66);
   position: relative;
   display: grid;
   place-items: center;
@@ -759,7 +782,7 @@ defineExpose({
   font-style: normal;
   font-weight: 700;
   color: #fff;
-  background: var(--tp-who, var(--accent));
+  background: var(--tp-who, var(--warp-none, #4f5b66));
   border: 1.5px solid #fff;
   border-radius: 50%;
   box-shadow: 0 1px 2px rgba(24, 34, 30, 0.35);
