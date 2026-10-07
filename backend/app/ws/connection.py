@@ -23,6 +23,7 @@ from collections import deque
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from app.config import settings
+from app.models import protocol
 from app.models.protocol import PROTOCOL_VERSION
 from app.ws import handlers
 from app.ws.hub import Hub, TripHub
@@ -158,12 +159,19 @@ class ClientConnection:
 
             is_presence = frame.get("type") == handlers.ClientMsg.PRESENCE
             if not is_presence and not self._strict.allow(now):
-                self.send_json(
-                    handlers.error_frame(
-                        "发送太快被限流",
-                        hint="普通消息上限 30 条/10 秒。presence 帧不受此限。",
+                # 被限流的是一笔 op 时，必须带着它的 op_id 回绝：客户端手上只有 op_id，
+                # 拿不到就分不清「哪一步没进去」，那笔改动已经从待发队列里出队了，于是
+                # 界面上还显示着、库里从来没有过。
+                op_id = frame.get("op_id")
+                if frame.get("type") == handlers.ClientMsg.OP and isinstance(op_id, str) and op_id:
+                    self.send_json(protocol.op_reject_frame(op_id, "rate_limited", {}))
+                else:
+                    self.send_json(
+                        handlers.error_frame(
+                            "发送太快被限流",
+                            hint="普通消息上限 30 条/10 秒。presence 帧不受此限。",
+                        )
                     )
-                )
                 continue
 
             handled = await handlers.dispatch(self, frame)

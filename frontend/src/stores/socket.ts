@@ -35,6 +35,13 @@ export const useSocketStore = defineStore('socket', () => {
   /** Ops sent while offline. Server dedupes on op_id, so a flush after reconnect is
    * safe even if some of these actually made it out before the socket died. */
   const pendingQueue: OpSendFrame[] = []
+  /** 已经发出去、服务端还没认账的 op。限流拒回时只有拿得回这一帧，才谈得上重发。 */
+  const inFlight = new Map<string, OpSendFrame>()
+  // 服务端普通消息上限是 30 条/10 秒。一次倾巢而出的补发会把它撞穿：第 30 条之后全部
+  // 被拒，而那些帧已经出队、不会再发——用户看到的是「我改的没了，也没人说过为什么」。
+  const FLUSH_BURST = 25
+  const FLUSH_PAUSE_MS = 10_500
+  let flushTimer: ReturnType<typeof setTimeout> | null = null
 
   function connect(id: string) {
     if (tripId === id && (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING))) {
@@ -42,18 +49,8 @@ export const useSocketStore = defineStore('socket', () => {
     }
     // 换房间：先把旧 ws 的 handler 逐个摘掉再关，否则它的 onclose 会在新连接已建好后
     // 把 ws 置 null 并重新起一条重连链，旧房间的 op 也会一路写进当前这份 store。
-    if (ws) {
-      ws.onclose = null
-      ws.onmessage = null
-      ws.onerror = null
-      ws.onopen = null
-      try {
-        ws.close()
-      } catch {
-        /* 已经关了 */
-      }
-      ws = null
-    }
+    dropSocket(ws)
+    ws = null
     tripId = id
     closedByUs = false
     fatalError.value = null
@@ -61,8 +58,28 @@ export const useSocketStore = defineStore('socket', () => {
     openSocket()
   }
 
+  /** 拆掉一条连接的全部钩子再关它。少了「先摘钩」这一步，它的 onclose 会在新连接已经
+   *  建好之后把 ws 置空、再起重连链——两条连接互相顶号，每一轮都重取快照抹用户的输入。 */
+  function dropSocket(sock: WebSocket | null) {
+    if (!sock) return
+    sock.onclose = null
+    sock.onmessage = null
+    sock.onerror = null
+    sock.onopen = null
+    try {
+      sock.close()
+    } catch {
+      /* 已经关了 */
+    }
+  }
+
   function openSocket() {
     teardownTimers()
+    if (ws) {
+      const stale = ws
+      ws = null
+      dropSocket(stale)
+    }
     status.value = attempt === 0 ? 'connecting' : 'reconnecting'
 
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
@@ -93,6 +110,9 @@ export const useSocketStore = defineStore('socket', () => {
     }
 
     ws.onclose = (event: CloseEvent) => {
+      // 只处理「我这一条」的关闭：钩子没摘干净的旧连接如果把 ws 置空，会把刚建好的那条
+      // 一起带走（心跳定时器也被它清掉），于是房间里的自己凭空消失。
+      if (event.target !== ws) return
       teardownTimers()
       ws = null
       if (closedByUs) {
@@ -128,7 +148,9 @@ export const useSocketStore = defineStore('socket', () => {
    * The moment the user LOOKS at the tab (or the network returns), retry immediately. */
   function reconnectSoon() {
     if (!tripId || closedByUs) return
-    if (ws && ws.readyState === WebSocket.OPEN) return
+    // CONNECTING 也算「已经在连了」：visibilitychange 与 online 常常同一拍到达（手机回
+    // 前台正好网络恢复），只挡 OPEN 就会在同一拍里再造一条 socket。
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
     teardownTimers()
     openSocket()
   }
@@ -138,17 +160,7 @@ export const useSocketStore = defineStore('socket', () => {
     teardownTimers()
     const sock = ws
     ws = null
-    if (sock) {
-      sock.onclose = null
-      sock.onmessage = null
-      sock.onerror = null
-      sock.onopen = null
-      try {
-        sock.close()
-      } catch {
-        /* 已经关了 */
-      }
-    }
+    dropSocket(sock)
     fatalError.value = {
       message: '这份行程已经打不开了',
       hint: '它可能刚被同伴删掉，或链接里的行程编号不对。',
@@ -162,17 +174,7 @@ export const useSocketStore = defineStore('socket', () => {
     lastError.value = null
     const sock = ws
     ws = null
-    if (sock) {
-      sock.onclose = null
-      sock.onmessage = null
-      sock.onerror = null
-      sock.onopen = null
-      try {
-        sock.close()
-      } catch {
-        /* 已经关了 */
-      }
-    }
+    dropSocket(sock)
     attempt = 0
     openSocket()
   }
@@ -218,6 +220,11 @@ export const useSocketStore = defineStore('socket', () => {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
     }
+    // 补发的下一片挂在定时器上：连接一断就停掉，等下一次 welcome 再接着发（队列还在）。
+    if (flushTimer) {
+      clearTimeout(flushTimer)
+      flushTimer = null
+    }
   }
 
   function disconnect() {
@@ -245,14 +252,30 @@ export const useSocketStore = defineStore('socket', () => {
     if (!send(frame)) {
       pendingQueue.push(frame)
       if (pendingQueue.length > MAX_QUEUE) pendingQueue.shift()
+    } else {
+      inFlight.set(op_id, frame)
     }
     return op_id
   }
 
+  /** 分片补发：一次最多 FLUSH_BURST 条，剩下的按限流窗口排下去，绝不一次性倾巢。 */
   function flushQueue() {
-    while (pendingQueue.length && ws && ws.readyState === WebSocket.OPEN) {
-      const frame = pendingQueue.shift()
-      if (frame) ws.send(JSON.stringify(frame))
+    if (flushTimer) return
+    const burst = pendingQueue.splice(0, FLUSH_BURST)
+    for (let k = 0; k < burst.length; k += 1) {
+      const frame = burst[k]
+      if (!send(frame)) {
+        // 又断了：把没发出去的原样退回队首，不许凭空蒸发。
+        pendingQueue.unshift(...burst.slice(k))
+        break
+      }
+      inFlight.set(frame.op_id, frame)
+    }
+    if (pendingQueue.length) {
+      flushTimer = setTimeout(() => {
+        flushTimer = null
+        flushQueue()
+      }, FLUSH_PAUSE_MS)
     }
   }
 
@@ -299,14 +322,33 @@ export const useSocketStore = defineStore('socket', () => {
         trip.applySnapshot(frame.data.snapshot as never)
         trip.clearPendingOps()
         flushQueue()
+        // 重连的 hello 只带名字与颜色，服务端会把在场的「哪天哪站」清空。不补这一发，
+        // 同伴地图上的头像就一路消失，直到本人再点一次别的东西才回来——而他什么都没做。
+        if (latestPresence) {
+          lastPresenceSent = Date.now()
+          send({ v: PROTOCOL_VERSION, type: ClientMsg.PRESENCE, data: latestPresence })
+        }
         break
       }
       case ServerMsg.OP: {
+        inFlight.delete(String(frame.op_id ?? ''))
         trip.applyRemoteOp(frame)
         break
       }
       case ServerMsg.OP_REJECT: {
-        trip.applyReject(frame.op_id, frame.reason, frame.data)
+        const op_id = String(frame.op_id ?? '')
+        if (frame.reason === 'rate_limited') {
+          // 服务端只是嫌快，不是不认这笔改动：原样塞回队列，按窗口重发。
+          const queued = inFlight.get(op_id)
+          inFlight.delete(op_id)
+          if (queued) {
+            pendingQueue.unshift(queued)
+            flushQueue()
+            break
+          }
+        }
+        inFlight.delete(op_id)
+        trip.applyReject(op_id, frame.reason, frame.data)
         break
       }
       case ServerMsg.PRESENCE_JOIN:

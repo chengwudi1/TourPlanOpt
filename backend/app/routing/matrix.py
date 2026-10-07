@@ -17,7 +17,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 from app.amap.cache import CacheRow, DistanceCache, round_key
-from app.amap.client import MAX_ORIGINS_PER_CALL, AmapWebClient, Coord
+from app.amap.client import MAX_ORIGINS_PER_CALL, AmapWebClient, Coord, DistanceResult
 from app.models.domain import AMAP_MODE_BY_TRAVEL, TravelMode
 from app.util.coords import haversine_m
 
@@ -206,16 +206,27 @@ async def build_matrix(
                 round(nodes[j][0] * 100_000) / 100_000,
                 round(nodes[j][1] * 100_000) / 100_000,
             )
-            results = []
+            # 结果按 client 回映射好的 origin_index 对位，不按「第几个结果」对位：高德会
+            # 少返条目（client.py 的注释与 origin_id 映射就是为此存在）。用位置下标时，
+            # 少一条就让这一列之后每一格整体错一格，还把错值连同错误坐标对写进缓存，
+            # 之后所有行程的自动重算都读这份脏数据。分批时 origin_index 是**批内**下标，
+            # 所以要把批次起点加回去。
+            paired: list[tuple[int, DistanceResult]] = []
             for start in range(0, len(origin_coords), MAX_ORIGINS_PER_CALL):
                 batch = origin_coords[start : start + MAX_ORIGINS_PER_CALL]
-                results.extend(await _distance_shared(client, batch, destination, amap_mode))
+                batch_results = await _distance_shared(client, batch, destination, amap_mode)
+                for position, res in enumerate(batch_results):
+                    # client 已经保证 origin_index 落在批内（越界时退回位置下标），这里再兜一次。
+                    pos = res.origin_index if 0 <= res.origin_index < len(batch) else position
+                    paired.append((start + pos, res))
                 api_calls += 1
-        for origin_index, res in enumerate(results):
-            i = origins[origin_index]
+        for pos, res in paired:
+            if pos >= len(origins):
+                continue
+            i = origins[pos]
             store_rows.append(
                 CacheRow(
-                    origin=origin_coords[origin_index],
+                    origin=origin_coords[pos],
                     destination=destination,
                     mode=amap_mode,
                     distance_m=res.distance_m,

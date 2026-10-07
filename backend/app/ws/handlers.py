@@ -136,7 +136,9 @@ async def _hello(conn: ClientConnection, frame: dict) -> Dispatch:
     # Broadcast to everyone including the joiner: every seq-consuming frame must reach
     # every member or the seq-gap heuristic would fire false resyncs. The client applies
     # its own presence idempotently.
-    await _broadcast_presence(hub, db, ServerMsg.PRESENCE_JOIN, presence.model_dump())
+    await _broadcast_presence(
+        hub, db, ServerMsg.PRESENCE_JOIN, presence.model_dump(), throttled=False
+    )
     return Dispatch.OK
 
 
@@ -170,12 +172,21 @@ async def _presence(conn: ClientConnection, frame: dict) -> Dispatch:
 
 
 async def _broadcast_presence(
-    hub: TripHub, db: Database, type_: str, data: dict, *, exclude: str | None = None
+    hub: TripHub,
+    db: Database,
+    type_: str,
+    data: dict,
+    *,
+    exclude: str | None = None,
+    throttled: bool = True,
 ) -> None:
     client_id = data.get("client_id", "")
     # Presence is throttled per client (hub.presence_should_broadcast); frames exempt
     # from the strict rate limit are coalesced here instead.
-    if not hub.presence_should_broadcast(client_id, time.monotonic()):
+    #
+    # 进房与离场是「一次连接一条」的生命周期帧，不参与节流（leave 一直如此）：join 占了
+    # 那道 250ms 的闸，重连后客户端立刻补发的那一帧就会被吞掉，而吞掉的正好是「他在哪一站」。
+    if throttled and not hub.presence_should_broadcast(client_id, time.monotonic()):
         return
     seq = await next_seq(db, hub.trip_id)
     hub.broadcast_presence(type_, client_id, data, seq=seq, exclude=exclude)
