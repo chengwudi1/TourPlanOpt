@@ -2,6 +2,8 @@
 
 几个人一起把行程排好——**同时编辑，自动算路**。
 
+**在线使用：<https://chengrm.online/tourplanopt>**　拿到链接即可注册，无需邀请；手机浏览器「添加到主屏幕」即可当应用用。语音输入与复制文字版行程要求安全上下文（HTTPS 或 localhost），本地用 `http://` 从局域网 IP 打开时这两项会静默不可用。
+
 市面上的旅行规划工具要么功能堆砌上手复杂，要么把协作当附加功能。TourPlanOpt 反着来：MVP 只做两件事，并把它们做顺——
 
 1. **实时协同编辑**：几个人打开同一个链接，彼此添加的地点、时间安排即时可见（谁在编辑哪张卡片也看得到）。
@@ -17,6 +19,7 @@
 | 前端 | Vue 3 · Pinia · TypeScript · Vite · sortablejs |
 | 后端 | Python FastAPI · 原生 WebSocket · Pydantic |
 | 存储 | SQLite（WAL，纯 sqlite3 + Pydantic，无 ORM） |
+| 部署 | Docker Compose + Caddy（自动签发/续期证书）；**单 worker 是协议约束**——协同 hub 与在场状态在进程内，多开会让彼此看不见 |
 
 ## 快速开始
 
@@ -36,9 +39,11 @@ cd backend && uv run uvicorn app.main:app --reload --port 8000
 cd frontend && npm run dev
 ```
 
-打开 http://localhost:5173 → 创建行程 → 把分享链接发给朋友（同一局域网内可直接打开）。
+打开 http://localhost:5173/tourplanopt → 创建行程 → 把分享链接发给朋友（同一局域网内可直接打开）。
 
-**只想跑一个端口**：`cd frontend && npm run build`，然后重启后端——FastAPI 会自动托管 `frontend/dist`，此后 http://localhost:8000 就是完整应用（单源、零 CORS）。
+**只想跑一个端口**：`cd frontend && npm run build`，然后重启后端——FastAPI 会自动托管 `frontend/dist`，此后 http://localhost:8000/tourplanopt 就是完整应用（单源、零 CORS）。
+
+**关于 `/tourplanopt` 这个前缀**：整站在它下面，但 `/api`、`/ws`、`/uploads`、`/covers` 留在域名根上——库里存的封面值是绝对路径，接口路径也因此不动。前缀由两处共同表达，改一处必须改另一处：`frontend/vite.config.ts` 的 `base` 与 `backend/app/config.py` 的 `frontend_prefix`（`tests/test_url_prefix.py` 里有一条判据钉住两者一致）。域名根上的旧路径一律 301 进前缀，搬家前发出去的分享链接继续可用。
 
 ### 高德 Key 怎么填
 
@@ -63,6 +68,10 @@ cd frontend && npm run dev
 - 首页按「规划中 / 已完成 / 已归档」分档，门面卡回答的不是「最近编辑了哪段」而是「这趟还差什么」：几天后出发、清单还差几项、钱花到哪了；日期走完却没收尾的行程顶在「回来了，还没收尾」里，可以一次全部标记完成
 - 出行清单：一键灌一份常用清单（服务端按文本去重，可反复点），打勾进度同时出现在行程页、卡片标签和首页门面上
 - 费用：预算、分类小计、超支告警；每笔可选分摊人（默认全员均摊），AA 按人头折算成应收应付并给出最少笔数的转账建议，结算明细一键复制成群里能看的文本
+- 同行留言：行程页第四个页签，留言锚在具体某天某站上，窄屏收进抽屉；掉线期间的消息在重连后补齐，在场的人不重复补发
+- 行程助手：说一句话就落成界面动作（「记得带雨伞和充电宝」「门票花了 240」「最后一天别排太满」），认不出的部分回问而不是猜；解析只回指令、绝不在服务端存会话；话筒优先走服务端转写，没配 ASR 时退回浏览器识别
+- 海报头封面：没上传时按行程 id 从六张内置图里稳定挑一张，可换成本机照片（前端先压到海报尺寸再上传）；封面归属按行程校验，别人拿不到你的路径
+- 每天的块头带那天的天气（`9/28 ☁ 21~29°`），长列表滚动时与「第 N 天」一起吸顶；日期是天气与倒计时的钥匙，没填日期的天两项都拿不到
 - 卡片菜单：标记完成 / 归档 / 复制分享链接 / 从首页移除。「从首页移除」只改这台设备的首页，行程本身、分享链接和别人的列表都不受影响；再打开一次就自动回来
 - 想去清单：搜索/推荐里先存着，想好了再排进某一天；地图右键/长按选点也能加
 - 「发现」面板可按综合/热度/距离排序（默认综合）：距离档挑一个基准点（当天地点或想去清单一员），拿它算直线距离、不查上游，零配额；没挑就不重排，不会顶着「距离」给一份假顺序；列表高度可拖，高度、排序、基准点都按行程记住
@@ -78,7 +87,7 @@ cd frontend && npm run dev
 - `docs/ARCHITECTURE.md` — 协同模型、分层成本、数据不变量、依赖决策
 - `docs/PROTOCOL.md` — WebSocket 协议规范
 
-运行时的 REST 接口文档：启动后访问 `/docs`（FastAPI 自动生成）。
+运行时的 REST 接口文档：启动后访问 `/docs`（FastAPI 自动生成）。公网默认关着——`EXPOSE_DOCS=true` 才开，挂着等于把整张接口清单白送给扫描器。
 
 ## 协同模型（给感兴趣的人）
 
@@ -90,22 +99,25 @@ cd frontend && npm run dev
 backend/
   app/
     amap/      高德客户端（200 信封校验、限流重试）、距离缓存、自检
-    api/       REST：行程、POI 代理、矩阵、优化
+    api/       REST：行程、POI 代理、矩阵、优化、城市推荐、天气、助手
+    assistant/ 一句话 → 界面动作的解析层（模型可换，只回指令、绝不落库）与服务端语音转写
     auth/      可选账号：注册/登录、换设备找回最近行程
+    uploads.py 封面落盘、按行程校验归属、换封面时清旧图
     ws/        协同 hub：TripHub / ClientConnection / handlers / ops
     routing/   矩阵构建、Held-Karp TSP（n≤14 精确）、排程
     db/        schema.sql + repositories（全部 SQL 在这一层）
-  tests/       含 200 随机矩阵暴力 oracle、WS 全流程、优化闭环
+  tests/       含 200 随机矩阵暴力 oracle、WS 全流程、优化闭环、地址前缀契约
 frontend/
   src/
-    stores/    trip（乐观应用+回声过滤）、socket（重连/心跳）
-    components/ 地图、搜索、卡片、优化栏、presence 头像、出行清单、费用与 AA 等
+    stores/    trip（乐观应用+回声过滤+同行留言）、socket（重连/心跳）、assistant、weather
+    components/ 地图、搜索、卡片、优化栏、presence 头像、出行清单、费用与 AA、
+                 同行留言、助手面板与精灵、海报头封面、想去清单、时间轴等
 ```
 
 ## 测试
 
 ```bash
-cd backend && uv run pytest -q          # 165 个测试
+cd backend && uv run pytest -q          # 354 个测试
 cd backend && uv run ruff check .       # 行宽 100，只 check 不 format
 cd frontend && npm run type-check       # vue-tsc
 cd frontend && npm run build            # 产出 frontend/dist，后端自动托管
