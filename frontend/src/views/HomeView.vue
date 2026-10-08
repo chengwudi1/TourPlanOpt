@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import CreateTripDialog from '@/components/CreateTripDialog.vue'
 import HomeHero from '@/components/HomeHero.vue'
+import NoticeBar from '@/components/NoticeBar.vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
 import TripCard from '@/components/TripCard.vue'
 import {
@@ -396,6 +397,10 @@ onMounted(() => {
 
     <div class="home__wrap">
       <main class="home__main">
+        <!-- 公告排在最前而不是塞进某个看板：它说的是「这份数据还有几天」，与列表状态无关，
+             读完点掉即可（记在本机，见 NoticeBar）。 -->
+        <NoticeBar class="reveal reveal--fade" />
+
         <!-- 首屏取数期间不能整块留白：那看起来像坏了。骨架先占住门面与网格的位置，
              眼睛有的等，列表回来再原位换成真卡。 -->
         <div v-if="loading && !trips.length" class="home__loading" aria-label="正在加载行程" aria-busy="true">

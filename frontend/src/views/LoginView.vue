@@ -18,6 +18,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import { ArrowLeft, Compass, Eye, EyeOff, LoaderCircle, LogIn, Lock, User } from '@/components/icons'
+import NoticeBar from '@/components/NoticeBar.vue'
 import { useReduceMotion } from '@/composables/useReduceMotion'
 import { useAuthStore } from '@/stores/auth'
 
@@ -390,6 +391,8 @@ onBeforeUnmount(() => {
     <!-- ============ 右：表单 ============ -->
     <section class="panel">
       <span class="rail" aria-hidden="true">瓦片取色 · 夜航图 · No.0001</span>
+      <!-- 公告排在票据上方、与它同宽：政策说的是「数据还能留几天」，正是这一页要交代的事。 -->
+      <NoticeBar class="panel__notice" />
       <div ref="cardEl" class="card">
         <div class="seg" role="radiogroup" aria-label="账号操作">
           <button
@@ -916,10 +919,20 @@ onBeforeUnmount(() => {
 /* ---------- 右：表单 ---------- */
 .panel {
   position: relative;
-  display: grid;
-  place-items: center;
+  /* 一列居中而不是网格：票据不再是唯一一件，公告与它要同宽（430）同列，
+     place-items: center 会把两条各自居中、宽度各随内容。 */
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  align-items: center;
+  justify-content: center;
   padding: var(--s6) var(--s6) var(--s7);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0) 300px), var(--bg);
+}
+
+/* 公告读的是子组件根节点上的这个类（子组件根的 scoped 属性由父级补上）。 */
+.panel__notice {
+  width: min(430px, 100%);
 }
 
 :global(html[data-theme='dark']) .panel {

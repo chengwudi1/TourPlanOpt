@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     # 前端已经把图压到 200–400KB，这一条是绕开前端直接打接口时的硬闸，不是体验限制。
     cover_max_bytes: int = 4 * 1024 * 1024
 
+    # --- 未登录行程的保留期 -----------------------------------------------------------
+    # 未登录创建的行程，这么多天无人打开/改动就自动清理（免得沉底数据白占空间）。
+    # 只要有一个已登录用户打开过（进了他的「我的行程」），就不再是清理对象——政策与
+    # 判据在 app/retention.py 头部。首页与登录页的公告条说的是同一件事，改这里要连公告一起改。
+    guest_trip_retention_days: int = 7
+
     # --- Amap: Web服务 key (backend REST). Never sent to the browser. ---
     amap_web_key: str = ""
     # --- Amap: Web端(JS API) key + security code (frontend map) ---

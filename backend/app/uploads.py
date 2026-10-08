@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import re
 import secrets
+import shutil
 import time
 from pathlib import Path
 
@@ -142,3 +143,28 @@ async def sweep_covers(trip_id: str, keep_url: str) -> None:
         await anyio.to_thread.run_sync(_sweep_sync, trip_id, keep_url)
     except Exception:
         logger.warning("清理封面孤儿文件失败（不影响本次上传）", exc_info=True)
+
+
+def _remove_trip_dir_sync(trip_id: str) -> bool:
+    directory = cover_dir(trip_id)
+    try:
+        if not directory.is_dir():
+            return False
+        shutil.rmtree(directory)
+        return True
+    except OSError:
+        logger.warning("清理行程 %s 的封面目录失败", trip_id, exc_info=True)
+        return False
+
+
+async def remove_trip_uploads(trip_id: str) -> None:
+    """整份行程被清理时，把它名下的封面目录一起收走（见 app/retention.py）。
+
+    尽力而为：目录删不掉不影响行程本身已经删掉这个事实，也不该让清理循环挂掉。
+    id 形状先过一道闸——拼进路径的东西必须挡在这一层，将来别的入口复用它也不用重检查。
+    """
+    try:
+        _safe_trip_id(trip_id)
+    except CoverReject:
+        return
+    await anyio.to_thread.run_sync(_remove_trip_dir_sync, trip_id)

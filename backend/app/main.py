@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -65,6 +66,12 @@ async def lifespan(app: FastAPI):
 
     await get_db().init()
 
+    # 未登录行程的保留期清理（政策见 app/retention.py 头部）：启动先扫一遍，之后每天一次。
+    # hub 是进程内状态、单 worker 是协议约束，所以这一个任务就是全局唯一的一份，不需要锁。
+    from app.retention import run_retention_loop
+
+    retention_task = asyncio.create_task(run_retention_loop())
+
     # A failed self-check must NEVER abort startup: the app has to boot so the
     # frontend can render its explanatory banner. A blank map plus a silent
     # server is precisely the failure mode this check exists to prevent.
@@ -102,6 +109,12 @@ async def lifespan(app: FastAPI):
         logger.exception("语音识别配置读取失败（不影响启动）")
 
     yield
+
+    retention_task.cancel()
+    try:
+        await retention_task
+    except asyncio.CancelledError:
+        pass
 
     try:
         from app.amap.client import close_amap_client
