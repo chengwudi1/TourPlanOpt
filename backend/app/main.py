@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -8,7 +9,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import settings
@@ -158,6 +159,30 @@ def _ws_origin_allowed(websocket: WebSocket) -> bool:
     return bool(host) and host == request_host
 
 
+def _retired_sw_source() -> str:
+    """根作用域那份旧 service worker 的收尾脚本（本站已搬进 frontend_prefix）。
+
+    前缀从 settings 现取并用 json.dumps 落成字面量，不在 JS 里再抄一份：两处不一致时的
+    坏法是「把还开着的页面导航到一个没上线的地址」，比白屏更难归因。
+    """
+    home = json.dumps(f"{settings.frontend_prefix.rstrip('/')}/")
+    return (
+        "self.addEventListener('install', () => self.skipWaiting());\n"
+        "self.addEventListener('activate', (event) => {\n"
+        "  event.waitUntil((async () => {\n"
+        "    const keys = await caches.keys();\n"
+        "    await Promise.all(keys.map((k) => caches.delete(k)));\n"
+        f"    const home = {home};\n"
+        "    const clients = await self.clients.matchAll({ includeUncontrolled: true });\n"
+        "    await self.registration.unregister();\n"
+        "    for (const c of clients) {\n"
+        "      if ('navigate' in c && !c.url.startsWith(home)) c.navigate(home);\n"
+        "    }\n"
+        "  })());\n"
+        "});\n"
+    )
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
@@ -255,8 +280,11 @@ def create_app() -> FastAPI:
     # A1: serve the built frontend from THIS port -- one origin, one port, zero CORS,
     # and a share link that works for anyone on the LAN. Dev keeps Vite + proxy; this
     # only activates after `vite build` and is skipped (silently) when dist is absent.
-    # Registered LAST: the catch-all mount must not shadow /api or the WS endpoint
-    # above (Starlette matches in registration order).
+    #
+    # 整站挂在 settings.frontend_prefix（线上 /tourplanopt）下，但 /api、/ws、/uploads、
+    # /covers 刻意留在域名根上：库里存的封面值就是 `/uploads/<程>/<图>`、`/covers/<名>.jpg`
+    # 这种根绝对路径（repositories 的白名单也按它写），把它们挪进前缀等于线上已有封面全
+    # 404 外加一次数据迁移。前缀必须与 frontend/vite.config.ts 的 `base` 一致。
     if settings.frontend_dist.is_dir() and (settings.frontend_dist / "index.html").is_file():
 
         class SPAStaticFiles(StaticFiles):
@@ -272,7 +300,40 @@ def create_app() -> FastAPI:
                         raise
                     return await super().get_response("index.html", scope)
 
-        app.mount("/", SPAStaticFiles(directory=settings.frontend_dist, html=True), name="frontend")
+        app.mount(
+            settings.frontend_prefix,
+            SPAStaticFiles(directory=settings.frontend_dist, html=True),
+            name="frontend",
+        )
+
+        # 内置海报随 dist 一起构建，可它的 URL 是根绝对路径。前缀一挪，历史库值和在用的
+        # builtinCovers 会一起断，所以把同一个目录在根上再挂一次。目录不存在时不挂——
+        # StaticFiles 对缺失目录是直接抛的，抛在这里等于为一个可选功能拒绝启动。
+        covers_dir = settings.frontend_dist / "covers"
+        if covers_dir.is_dir():
+            app.mount("/covers", StaticFiles(directory=covers_dir), name="covers")
+
+        # 搬到前缀之前，每台用过的手机都在根作用域注册了 /sw.js。那个脚本一旦 404，旧
+        # service worker 更新不到、却仍在拦截导航，离线打开就吐旧壳——症状只在部分人身上
+        # 出现，看起来像「这次上线把站搬坏了」。根上供一份自毁版：清自己的缓存、注销自己、
+        # 把还开着的页面放回新地址。no-cache 是给 CDN 的：sw.js 一旦被边缘缓存住，这份
+        # 自毁就永远送不到手机上。
+        @app.get("/sw.js", include_in_schema=False)
+        async def retired_service_worker() -> Response:
+            return Response(
+                content=_retired_sw_source(),
+                media_type="application/javascript",
+                headers={"Cache-Control": "no-cache, must-revalidate"},
+            )
+
+        # 老链接保命：改动前发出去的 /trip/{id}、首页书签、收藏夹全部 301 进前缀。
+        # 注册在最后是硬要求——上面那些真实路由优先命中，只有没人认领的根路径才走到这里。
+        # 只接 GET/HEAD：对 POST 发 301 会让浏览器改方法重发，那是另一种坏法。
+        @app.api_route("/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+        async def root_to_prefix(request: Request) -> Response:
+            target = f"{settings.frontend_prefix}/{request.path_params.get('path', '').lstrip('/')}"
+            query = request.url.query
+            return RedirectResponse(f"{target}?{query}" if query else target, status_code=301)
 
     return app
 

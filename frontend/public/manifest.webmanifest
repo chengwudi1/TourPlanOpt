@@ -2,21 +2,21 @@
   "name": "TourPlanOpt · 一起把行程排好",
   "short_name": "TourPlanOpt",
   "description": "几个人一起把行程排好——同时编辑，自动算路。",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#f7f7f6",
   "theme_color": "#f7f7f6",
   "icons": [
     {
-      "src": "/icons/icon-192.png",
+      "src": "./icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-512.png",
+      "src": "./icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"

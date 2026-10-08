@@ -6,7 +6,13 @@ import { defineConfig } from 'vite'
 // Dev only: proxy the API and the WebSocket to the FastAPI backend so the
 // browser sees a single origin and no CORS is involved. In production the
 // backend serves frontend/dist directly, so there is nothing to proxy.
+//
+// `base` 与 backend/app/config.py 的 frontend_prefix 是同一条决定的两处表达，必须一起改
+// （test_url_prefix.py 盯着它们一致）。开发期同样带前缀：本地地址是
+// http://127.0.0.1:5173/tourplanopt/，这样开发和线上验的是同一件事。
+// /api、/ws、/uploads 走的是根绝对路径，不进前缀，所以 proxy 表和 fetch 调用都不用动。
 export default defineConfig({
+  base: '/tourplanopt/',
   plugins: [vue()],
   resolve: {
     alias: {

@@ -54,6 +54,7 @@ import type { Place, Poi } from '@/types/domain'
 import { ApiError, apiFetch } from '@/utils/api'
 import { anchorMenu, type MenuPosition } from '@/utils/anchorMenu'
 import { formatMoney } from '@/utils/money'
+import { tripUrl } from '@/utils/shareUrl'
 import { formatMin } from '@/utils/time'
 
 const props = defineProps<{ tripId: string }>()
@@ -538,7 +539,7 @@ async function onCoverFile(blob: Blob) {
 }
 
 async function copyShareLink() {
-  const url = `${window.location.origin}/trip/${props.tripId}`
+  const url = tripUrl(props.tripId)
   await copy(url, {
     receipt: '分享链接已复制，同行者打开即可共同编辑',
     fallbackTitle: '分享链接',

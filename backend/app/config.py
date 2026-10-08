@@ -108,6 +108,11 @@ class Settings(BaseSettings):
 
     # A1: when frontend/dist exists it is served from this port (single-origin deploy).
     frontend_dist: Path = FRONTEND_DIST
+    # 前端整体挂在这个路径前缀下，与 frontend/vite.config.ts 的 `base` 必须一致。
+    # 只有文档层进前缀：/api、/ws、/uploads、/covers 留在域名根上——库里存的封面是
+    # `/uploads/...`、`/covers/...` 绝对路径（repositories 的校验白名单也按这个写），
+    # 挪走等于线上已有封面全 404 外加一次数据迁移。
+    frontend_prefix: str = "/tourplanopt"
 
 
 settings = Settings()

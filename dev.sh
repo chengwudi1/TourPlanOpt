@@ -24,7 +24,7 @@ echo "==> backend  http://127.0.0.1:8000"
 (cd backend && uv run uvicorn app.main:app --reload --port 8000) &
 BACKEND_PID=$!
 
-echo "==> frontend http://127.0.0.1:5173  (API/WS proxied to :8000)"
+echo "==> frontend http://127.0.0.1:5173/tourplanopt  (API/WS proxied to :8000)"
 (cd frontend && npm run dev)
 
 wait "$BACKEND_PID" 2>/dev/null || true

@@ -68,7 +68,8 @@ def share_url(request: Request, trip_id: str) -> str:
     POST, so it is the honest base.
     """
     base = request.headers.get("origin") or str(request.base_url)
-    return f"{base.rstrip('/')}/trip/{trip_id}"
+    # 前端挂在 frontend_prefix 下，路径部分必须跟着走，否则发出去的链接只靠那条 301 兜。
+    return f"{base.rstrip('/')}{settings.frontend_prefix}/trip/{trip_id}"
 
 
 @router.post("", response_model=TripCreateResult, status_code=status.HTTP_201_CREATED)

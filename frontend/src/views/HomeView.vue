@@ -36,6 +36,7 @@ import { useFeedbackStore } from '@/stores/feedback'
 import { useSettingsStore } from '@/stores/settings'
 import type { TripStatus, TripSummary } from '@/types/domain'
 import { apiFetch } from '@/utils/api'
+import { tripUrl } from '@/utils/shareUrl'
 import { formatMoney } from '@/utils/money'
 import { formatAgo } from '@/utils/time'
 import { HOME_TABS, type Countdown, countdownOf, formatDateRange, needsWrapUp, phaseOf } from '@/utils/tripstatus'
@@ -318,7 +319,7 @@ function setStatus(tripId: string, next: TripStatus, receipt: string | null = ST
 }
 
 async function copyLink(tripId: string) {
-  const url = `${window.location.origin}/trip/${tripId}`
+  const url = tripUrl(tripId)
   await copy(url, {
     receipt: '分享链接已复制，同行者打开即可共同编辑',
     fallbackTitle: '分享链接',

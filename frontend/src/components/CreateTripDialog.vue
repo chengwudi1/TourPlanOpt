@@ -7,6 +7,7 @@ import { ArrowRight, Check, ChevronDown, ImagePlus, Link2, LoaderCircle, MapPin 
 import { useCopy } from '@/composables/useCopy'
 import type { TravelMode, Trip, TripCreateResult } from '@/types/domain'
 import { ApiError, apiFetch, postJson } from '@/utils/api'
+import { tripUrl } from '@/utils/shareUrl'
 import { shrinkToCover } from '@/utils/coverImage'
 import { TRAVEL_MODE_OPTIONS, TRAVEL_MODE_TEXT } from '@/utils/tripmodes'
 import { parseHHMM } from '@/utils/time'
@@ -131,7 +132,7 @@ async function submitCreate() {
 
 async function copyLink() {
   if (!created.value) return
-  const url = created.value.share_url || `${window.location.origin}/trip/${created.value.trip_id}`
+  const url = created.value.share_url || tripUrl(created.value.trip_id)
   const ok = await copy(url, {
     receipt: '分享链接已复制，同行者打开即可共同编辑',
     fallbackTitle: '分享链接',

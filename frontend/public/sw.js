@@ -11,10 +11,22 @@
  * 发新版本时把 CACHE 版本号 +1，activate 会清掉旧缓存。
  */
 
-// v2：index.html 多了内联的防闪脚本与 manifest 链接。v1 里那份 shell 不含这两样，
-// 断网打开就会先白一下再翻深色——正是这段脚本要消灭的症状，不能让它的缓存版本留着。
-const CACHE = 'tourplanopt-v2'
-const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png']
+// 前缀从脚本自己的 URL 推，不写死第二份：这份文件在 dist 根上，浏览器看到的路径
+// 就是本站的前缀（线上 /tourplanopt/sw.js）。写死会在换前缀时留下一个「缓存清单和
+// 实际路径不一致」的坑——那种坑只会让部分人的手机离线时吐旧壳，最难归因。
+const BASE = new URL('./', self.location).pathname
+
+// v3：整站搬进 /tourplanopt/ 前缀，SHELL 与资源判断都跟着换了。
+// v2 那份缓存的键是根路径（'/'、'/assets/…'），留着就是「旧壳顶着新站」的事故现场，
+// activate 里按名字删掉。
+const CACHE = 'tourplanopt-v3'
+const SHELL = [
+  BASE,
+  `${BASE}index.html`,
+  `${BASE}manifest.webmanifest`,
+  `${BASE}icons/icon-192.png`,
+  `${BASE}icons/icon-512.png`,
+]
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -37,6 +49,7 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
+  // 接口与协同长连接刻意留在域名根上（不在本前缀下），这里按根路径放行。
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ws')) return
 
   // 页面导航：network-first（保证拿到最新构建），失败回落缓存 shell。
@@ -45,16 +58,16 @@ self.addEventListener('fetch', (event) => {
       fetch(request)
         .then((response) => {
           const copy = response.clone()
-          caches.open(CACHE).then((cache) => cache.put('/', copy))
+          caches.open(CACHE).then((cache) => cache.put(BASE, copy))
           return response
         })
-        .catch(() => caches.match('/').then((hit) => hit || Response.error())),
+        .catch(() => caches.match(BASE).then((hit) => hit || Response.error())),
     )
     return
   }
 
   // 带哈希的静态资源：cache-first。
-  if (url.pathname.startsWith('/assets/')) {
+  if (url.pathname.startsWith(`${BASE}assets/`)) {
     event.respondWith(
       caches.match(request).then(
         (hit) =>
