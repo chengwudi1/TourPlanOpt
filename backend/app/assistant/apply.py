@@ -35,7 +35,7 @@ from app.assistant.schema import (
     TripUpdate,
 )
 from app.config import settings
-from app.models.domain import Snapshot
+from app.models.domain import Snapshot, TripStatus
 
 logger = logging.getLogger("tourplan.assistant")
 
@@ -60,6 +60,12 @@ _TRIP_STATUS_LABELS = {
     "finished": "已完成",
     "archived": "已归档",
 }
+
+# 解析词表与库里的三档之间差一步：done 归一到 finished；booked/ongoing 是界面按日期
+# 算出来的展示态（「即将出发 / 进行中」），库里没有这一列——照原样发 patch 会被仓储层
+# 的枚举校验一律拒成 bad_patch，确认卡上只剩一句读不懂的「修改内容无效」。
+_STATUS_TO_STORED = {"done": "finished"}
+_STORED_STATUSES = {member.value for member in TripStatus}
 
 _TRAVEL_MODE_LABELS = {"driving": "驾车", "walking": "步行"}
 
@@ -389,8 +395,15 @@ async def _update_trip(resolver: Resolver, intent: Intent, st: _State) -> None:
         patch["city"] = _clean(intent.city, 40)
         bits.append("城市")
     if intent.status in TRIP_STATUSES and intent.status != trip.status.value:
-        patch["status"] = intent.status
-        bits.append(f"状态改为{_TRIP_STATUS_LABELS.get(intent.status, '已改')}")
+        stored = _STATUS_TO_STORED.get(intent.status, intent.status)
+        if stored in _STORED_STATUSES:
+            patch["status"] = stored
+            bits.append(f"状态改为{_TRIP_STATUS_LABELS.get(intent.status, '已改')}")
+        else:
+            st.out.warnings.append(
+                f"「{_TRIP_STATUS_LABELS.get(intent.status, intent.status)}」不单独存："
+                "行程状态只记规划中 / 已完成 / 已归档三档，这次没有改"
+            )
     if intent.travel_mode in TRAVEL_MODES and intent.travel_mode != trip.travel_mode.value:
         patch["travel_mode"] = intent.travel_mode
         bits.append(f"交通方式改为{_TRAVEL_MODE_LABELS.get(intent.travel_mode, '已改')}")

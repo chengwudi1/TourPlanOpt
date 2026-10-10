@@ -191,6 +191,40 @@ def test_docs_endpoints_hidden_by_default() -> None:
         setattr(settings, "expose_docs", monkeyoff)
 
 
+# -- R7 REST 地点端点的归属校验 -------------------------------------------------------------
+
+
+def test_place_endpoints_verify_the_day_and_place_belong_to_the_trip(client) -> None:
+    """day / place 必须属于 URL 里的 trip。
+
+    旧代码把路径里的 day_id / place_id 原样落库：两个行程的 id 拼在一起，就能把地点
+    种进别人的天、或删掉别人的地点。WS 那条路一直有这道检查，REST 这两条漏了。
+    """
+    testclient, trip_a, day_a = client
+    other = testclient.post("/api/trips", json={"title": "另一趟", "city": "北京"}).json()
+    trip_b, day_b = other["trip_id"], other["day_id"]
+
+    # 路由写 B、天是 A 的 → 404，且 A 里不能多出地点
+    resp = testclient.post(
+        f"/api/trips/{trip_b}/days/{day_a}/places",
+        json={"name": "越界", "lng": 118.8, "lat": 32.0},
+    )
+    assert resp.status_code == 404
+    assert testclient.get(f"/api/trips/{trip_a}").json()["places"] == []
+
+    # 正经加进 B，再拿 A 的路由删它 → 404，地点还在
+    created = testclient.post(
+        f"/api/trips/{trip_b}/days/{day_b}/places",
+        json={"name": "正经", "lng": 118.8, "lat": 32.0},
+    )
+    assert created.status_code == 201
+    place_id = created.json()["id"]
+    assert testclient.delete(f"/api/trips/{trip_a}/places/{place_id}").status_code == 404
+    assert [
+        p["id"] for p in testclient.get(f"/api/trips/{trip_b}").json()["places"]
+    ] == [place_id]
+
+
 # -- R3 距离缓存 TTL ---------------------------------------------------------------------
 
 

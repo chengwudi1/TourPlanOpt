@@ -18,6 +18,8 @@ from app.db.repositories import (
     clamp_trip_days,
     create_trip,
     delete_place,
+    get_day,
+    get_place,
     get_snapshot,
     get_trip_summaries,
     next_seq,
@@ -178,10 +180,18 @@ async def upload_cover(trip_id: str, file: UploadFile) -> TripOut:
     db = get_db()
     if await db.fetch_one("SELECT id FROM trips WHERE id = ?", (trip_id,)) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "这份行程不存在，可能已被删除")
+    limit_mb = settings.cover_max_bytes // (1024 * 1024)
+    # 先按上限收口再读：裸 ``await file.read()`` 会把整个请求体拉进内存，一张 1 GB 的图
+    # 在进 save_cover 的大小检查之前就已经把单 worker 压住了（对照 routes_assistant.py
+    # 读 max+1 字节的写法，同一道闸门）。
+    data = await file.read(settings.cover_max_bytes + 1)
+    if len(data) > settings.cover_max_bytes:
+        raise HTTPException(
+            status.HTTP_413_CONTENT_TOO_LARGE, f"图片超过 {limit_mb} MB"
+        )
     try:
-        url = await save_cover(trip_id, await file.read())
+        url = await save_cover(trip_id, data)
     except CoverReject as exc:
-        limit_mb = settings.cover_max_bytes // (1024 * 1024)
         code, message = {
             "type": (
                 status.HTTP_400_BAD_REQUEST,
@@ -219,6 +229,11 @@ async def register_participant(trip_id: str, body: ParticipantUpsert) -> Partici
     status_code=status.HTTP_201_CREATED,
 )
 async def add_place_endpoint(trip_id: str, day_id: str, body: PlaceCreate) -> PlaceOut:
+    # 路由里的 trip_id 是归属面，不是装饰：day 必须落在这份行程里，否则一个手改的
+    # URL 就能把地点种进别人的天（WS 那条路已经这么查了，两条路同一把尺子）。
+    day = await get_day(get_db(), day_id)
+    if day is None or day.trip_id != trip_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "这一天不存在，可能已被删除")
     # 与 WS 路径同一套照片补抓：搜索联想不带图，落库前用 POI id 换一张。
     if not body.photo_url and body.amap_poi_id:
         body = body.model_copy(
@@ -232,6 +247,10 @@ async def add_place_endpoint(trip_id: str, day_id: str, body: PlaceCreate) -> Pl
 
 @router.delete("/{trip_id}/places/{place_id}")
 async def delete_place_endpoint(trip_id: str, place_id: str) -> dict:
+    # 同上：place 必须先证明它属于这份行程，再谈删。
+    place = await get_place(get_db(), place_id)
+    if place is None or place.trip_id != trip_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "这个地点不存在，可能已被删除")
     result = await delete_place(get_db(), place_id)
     if result is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "这个地点不存在，可能已被删除")

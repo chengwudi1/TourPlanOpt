@@ -169,6 +169,27 @@ def test_destructive_actions_are_flagged(trip_client, poi) -> None:
     assert "删除" in out["reply"]
 
 
+def test_status_words_map_to_stored_values(trip_client, poi) -> None:
+    """状态词表与库里的三档差一步，这一步必须由 apply 补上。
+
+    ``done`` 要归一成 ``finished`` 再进 patch；``booked`` / ``ongoing`` 是界面按日期
+    算出来的展示态，库里没有这一列——照原样发 patch 会被仓储层的枚举校验拒成
+    bad_patch，用户点完「执行」只收到一句读不懂的「修改内容无效」。旧代码把 "done"
+    原样写进 patch，第一条等值断言就是它的红灯。
+    """
+    testclient, trip_id, _day1, _day2 = trip_client
+
+    out = parse(testclient, trip_id, "把行程标记为已完成")
+    patch = next(a for a in out["actions"] if a["kind"] == "trip_update")["patch"]
+    assert patch["status"] == "finished"
+
+    out = parse(testclient, trip_id, "把行程标记为已订")
+    assert all(
+        "status" not in a["patch"] for a in out["actions"] if a["kind"] == "trip_update"
+    )
+    assert any("不单独存" in w for w in out["warnings"])
+
+
 def test_status_never_leaks_the_key(monkeypatch) -> None:
     from app.config import settings
 
