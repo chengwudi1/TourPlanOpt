@@ -81,6 +81,13 @@ watch(
   },
 )
 
+/** 输入法确认候选词的那下回车不是「改完」：preventDefault 还会把它从输入法手里抢走。 */
+function onNameEnter(e: KeyboardEvent) {
+  if (e.isComposing) return
+  e.preventDefault()
+  commitName()
+}
+
 function commitName() {
   nameTyping.value = false
   const next = nameDraft.value.trim()
@@ -120,7 +127,11 @@ function esc(on: boolean) {
 }
 
 watch(inlineOpen, (on) => esc(on), { immediate: true })
-onBeforeUnmount(() => esc(false))
+onBeforeUnmount(() => {
+  esc(false)
+  // 长按计时器跨得过卸载：同伴的 op 把这张卡删掉时，500ms 后那一发会打在死人身上。
+  pressCancel()
+})
 
 /** 键盘选中：Enter/空格与点击同义。只认落在卡片本身上的按键，编辑器的键不归这里管。 */
 function onCardKeydown(e: KeyboardEvent) {
@@ -185,7 +196,7 @@ function onCardKeydown(e: KeyboardEvent) {
             @dblclick.stop
             @pointerdown.stop
             @focus="nameTyping = true"
-            @keydown.enter.prevent="commitName"
+            @keydown.enter="onNameEnter"
             @keydown.esc.stop.prevent="cancelName"
             @blur="commitName"
           />
@@ -313,14 +324,14 @@ function onCardKeydown(e: KeyboardEvent) {
   align-items: flex-start;
 }
 
-/* 描边与阴影由宿主递变量：日卡（DaySection）是中性纸，不覆写这两枚，票券就靠
-   一道发丝边 + 一层近影浮起来。选择器要多带一枚 `.card`：全局那条 `.panel .card`
-   也是两类的权重，只写 `.place` 会被它压掉，兜底跟着它降过的那一档，
-   别的宿主看到的还是原来那层影。 */
+/* 票券浮在天的纸上：F 的浮层语言里边界由一道白描边 + 一层近影勾出来
+   （--glass-border + --shadow-sm），再收一道 --edge 顶部高光，与 mock 的 --sh-card
+   同一手笔。选择器要多带一枚 `.card`：全局那条 `.panel .card` 也是两类的权重，
+   只写 `.place` 会被它压掉。 */
 .place.card {
   background: var(--ticket);
-  border-color: var(--place-edge, var(--border));
-  box-shadow: var(--place-shadow, var(--shadow-sm));
+  border-color: var(--glass-border);
+  box-shadow: var(--shadow-sm), var(--edge);
 }
 
 /* 站点：一枚落在轨道中线上的实心圆（--dc 由这一天继承下来，所以颜色本身就是「第几天」）。
@@ -346,9 +357,11 @@ function onCardKeydown(e: KeyboardEvent) {
 }
 
 /* 浮起 1px + 阴影升一级：行卡是列表里唯一可点的对象，靠这点位移认领 hover。
+   洗色是正文色的 5% 掺进票券白——实色 --surface-hover 压在半透明的票上是一块
+   不透明的补丁，而按 text 占比混出来的洗色在亮暗两题里方向都对。
    拖拽中的幽灵不跟浮，否则它会跟旁边的行错开半像素。 */
 .place:hover:not(.place--ghost) {
-  background: var(--surface-hover);
+  background: color-mix(in srgb, var(--text) 5%, var(--ticket));
   box-shadow: var(--shadow-md);
   transform: translateY(-1px);
 }
@@ -357,9 +370,11 @@ function onCardKeydown(e: KeyboardEvent) {
   opacity: 0.4;
 }
 
-.place--active {
+/* 选中态多带一枚 .card：全局 `.panel .card` 现在也写 border-color，两边同为 (0,2,0)
+   时谁赢只取决于样式注入顺序，这里不赌（同 DaySection 的 .daysec.card.daysec--on）。 */
+.place.card.place--active {
   border-color: var(--accent);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-sm), var(--edge);
 }
 
 /* 鼠标端整行都能拖了，这一枚仍是触屏上唯一的把手：touch-action:none 只写在把手上，
@@ -390,7 +405,7 @@ function onCardKeydown(e: KeyboardEvent) {
   display: block;
   width: 34px;
   height: 34px;
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   object-fit: cover;
   border-radius: 50%;
 }
@@ -416,7 +431,8 @@ function onCardKeydown(e: KeyboardEvent) {
   font-variant-numeric: tabular-nums;
   color: #fff;
   background: var(--accent);
-  border: 1.5px solid var(--surface);
+  /* 环色＝卡片自己的票券白：这枚圆要像是从卡上剜出来的，环就必须读同一个底。 */
+  border: 1.5px solid var(--ticket);
   border-radius: var(--radius-pill);
 }
 
@@ -454,13 +470,16 @@ function onCardKeydown(e: KeyboardEvent) {
   padding: 1px 4px;
   margin-left: -4px;
   font-family: inherit;
-  background: var(--surface-2);
+  /* 井是「沉进票面」的意思：薄薄一层正文色洗色，亮暗两题下都是「比周围暗一档」。
+     实色 --surface-2 在票上会是一块不透明的补丁。 */
+  background: color-mix(in srgb, var(--text) 5%, transparent);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   cursor: text;
   transition:
     border-color var(--dur-fast) var(--ease),
-    background var(--dur-fast) var(--ease);
+    background var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
 }
 
 .place__name--edit:hover {
@@ -468,8 +487,9 @@ function onCardKeydown(e: KeyboardEvent) {
 }
 
 .place__name--edit:focus {
-  background: var(--surface);
+  background: var(--glass-dense);
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
   outline: none;
 }
 
@@ -498,7 +518,7 @@ function onCardKeydown(e: KeyboardEvent) {
   padding: 4px 6px;
   margin-top: 5px;
   white-space: pre-wrap;
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
   border-radius: var(--radius-sm);
 }
 

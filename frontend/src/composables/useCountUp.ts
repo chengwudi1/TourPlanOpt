@@ -27,11 +27,13 @@ export function useCountUp(source: () => number, durationMs = 760) {
   let started = false
 
   function run(from: number, to: number) {
+    // 先拆掉可能在飞的那一趟：下面的早退分支直接写终值，旧循环若还挂着，标签页回可见时
+    // 它会拿旧终点再写一遍，读数就停在上一次的数上（hidden 时 WS 照收、值照变，撞得上）。
+    cancelAnimationFrame(raf)
     if (reduceMotion.value || durationMs <= 0 || from === to || document.hidden) {
       shown.value = to
       return
     }
-    cancelAnimationFrame(raf)
     const t0 = performance.now()
     const step = (t: number) => {
       const k = Math.min(1, (t - t0) / durationMs)

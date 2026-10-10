@@ -59,6 +59,13 @@ watch(
   },
 )
 
+/** 输入法确认候选词的那下回车不是「改完」：preventDefault 还会把它从输入法手里抢走。 */
+function onNameEnter(e: KeyboardEvent) {
+  if (e.isComposing) return
+  e.preventDefault()
+  commitName()
+}
+
 /** 名字不许清空：清空、没改、或纯空格都回滚成行数据，改了就立即发（不等防抖）。 */
 function commitName() {
   nameTyping.value = false
@@ -155,6 +162,13 @@ const DUR_CHIPS = [
 
 function clampMin(v: number) {
   return Math.max(0, Math.min(24 * 60, Math.round(v)))
+}
+
+/** 时长框的回车＝失焦收尾；合成态的回车留给输入法选词。 */
+function onDurationEnter(e: KeyboardEvent) {
+  if (e.isComposing) return
+  e.preventDefault()
+  ;(e.target as HTMLInputElement).blur()
 }
 
 function onDurationInput() {
@@ -255,7 +269,7 @@ const orderHint = computed(() => {
         placeholder="这一站叫什么"
         @focus="nameTyping = true"
         @blur="commitName"
-        @keydown.enter.prevent="commitName"
+        @keydown.enter="onNameEnter"
       />
     </label>
 
@@ -291,7 +305,7 @@ const orderHint = computed(() => {
         @focus="durationTyping = true"
         @input="onDurationInput"
         @blur="onDurationBlur"
-        @keydown.enter.prevent="($event.target as HTMLInputElement).blur()"
+        @keydown.enter="onDurationEnter"
       />
       <div class="edit__chips">
         <button
@@ -414,7 +428,7 @@ const orderHint = computed(() => {
   gap: 4px;
   align-items: center;
   padding: 6px 8px;
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
   border-radius: var(--radius-sm);
 }
 
@@ -461,7 +475,7 @@ const orderHint = computed(() => {
   padding: 1px 6px;
   color: var(--accent-strong);
   background: var(--accent-soft);
-  border: 1px solid var(--accent);
+  border: 1px solid transparent;
   border-radius: var(--radius-pill);
 }
 
@@ -472,7 +486,7 @@ const orderHint = computed(() => {
   right: 8px;
   padding: 1px 6px;
   color: var(--text-3);
-  background: var(--surface);
+  background: color-mix(in srgb, var(--glass) 80%, transparent);
   border: 1px dashed var(--border);
   border-radius: var(--radius-pill);
 }
@@ -555,7 +569,7 @@ const orderHint = computed(() => {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   color: var(--text-2);
-  background: var(--surface);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   transition:
@@ -584,7 +598,7 @@ const orderHint = computed(() => {
 .chip--on {
   color: var(--accent-strong);
   background: var(--accent-soft);
-  border-color: var(--accent);
+  border-color: transparent;
   font-weight: 600;
 }
 
@@ -607,7 +621,9 @@ const orderHint = computed(() => {
   align-items: center;
   justify-content: flex-end;
   padding: 8px 0 2px;
-  background: var(--surface);
+  background: var(--glass-dense);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
   border-top: 1px solid var(--border-faint);
 }
 

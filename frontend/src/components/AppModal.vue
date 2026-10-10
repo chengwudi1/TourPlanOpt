@@ -165,7 +165,7 @@ defineExpose({ close: requestClose })
       <div
         ref="panel"
         v-bind="$attrs"
-        class="modal__panel card"
+        class="modal__panel"
         :class="{ 'modal__panel--dragging': dragging }"
         tabindex="-1"
         role="dialog"
@@ -209,10 +209,13 @@ defineExpose({ close: requestClose })
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgba(30, 20, 10, 0.42);
+  /* 冷调压暗（F 的 .scrim）：暖调压在照片上会跟纸色打架。 */
+  background: rgba(16, 20, 24, 0.34);
   animation: modal-fade var(--dur) var(--ease-out);
 }
 
+/* 弹层＝屏幕中央最大的一块玻璃（F 的 .dlg）：白线勾边 + 16px 模糊，头/脚不铺底色——
+   各接一条实底会把它切回三块拼板。文字里会出现 --text-3 小字，所以走 dense 档。 */
 .modal__panel {
   position: relative;
   display: flex;
@@ -222,6 +225,11 @@ defineExpose({ close: requestClose })
   max-height: calc(100vh - 40px);
   padding: 0;
   overflow: hidden;
+  background: var(--glass-dense);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
   box-shadow: var(--shadow-modal);
   /* 基础 transform 常驻，下滑改的只是 --drag-y；松手回位要有弹性，所以留一条过渡。 */
   transform: translateY(var(--drag-y, 0px));
@@ -258,8 +266,6 @@ defineExpose({ close: requestClose })
   gap: 10px;
   align-items: flex-start;
   padding: 16px 16px 12px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border-faint);
 }
 
 .modal__heading {
@@ -288,8 +294,6 @@ defineExpose({ close: requestClose })
   gap: 8px;
   align-items: center;
   padding: 12px 16px 16px;
-  background: var(--surface);
-  border-top: 1px solid var(--border-faint);
 }
 
 .modal__panel:focus-visible {
@@ -330,7 +334,7 @@ defineExpose({ close: requestClose })
     max-height: 88dvh;
     /* 高度默认随内容长；调用方给一个 --sheet-h 就钉住它（地点抽屉要拿这个数抬地图）。 */
     height: var(--sheet-h, auto);
-    border: 0;
+    /* 白线勾边在手机上留着（跟桌面同一张脸），只把贴屏幕底的那条去掉。 */
     border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     border-bottom: 0;
     padding-bottom: var(--sab);

@@ -96,6 +96,12 @@ onBeforeUnmount(() => {
 .gate__box {
   width: min(380px, calc(100vw - 40px));
   padding: 26px;
+  /* 与 AppModal 的面板同一套重玻璃（mock 的 .dlg 就在 blur 清单里）：这扇门悬在
+     照片上，底下一动不动，dense 档 + blur 换来「一块磨砂玻璃浮在风景上」。 */
+  background: var(--glass-dense);
+  border: 1px solid var(--glass-border);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 
 .gate__title {

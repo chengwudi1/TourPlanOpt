@@ -261,9 +261,17 @@ watch(
   { immediate: true },
 )
 
-/* 抽屉开着时把窗口拉宽：页签宿主接管这一面，抽屉得自己走完退场，不然它会永远悬在半空。 */
+/* 抽屉开着时把窗口拉宽：`v-if` 立刻拆掉抽屉，AppModal 的 close 事件还压在退场动画
+   后面，跟着实例一起没了——chatSheetShown 会留在 true，收窄回来抽屉自己弹开。这里
+   直接落状态（close 那条路本来也播不完，动画随卸载一并取消）。pane 不动：宽屏有真正
+   的聊天页签，转宽不该把人从聊天拽回行程。收窄回来时人还停在聊天面上就把抽屉重新
+   挂上——窄屏的聊天只有抽屉这一处宿主，不挂就是一片空。 */
 watch(narrow, (isNarrow) => {
-  if (!isNarrow && chatSheetShown.value) chatSheetEl.value?.close()
+  if (!isNarrow) {
+    if (chatSheetShown.value) chatSheetShown.value = false
+    return
+  }
+  if (chatWanted.value && !chatSheetShown.value) chatSheetShown.value = true
 })
 
 function onChatSheetClosed() {
@@ -585,13 +593,20 @@ async function retryLoad() {
   socket.connect(props.tripId)
 }
 
+/** 加载未完就切走（App.vue 以 route.path 作 key，切行程必重挂载）：await 之后的每一步
+ *  都落在已经卸载的实例上——监听泄漏一份，旧 tripId 还会把新页刚建的连接换回旧房间。
+ *  卸载后整段跳过；store 里的快照由 load 自己的代际守卫兜住。 */
+let disposed = false
+
 onMounted(async () => {
   await auth.load()
+  if (disposed) return
   try {
     await store.load(props.tripId)
   } catch {
     // store.loadError already holds the message/hint pair for the banner below.
   }
+  if (disposed) return
   // Logged-in users skip the name gate: their account IS the identity, and asking
   // them to re-type it in every new tab reads as broken. Guests still see the gate
   // because per-tab identity is what makes two-window collaboration testable.
@@ -610,6 +625,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true
   if (flashTimer) clearTimeout(flashTimer)
   document.removeEventListener('visibilitychange', onVisibility)
   window.removeEventListener('click', closeCardMenuOnClick)
@@ -694,28 +710,38 @@ const mapPick = ref<{
 
 function onMapPick(point: { lng: number; lat: number }) {
   const round = (v: number) => Math.round(v * 1e6) / 1e6
-  mapPick.value = {
+  const picked = {
     lng: round(point.lng),
     lat: round(point.lat),
     name: '',
     address: '',
     loading: true,
   }
+  mapPick.value = picked
   apiFetch<{ name: string; address: string }>(
-    `/api/poi/regeo?lng=${mapPick.value.lng}&lat=${mapPick.value.lat}`,
+    `/api/poi/regeo?lng=${picked.lng}&lat=${picked.lat}`,
   )
     .then((info) => {
-      if (!mapPick.value) return
+      // 连点两处时旧响应可能后到：只认当前这一份的结果，否则 A 的地名会刻在 B 的坐标上。
+      if (mapPick.value !== picked) return
       mapPick.value.address = info.address || ''
       mapPick.value.name = info.name || info.address || '地图选点'
     })
     .catch(() => {
       // 没配 Web 服务 Key 时 regeo 不可用：仍可手动命名添加。
-      if (mapPick.value) mapPick.value.name = '地图选点'
+      if (mapPick.value !== picked) return
+      mapPick.value.name = '地图选点'
     })
     .finally(() => {
-      if (mapPick.value) mapPick.value.loading = false
+      if (mapPick.value === picked) mapPick.value.loading = false
     })
+}
+
+/** 输入法确认候选词的那下回车不是「加入行程」。 */
+function onMapPickEnter(e: KeyboardEvent) {
+  if (e.isComposing) return
+  e.preventDefault()
+  confirmMapPick()
 }
 
 function confirmMapPick() {
@@ -1005,12 +1031,14 @@ if (import.meta.env.DEV) {
               </button>
             </div>
 
-            <section v-if="pane === 'checklist'" class="page">
+            <!-- 清单与费用也走 v-show（与聊天页签同一把尺子）：切走页签时输入框里
+                 还没发出去的那句话不该蒸发。两段常驻的代价只是多两个面板的 DOM。 -->
+            <section v-show="pane === 'checklist'" class="page">
               <p class="page__lead tiny muted">清单由同行人共同维护，打勾状态实时同步。</p>
               <ChecklistPanel />
             </section>
 
-            <section v-else-if="pane === 'cost'" class="page">
+            <section v-show="pane === 'cost'" class="page">
               <p class="page__lead tiny muted">记录每笔开销，按人分摊并给出结算建议。</p>
               <ExpensePanel />
             </section>
@@ -1210,7 +1238,7 @@ if (import.meta.env.DEV) {
         class="mappick__name"
         placeholder="地点名称"
         maxlength="120"
-        @keyup.enter="confirmMapPick"
+        @keydown.enter="onMapPickEnter"
       />
       <p v-if="mapPick.address" class="tiny muted mappick__addr">{{ mapPick.address }}</p>
       <div class="mappick__actions">
@@ -1237,6 +1265,16 @@ if (import.meta.env.DEV) {
 </template>
 
 <style scoped>
+/* 两张浮层（卡片菜单、地图选点）都进玻璃清单：密档底 + 白边 + 16px 模糊，靠模糊把
+   它们从底下的地图/照片上摘起来——这两块下面压的是花地图，不模糊就得分不清边界。 */
+.cardmenu.card,
+.mappick.card {
+  background: var(--glass-dense);
+  border: 1px solid var(--glass-border);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+
 .cardmenu {
   position: fixed;
   z-index: var(--z-bar);
@@ -1267,7 +1305,7 @@ if (import.meta.env.DEV) {
 }
 
 .cardmenu__item:hover {
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
 .mappick {
@@ -1288,9 +1326,16 @@ if (import.meta.env.DEV) {
 .mappick__name {
   padding: 8px 10px;
   font-size: calc(14px * var(--fs-scale));
-  background: var(--surface-2);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--glass) 82%, transparent);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--edge);
   border-radius: var(--radius-sm);
+  outline: none;
+}
+
+.mappick__name:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--edge);
 }
 
 .mappick__addr {
@@ -1403,14 +1448,19 @@ if (import.meta.env.DEV) {
 
 /* ---------- 分栏（M24b）：行程 / 出行清单 / 费用 ---------- */
 
+/* mock 的 .tabs：一条浮在栏面上的玻璃条（内垫 5px + 控件档圆角），不是贴边的横栏。
+   容器不进 blur 清单：它下面就是 .76 的栏面，照片纹理早被抹平，模糊这一条只剩
+   每帧一次的合成开销。 */
 .panebar {
   display: flex;
   flex: 0 0 auto;
-  gap: 3px;
+  gap: 4px;
   justify-content: center;
-  padding: 6px 8px;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
+  margin: 8px var(--pane-pad) 0;
+  padding: 5px;
+  background: color-mix(in srgb, var(--glass) 72%, transparent);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--edge);
 }
 
 .panebar__btn {
@@ -1433,31 +1483,34 @@ if (import.meta.env.DEV) {
     border-color var(--dur-fast) var(--ease);
 }
 
+/* hover 的两档方向：亮色把它压深一点、深色把它提亮一点——用 --text 的 8% 一层罩，
+   两种主题各自得到正确方向（同 --surface-hover 的语义，但不会把玻璃面填成实心）。 */
 .panebar__btn:hover:not(.panebar__btn--on) {
   color: var(--text);
-  background: var(--surface-3);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
-/* 选中态沿用分段控件那套（白底 + 强调描边 + accent-strong 文字）：实心强调底会把一条
-   导航栏变成一个大按钮，而 accent-strong 的对比度在别处已经验过。 */
+/* 选中态＝翻成一块墨（mock 的 .tab.on）：和分段控件、手机 dock 同一条规矩。
+   F 里「当前在哪一页」不靠染上强调色说，靠这一块实心墨。 */
 .panebar__btn--on {
-  color: var(--accent-strong);
-  background: var(--surface);
-  border-color: var(--accent);
-  box-shadow: var(--shadow-sm);
+  color: var(--chip-on-ink);
+  background: var(--chip-on);
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .panebar__n {
   flex: 0 0 auto;
   padding: 1px 6px;
   color: var(--text-2);
-  background: var(--surface-3);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
   border-radius: var(--radius-pill);
 }
 
+/* 墨块上的量徽标：反过来往墨里掺白/掺墨，别再叠一块灰底（会糊成一个脏点）。 */
 .panebar__btn--on .panebar__n {
-  color: var(--accent-strong);
-  background: var(--accent-soft);
+  color: color-mix(in srgb, var(--chip-on-ink) 74%, transparent);
+  background: color-mix(in srgb, var(--chip-on-ink) 14%, transparent);
 }
 
 /* 未读徽标：强调色实心 + 反白字。三枚「量」徽标（10 / 1/6 / ¥172.84）都是淡底数字，
@@ -1491,10 +1544,9 @@ if (import.meta.env.DEV) {
   padding: 6px 0 24px;
 }
 
-/* 文档页铺页面底色：面板卡靠底色差浮出来，而不是贴边铺满。
-   与 body 共用同一张顶光屏底，这两页才不像另一个系统的附表。 */
+/* 文档页：这一栏临时当长文档读（条款、说明），玻璃换成密档——读长句时不跟照片争。 */
 .shell__body.doc-open .panel {
-  background: var(--page-art);
+  background: var(--glass-dense);
 }
 
 .page__lead {
@@ -1519,7 +1571,8 @@ if (import.meta.env.DEV) {
   gap: 8px;
 }
 
-/* 添加一天：通栏虚线一行，读作「这一列的收口」，不是又一张卡。 */
+/* 添加一天：mock 的 .addbox——2px 虚线圈出一块比栏面更透的白（.4 对 .76），
+   读作「这里还等东西」，不是又一张卡。圆角按控件档，和它服务的天卡拉开一档。 */
 .addday {
   display: flex;
   gap: 6px;
@@ -1528,9 +1581,9 @@ if (import.meta.env.DEV) {
   min-height: 38px;
   padding: 8px;
   color: var(--text-2);
-  background: none;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--glass) 52%, transparent);
+  border: 2px dashed var(--hairline);
+  border-radius: var(--radius-sm);
   transition:
     color var(--dur-fast) var(--ease),
     border-color var(--dur-fast) var(--ease),
@@ -1538,8 +1591,8 @@ if (import.meta.env.DEV) {
 }
 
 .addday:hover {
-  color: var(--accent);
-  background: var(--accent-soft);
+  color: var(--accent-strong);
+  background: color-mix(in srgb, var(--accent-soft) 68%, transparent);
   border-color: var(--accent);
 }
 
@@ -1551,11 +1604,16 @@ if (import.meta.env.DEV) {
 
 /* ---------- 添加地点：搜索框与「发现」共用一个描边 ---------- */
 
-.addbar {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+/* mock 的 .search：一块比天卡更透的亮井（.62 对 .72）+ 白线勾边。它是工具条不是内容卡，
+   所以圆角按控件档；`card` 类带进来的 --paper 底由这里整条接管。 */
+.addbar.card {
+  background: color-mix(in srgb, var(--glass) 82%, transparent);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
   box-shadow: var(--edge);
-  transition: border-color var(--dur) var(--ease);
+  transition:
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
 }
 
 .addbar:focus-within,

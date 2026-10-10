@@ -94,7 +94,7 @@ const store = useTripStore()
   height: 44px;
   object-fit: cover;
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
 .stash__name {

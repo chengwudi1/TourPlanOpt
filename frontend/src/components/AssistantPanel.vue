@@ -213,6 +213,13 @@ watch(micError, (code) => {
   })
 })
 
+function onEnter(e: KeyboardEvent): void {
+  // 输入法拿回车确认候选词的那一下不是「发送」：preventDefault 还会把它从输入法手里抢走。
+  if (e.isComposing) return
+  e.preventDefault()
+  submit()
+}
+
 function submit(): void {
   const text = input.value
   if (!canSend.value) return
@@ -433,7 +440,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                   : '正在听写，说完点话筒结束'
                 : `例如：${SUGGESTIONS[0]}`
           "
-          @keydown.enter.prevent="submit"
+          @keydown.enter="onEnter"
         />
         <button
           class="apanel__mic"
@@ -469,10 +476,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   bottom: 132px;
   width: min(420px, calc(100vw - 32px));
   z-index: calc(var(--z-sprite) + 1);
-  background: var(--surface);
-  border: 1px solid var(--border);
+  /* 浮在页面上的助手面板：重玻璃 + blur（浮层清单内）。珊瑚头保持实心——
+     它是这块面板的身份，和玻璃不是同一种料子。 */
+  background: var(--glass-dense);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-pop);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -549,7 +560,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 /* 说明区：点开哪一枚就答哪一枚，永远只有一块，高度不会叠两层。 */
 .about {
   padding: var(--s3) var(--s4);
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
   border-bottom: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -613,7 +624,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   padding: var(--s2) 4px var(--s3);
   border-radius: var(--radius);
   border: 1.5px solid var(--border);
-  background: var(--surface);
+  background: var(--glass-dense);
   color: var(--text-2);
   font-family: var(--font);
   cursor: pointer;
@@ -703,14 +714,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 .msg .txt {
   padding: 9px var(--s3);
   border-radius: var(--radius) var(--radius) var(--radius) 4px;
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
   border: 1px solid var(--border);
 }
 
+/* 自己那一句＝珊瑚浅底的小药丸（mock 的 .pill.on：不描边）。 */
 .msg--me .txt {
   border-radius: var(--radius) var(--radius) 4px var(--radius);
   background: var(--accent-soft);
-  border-color: var(--accent);
+  border-color: transparent;
 }
 
 .notes {
@@ -758,7 +770,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   align-items: center;
   gap: var(--s2);
   padding: 9px var(--s3);
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
   font-size: var(--t-micro);
 }
 
@@ -863,7 +875,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   font-size: var(--t-micro);
   color: var(--text-2);
   border: 1px dashed var(--hairline);
-  background: var(--surface);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
   cursor: pointer;
   transition: color var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast);
 }
@@ -880,7 +892,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   gap: var(--s2);
   padding: var(--s3) var(--s4);
   border-top: 1px solid var(--border);
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
 }
 
 .apanel__in input {
@@ -888,8 +900,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   min-width: 0;
   padding: 10px var(--s3);
   border-radius: var(--radius-pill);
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  background: var(--glass);
   box-shadow: var(--edge);
   font: inherit;
   font-size: var(--t-meta);
@@ -914,8 +926,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   border-radius: 50%;
   display: grid;
   place-items: center;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  background: var(--glass);
   box-shadow: var(--edge);
   color: var(--text-2);
   cursor: pointer;

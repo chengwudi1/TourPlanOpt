@@ -379,8 +379,8 @@ watch(
   align-items: center;
   justify-content: space-between;
   padding: var(--s2) var(--s3);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
+  /* 行是一块「洗」不是一张纸：去掉墨线边（Q2 已废描边即结构色），底色差自己分层。 */
+  background: color-mix(in srgb, var(--text) 4%, transparent);
   border-radius: var(--radius-sm);
 }
 

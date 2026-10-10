@@ -194,9 +194,13 @@ const originKey = computed(() =>
     切回去还得白打一次接口（实测过）。 */
 const basisKey = computed(() => (sort.value === 'distance' ? originKey.value : 'none'))
 
-// 后发先至：下拉里连点两个基准点时，先发的请求可能后回来，把顺序退回上一条基准点的结果。
-// 只让最新那一次落地，旧响应直接丢。
-let reqSeq = 0
+/** 当前这组条件对应的结果键：城市:类目:排序:基准点。请求落地与否只看「是不是当前这个
+    键」。用全局序号当尺子会漏：A 的请求还在飞时切到 B、又切回 A，最后一次触发只会在
+    inFlight 处早退，A 的响应回来时序号已被 B 顶掉——界面停在 B 的列表顶着 A 的标签，
+    且不再重取，只有再切走切回一次才靠缓存纠正。 */
+const resultKey = computed(
+  () => `${props.city}:${category.value}:${sort.value}:${basisKey.value}`,
+)
 
 watch(
   () => [props.city, open.value, category.value, sort.value, basisKey.value] as const,
@@ -205,8 +209,7 @@ watch(
     // 没有基准点就不发这一枪：服务端只会把综合那批原样退回，顶着「距离」标签的假顺序
     // 比一条空列表更坏。界面上此时显示的是「挑一个基准点」的提示。
     if (sort.value === 'distance' && !origin.value) return
-    const key = `${city}:${category.value}:${sort.value}:${basisKey.value}`
-    if (inFlight.has(key)) return
+    const key = resultKey.value
     const hit = cache.get(key)
     if (hit) {
       // 早退不等于数据对：pois 里可能还留着上一个 key 的结果，必须拿这份缓存盖回去。
@@ -215,8 +218,13 @@ watch(
       error.value = null
       return
     }
+    if (inFlight.has(key)) {
+      // 同一键已有一发在飞，它回来就是这份数据：转到加载态等它，别退回旧键的列表装没事。
+      loading.value = true
+      error.value = null
+      return
+    }
     inFlight.add(key)
-    const seq = ++reqSeq
     loading.value = true
     error.value = null
     // origin 回显是服务端唯一的「我采纳了这个基准点」信号：读不懂或境外坐标会被当作没给。
@@ -236,13 +244,13 @@ watch(
         // 服务端把读不懂或境外的 origin 当作没给，退回的就是综合顺序——假顺序不配进缓存。
         throw new Error('这个基准点高德认不出来（境外坐标？）')
       }
-      // 结果属于它自己那个 key，缓存照写；被更新的请求取代时只丢界面，不丢这一份。
+      // 结果属于它自己那个键，缓存照写；人已经切走时只丢界面，不丢这一份。
       cache.set(key, { pois: data.pois, amapUrl: data.amap_url })
-      if (seq !== reqSeq) return
+      if (key !== resultKey.value) return
       pois.value = data.pois
       amapUrl.value = data.amap_url
     } catch (err) {
-      if (seq !== reqSeq) return
+      if (key !== resultKey.value) return
       const e = err as Error
       error.value = {
         message: e.message || '推荐加载失败',
@@ -250,8 +258,8 @@ watch(
       }
     } finally {
       inFlight.delete(key)
-      // 只有最新那次才有权收spinner——旧请求先回来时新请求还在路上。
-      if (seq === reqSeq) loading.value = false
+      // 只有当前键才有权收 spinner——切走后回来的旧请求不该碰当前的转圈。
+      if (key === resultKey.value) loading.value = false
     }
   },
 )
@@ -462,15 +470,17 @@ defineExpose({
   padding: 5px 11px;
   font-size: calc(13px * var(--fs-scale));
   color: var(--text-2);
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
   border: 1px solid transparent;
   border-radius: var(--radius-pill);
 }
 
+/* 小药丸的选中＝珊瑚浅底 + 深珊瑚字（mock 的 .pill.on，border-color: transparent）。
+   它不是页签那条「翻成一块墨」的规矩——那一档留给主栏、分段控件与 dock。 */
 .reco__tab--on {
   color: var(--accent-strong);
   background: var(--accent-soft);
-  border-color: var(--accent);
+  border-color: transparent;
 }
 
 /* 基准点候选数量不定、还要按天分组，自绘下拉得自己接管键盘与焦点，性价比为负，这里破例用原生
@@ -520,11 +530,11 @@ defineExpose({
   height: 44px;
   object-fit: cover;
   border-radius: var(--radius-sm);
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
 }
 
 .reco__item:hover {
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
 }
 
 .reco__info {
@@ -545,7 +555,7 @@ defineExpose({
 
 .reco__empty {
   padding: 10px 12px;
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
   border-radius: var(--radius-sm);
 }
 

@@ -74,6 +74,7 @@ const statusText = computed(() =>
 </script>
 
 <template>
+  <div class="hero-wrap">
   <section class="hero" :class="{ 'hero--nophoto': !cover }">
     <div v-if="cover" class="hero__photo">
       <img :src="cover" :alt="`${trip.title || '未命名行程'}的封面`" decoding="async" referrerpolicy="no-referrer" />
@@ -105,54 +106,66 @@ const statusText = computed(() =>
 
       <p v-if="hints.length" class="hero__hints tiny"><Sparkles class="ic" :size="12" /> {{ hints.join(' · ') }}</p>
 
-      <div class="hero__stats card">
-        <div class="hero__stat">
-          <span class="hero__stat-key tiny"><Users class="ic" :size="12" /> 旅伴</span>
-          <strong class="hero__stat-num">{{ companions }}</strong>
-          <span class="hero__stat-unit tiny">{{ trip.companion_count === 1 ? '人' : '位参与者' }}</span>
-        </div>
-        <div class="hero__stat">
-          <span class="hero__stat-key tiny"><CalendarDays class="ic" :size="12" /> 行程</span>
-          <strong class="hero__stat-num">{{ dayNum }}</strong>
-          <span class="hero__stat-unit tiny">天</span>
-        </div>
-        <div class="hero__stat">
-          <span class="hero__stat-key tiny"><MapPin class="ic" :size="12" /> 地点</span>
-          <strong class="hero__stat-num">{{ placeNum }}</strong>
-          <span class="hero__stat-unit tiny">个</span>
-        </div>
-        <div class="hero__stat">
-          <span class="hero__stat-key tiny"><ListChecks class="ic" :size="12" /> 出行清单</span>
-          <strong class="hero__stat-num">{{ checklistText }}</strong>
-          <span class="hero__stat-unit tiny">{{ trip.checklist_total ? '已备好' : '未填写' }}</span>
-        </div>
-        <div class="hero__stat">
-          <span class="hero__stat-key tiny"><Wallet class="ic" :size="12" /> 费用</span>
-          <strong class="hero__stat-label">{{ money }}</strong>
-          <span class="hero__stat-unit tiny">{{ trip.budget_cents ? '已花 / 预算' : '点开行程可设' }}</span>
-        </div>
-
-        <div class="hero__acts">
-          <button v-if="wrapUp" class="btn btn--sm hero__wrap" type="button" @click="emit('finish')">
-            <CheckCheck class="ic" :size="13" /> 标记完成
-          </button>
-          <button class="btn btn--primary hero__open" type="button" @click="emit('open')">
-            打开行程 <ChevronRight class="ic" :size="14" />
-          </button>
-        </div>
+      <div class="hero__acts">
+        <button v-if="wrapUp" class="btn btn--sm hero__wrap" type="button" @click="emit('finish')">
+          <CheckCheck class="ic" :size="13" /> 标记完成
+        </button>
+        <button class="btn btn--primary hero__open" type="button" @click="emit('open')">
+          打开行程 <ChevronRight class="ic" :size="14" />
+        </button>
       </div>
     </div>
   </section>
+
+  <!-- 数据带搬到英雄卡外面（F 的 .tiles）：五块糖果瓷砖嵌在照片里会跟画面抢色，
+       落在纸面上才是「票根撕下来排一排」的读法。 -->
+  <div class="tiles">
+    <div class="tile tile--a">
+      <span class="tile__key tiny"><Users class="ic" :size="12" /> 旅伴</span>
+      <strong class="tile__num">{{ companions }}</strong>
+      <span class="tile__unit tiny">{{ trip.companion_count === 1 ? '人' : '位参与者' }}</span>
+    </div>
+    <div class="tile tile--b">
+      <span class="tile__key tiny"><CalendarDays class="ic" :size="12" /> 行程</span>
+      <strong class="tile__num">{{ dayNum }}</strong>
+      <span class="tile__unit tiny">天</span>
+    </div>
+    <div class="tile tile--c">
+      <span class="tile__key tiny"><MapPin class="ic" :size="12" /> 地点</span>
+      <strong class="tile__num">{{ placeNum }}</strong>
+      <span class="tile__unit tiny">个</span>
+    </div>
+    <div class="tile tile--d">
+      <span class="tile__key tiny"><ListChecks class="ic" :size="12" /> 出行清单</span>
+      <strong class="tile__num">{{ checklistText }}</strong>
+      <span class="tile__unit tiny">{{ trip.checklist_total ? '已备好' : '未填写' }}</span>
+    </div>
+    <div class="tile tile--e">
+      <span class="tile__key tiny"><Wallet class="ic" :size="12" /> 费用</span>
+      <strong class="tile__num tile__num--word" :title="money">{{ money }}</strong>
+      <span class="tile__unit tiny">{{ trip.budget_cents ? '已花 / 预算' : '点开行程可设' }}</span>
+    </div>
+  </div>
+  </div>
 </template>
 
 <style scoped>
+/* 英雄卡＝一枚裱进白框的贴纸（F 的 .hero）：30px 级圆角 + 6px 白边。
+   白框是半透的（.55），照片亮部会把它透出来一点，边才不像贴上去的。 */
 .hero {
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border: 6px solid rgba(255, 255, 255, 0.55);
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow-md);
+}
+
+/* 英雄卡 + 瓷砖带是一整块：英雄卡晚 60ms 入场（--base 由调用方给），瓷砖跟它一起动。 */
+.hero-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .hero__photo,
@@ -261,11 +274,6 @@ const statusText = computed(() =>
   background: var(--surface-3);
 }
 
-.hero--nophoto .hero__stats {
-  background: color-mix(in srgb, var(--surface) 90%, transparent);
-  border-color: var(--border);
-}
-
 .hero__inner {
   display: flex;
   flex-direction: column;
@@ -283,12 +291,13 @@ const statusText = computed(() =>
   align-items: center;
 }
 
+/* 城市胶囊＝柠黄一块（F 的 .chip.city）：压在照片上，所以两档主题都不反色。 */
 .hero__badge {
   padding: 3px 10px;
   font-size: calc(12px * var(--fs-scale));
   font-weight: 600;
-  color: var(--ember-ink);
-  background: var(--ember);
+  color: var(--city-chip-ink);
+  background: var(--city-chip);
   border-radius: var(--radius-pill);
 }
 
@@ -313,14 +322,17 @@ const statusText = computed(() =>
 }
 
 .hero__title {
-  /* 大字是这张卡的主角：clamp 到 42px。遮罩是比例渐变，照片裁切后暗部落在哪没法保证，
-     所以再补一道轻投影兜底——只糊边缘，不做描边。 */
+  /* 大字是这张卡的主角（F 的 .hero-title 66px/800）：中文落到系统黑体的粗档，
+     拉丁与数字走打包的 Bricolage，两种字面在同一行里排。字距收一点，大字不收会散。
+     遮罩是比例渐变，照片裁切后暗部落在哪没法保证，所以再补一道软投影兜底。 */
   max-width: 22ch;
-  font-size: clamp(26px, 4.6vw, 42px);
-  font-weight: 700;
-  line-height: 1.12;
+  font-family: var(--font-display);
+  font-size: clamp(30px, 4.8vw, 52px);
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
   color: #fff;
-  text-shadow: 0 1px 2px rgba(11, 22, 26, 0.45);
+  text-shadow: 0 2px 16px rgba(11, 22, 26, 0.4);
   text-wrap: balance;
 }
 
@@ -356,87 +368,105 @@ const statusText = computed(() =>
   color: #bcdff5;
 }
 
-.hero__stats {
+/* ---------- 数据带：五块糖果瓷砖（F 的 .tiles/.tile） ---------- */
+.tiles {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
-  gap: 0;
-  align-items: center;
-  padding: 12px 6px;
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
-  border-color: var(--border-faint);
-  box-shadow: var(--shadow-sm);
-  /* 卡片先落、数据带晚三拍跟上：一次入场里有先后，才不是一整块闪现。
-     父子各自动 transform 是叠加的，所以视觉上像带子被惯性甩了一下。 */
-  animation: rise-in var(--dur-entrance) var(--ease-out) calc(var(--stagger) * 3) backwards;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
 }
 
-.hero__stat {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 0 10px;
+/* 瓷砖是实色块，不参与玻璃层——画面里的高饱和只留给它们和果冻按钮。
+   数字是大字档（800 重、26px），糖果墨只需过 3:1，每块的最差值在
+   docs/_fskin-check.mjs 里过过账。 */
+.tile {
+  padding: 12px 14px 10px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+}
+.tile--a {
+  background: var(--candy-1);
+}
+.tile--b {
+  background: var(--candy-2);
+}
+.tile--c {
+  background: var(--candy-3);
+}
+.tile--d {
+  background: var(--candy-4);
+}
+.tile--e {
+  background: var(--candy-5);
 }
 
-/* 票券式虚线分隔：TREK 用它替代硬边框，压在奶油底上不会显脏。 */
-.hero__stat + .hero__stat {
-  border-left: 1px dashed var(--hairline);
-}
-
-.hero__stat-key {
+.tile__key {
   display: inline-flex;
   gap: 4px;
   align-items: center;
   color: var(--text-2);
 }
 
-.hero__stat-num {
-  font-size: calc(24px * var(--fs-scale));
-  font-weight: 700;
+.tile__num {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-display);
+  font-size: calc(26px * var(--fs-scale));
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
-  line-height: 1.1;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--candy-1-ink);
+}
+.tile--b .tile__num {
+  color: var(--candy-2-ink);
+}
+.tile--c .tile__num {
+  color: var(--candy-3-ink);
+}
+.tile--d .tile__num {
+  color: var(--candy-4-ink);
+}
+.tile--e .tile__num {
+  color: var(--candy-5-ink);
 }
 
-/* 金额是这一格里唯一会长的字符串，宁可省略号也不许它把票券挤歪。 */
-.hero__stat-label {
+/* 金额是唯一会长的字符串：缩到标签字号，宁可用省略号也不许把这一行撑破。 */
+.tile__num--word {
   overflow: hidden;
-  font-size: calc(15px * var(--fs-scale));
-  font-weight: 600;
+  font-size: calc(17px * var(--fs-scale));
+  font-weight: 700;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.hero__stat-unit {
-  overflow: hidden;
+.tile__unit {
+  display: block;
+  margin-top: 3px;
   color: var(--text-3);
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
+/* CTA 收在英雄卡右下（F 的 .cta）：实心果冻只留「打开行程」一颗。 */
 .hero__acts {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
-  margin-right: 8px;
-  margin-left: 8px;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+.hero__open {
+  padding: 10px 18px;
+  font-size: calc(15px * var(--fs-scale));
 }
 
 /* 「回来了但没整理」是旅行产品里最常见的沉默流失，所以这一档给一键而不是让人点进再说。
-   实心留给「打开行程」：一条数据带里出现两个大色块，就等于没有主次。 */
+   实心留给「打开行程」：一颗卡的左下角出现两个大色块，就等于没有主次。 */
 .hero__wrap .ic {
   color: var(--ember-deep);
 }
 
 @media (max-width: 860px) {
-  .hero__stats {
+  .tiles {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    row-gap: 10px;
-  }
-  .hero__stat:nth-child(2n + 1) {
-    border-left: 0;
-  }
-  .hero__acts {
-    grid-column: 1 / -1;
-    margin: 4px 8px 0;
   }
 }
 </style>

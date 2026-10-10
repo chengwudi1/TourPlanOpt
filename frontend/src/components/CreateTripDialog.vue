@@ -146,6 +146,13 @@ function enter() {
   if (created.value) emit('done', created.value.trip_id)
 }
 
+/** 输入法确认候选词的那下回车不是「打开」。 */
+function onPasteEnter(e: KeyboardEvent) {
+  if (e.isComposing) return
+  e.preventDefault()
+  openPasted()
+}
+
 function openPasted() {
   if (pastedId.value) emit('done', pastedId.value)
 }
@@ -244,7 +251,7 @@ onBeforeUnmount(() => {
           <input
             id="new-title"
             v-model="title"
-            class="tf__input"
+            class="input tf__input"
             placeholder="五一 · 苏州三日游"
             autocomplete="off"
             maxlength="40"
@@ -384,7 +391,7 @@ onBeforeUnmount(() => {
             placeholder="粘贴完整的分享链接"
             autocomplete="off"
             spellcheck="false"
-            @keyup.enter="openPasted"
+            @keydown.enter="onPasteEnter"
           />
           <button class="btn btn--primary paste__go" type="button" :disabled="!pastedId" @click="openPasted">
             打开 <ArrowRight class="ic" :size="14" />
@@ -440,36 +447,29 @@ onBeforeUnmount(() => {
   color: var(--text-2);
 }
 
-/* 标题是这一屏唯一的主角：字号最大、去掉盒子边框，只留一条基线。
-   四个长得一样的输入框会让「必填的那个」消失。 */
+/* 标题是这一屏唯一的主角：盒子比别的输入框高半头、字号最大，自动聚焦的光环常落在这里
+   （mock 的 .inp.focus 就是首屏状态），「必填的那个」一眼就认得出。 */
 .tf__input {
-  padding: 2px 0 9px;
-  font-family: inherit;
-  font-size: calc(19px * var(--fs-scale));
+  padding: 11px 13px;
+  font-size: calc(17px * var(--fs-scale));
   font-weight: 600;
-  color: var(--text);
-  background: transparent;
-  border: 0;
-  border-bottom: 1px solid var(--hairline);
-  border-radius: 0;
-  transition: border-color var(--dur-fast) var(--ease);
 }
 .tf__input::placeholder {
   font-weight: 500;
   color: var(--text-3);
 }
-.tf__input:focus {
-  border-bottom-color: var(--accent);
-}
 
+/* 补充信息是一个内凹的浅井：比弹窗玻璃再透一档（--glass 在 --glass-dense 之下），
+   读起来像玻璃上刻进去的一块；底料与其他输入井同一条（井＝标准档玻璃 + 白线 + 内高光）。 */
 .opt {
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 14px;
-  background: var(--surface-2);
-  border: 1px solid var(--border-faint);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius);
+  box-shadow: var(--edge);
 }
 
 .opt__head {
@@ -528,12 +528,13 @@ onBeforeUnmount(() => {
   margin: 0;
 }
 
+/* 计数器＝一枚小玻璃片（F 的 .stepper）：加减是两枚灰色圆片，落在玻璃上。 */
 .stepper {
   display: grid;
   grid-template-columns: 30px 1fr 30px;
   align-items: center;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
   box-shadow: var(--edge);
 }
@@ -541,12 +542,13 @@ onBeforeUnmount(() => {
 .stepper__btn {
   display: grid;
   place-items: center;
-  height: 30px;
+  height: 24px;
+  margin: 0 3px;
   font-size: calc(15px * var(--fs-scale));
   color: var(--text-2);
-  background: transparent;
+  background: color-mix(in srgb, var(--text) 7%, transparent);
   border: 0;
-  border-radius: calc(var(--radius-sm) - 2px);
+  border-radius: var(--radius-xs);
   transition:
     background var(--dur-fast) var(--ease),
     color var(--dur-fast) var(--ease),
@@ -554,7 +556,7 @@ onBeforeUnmount(() => {
 }
 .stepper__btn:hover:not(:disabled) {
   color: var(--accent-strong);
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 12%, transparent);
 }
 .stepper__btn:active:not(:disabled) {
   transform: scale(0.9);
@@ -588,9 +590,12 @@ onBeforeUnmount(() => {
   color: var(--danger);
 }
 
+/* 主 CTA 是这一屏的收束（F 的 .dlg-f .btn-p）：通栏、高出一档，果冻底影是它的全部状态。 */
 .form__submit {
   flex: 1;
   justify-content: center;
+  min-height: 44px;
+  font-size: calc(15px * var(--fs-scale));
 }
 
 .form__spin {
@@ -626,7 +631,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   color: var(--text-2);
   cursor: pointer;
-  background: var(--surface);
+  background: var(--glass);
   border: 1px dashed var(--border);
   border-radius: var(--radius-sm);
   transition:
@@ -758,9 +763,10 @@ onBeforeUnmount(() => {
   align-items: center;
   margin-top: 6px;
   padding: 4px 4px 4px 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
+  box-shadow: var(--edge);
 }
 
 .done__url {

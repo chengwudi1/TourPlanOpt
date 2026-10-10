@@ -1,33 +1,38 @@
 :root {
-  /* ---------- 中性阶与强调色（2026 换皮定案：中性暖白 + 淡线 + 三段软影） ----------
-     亮档不再走米黄纸：底面收成近中性的暖灰，层次全部交给「底色差 + 一条极淡的线」，
-     而不是墨线描边和厚投影。强调色按「低饱和、只上极少数关键交互」重算：
-     #1670c2 饱和 89% → #2f6a99 饱和 69%，白字压它 5.77:1、它自己当正文压白底 5.77:1，两头都过。
-     文字分三层，只有前两层许给正文：--text-2 是 AA 底线（≥7:1 压在 surface-2 上），
-     --text-3 压白底 5.29、压 surface-2 4.68、压页面底 4.94 都过 4.5，唯独压 surface-3 只有
-     4.27——所以「--text-3 不许上 surface-3」是硬禁令。--text-faint 永远只做装饰
-     （它到不了 4.5，别拿它写句子）。 */
-  --bg: #f7f7f6;
-  /* ---------- 令牌之外的三处色值（改配色时必须一起改） ----------
+  /* ---------- 中性阶与强调色（F 糖果极光定案：暖白纸 + 珊瑚强调 + 玻璃层） ----------
+     2026-10-09 换皮：整套色板从「水系蓝 + 近中性暖灰」翻到 F 案（docs/YOUNG-2026.html
+     的 .k-bd，用户拍板 B+D 合成）。强调色 #2f6a99 → 珊瑚 #d93a1d：它是「两头都过」的
+     那一档——白字压它 4.59:1（主按钮），它自己当正文压白底 4.59:1（链接、图标），
+     mock 里那颗更亮的 #ff4d2e 只有 3.3:1，只够大字，所以上屏的一律是这一档深珊瑚。
+     纸重新走暖白（#fbfaf7），深一档的阶梯也跟着偏暖；阴影从灰墨换成带紫的软影
+     （F 的 0 14px 32px -20px rgba(35,28,55,.3)），暖纸上不再发脏。
+     文字三层照旧，但 --text-3 从 #686c70 压深到 #5f6367：玻璃层（0.72 白）底下的
+     最坏情况是压在一块近黑照片上，原值只到 4.2:1，新值 4.52:1 过线；顺带它压在
+     surface-3 上也有 4.91:1——旧注释里那条「不许上 surface-3」的禁令随之解除。
+     --text-faint 永远只做装饰（它到不了 4.5，别拿它写句子）。 */
+  --bg: #fbfaf7;
+  /* ---------- 令牌之外的两处色值（改配色时必须一起改） ----------
      CSS 变量出不了这个文件，所以浏览器自己的那几块底色只能各留一个字面值：
      1. index.html 的 <meta name="theme-color"> —— 必须等于亮档的 --bg；深色由
         stores/settings.ts 在主题解析后按当下 --bg 重写，所以它只在首绘前那一段是硬编码。
      2. public/manifest.webmanifest 的 background_color 与 theme_color —— 等于亮档 --bg。
         JSON 读不了变量，装机启动屏那一刻也没有 JS，这两个值就是深色用户开机看到的亮底；
         这是可接受的代价，反过来（写深色值）会让默认亮档用户看到一屏脏黑。
-     3. mask-image 渐变里的 #000 —— 那是蒙版的形状不是颜色，全屏只有这一处。
-     除此之外屏幕上不许出现第四个硬编码色值。 */
+     （旧清单里的第 3 条「mask-image 渐变里的 #000」随旧环境层删除，已不存在。）
+     除此之外屏幕上不许出现第三个硬编码色值。 */
   --surface: #ffffff;
-  --surface-2: #f1f1f0;
-  --surface-3: #e7e7e5;
-  --surface-hover: #f4f4f3;
-  --surface-selected: #eef2f5;
-  /* 纸与票（Q6=B）：一天是一页纸，纸上的地点卡是浮起来的票。这两枚是**角色**令牌而不是
-     色阶档位——浅色态「票比纸亮」（票是白纸、纸是浅灰垫），深色态恰好反过来
-     「票比纸亮」意味着票的数值更高。所以深色块必须显式重定义这两枚，
-     写死 var(--surface-2) 之类的间接引用会在深色里把票压回纸下面，浮感变成凹陷。 */
-  --paper: var(--surface-2);
-  --ticket: var(--surface);
+  --surface-2: #f5f3ef;
+  --surface-3: #eae7e0;
+  --surface-hover: #f8f6f2;
+  /* 选中态跟强调色走：F 里选中的东西就是一块珊瑚浅底（mock 的 .pill.on #ffe0d7）。 */
+  --surface-selected: #ffe9e3;
+  /* 纸与票（Q6=B）在 F 里仍然是两个角色，但料子从「实心纸」换成「玻璃纸」：
+     天卡是一块半透明白（mock 的 .day 就是 rgba(255,255,255,.7)，这里 0.72 让它压
+     在 0.76 的栏面上合成 ~0.93——照片在卡面内只剩一层薄影，字不再跟纹理打架），
+     票（地点卡）更实一档，因为卡上全是 --text-2 的地址与小字。
+     深色态照旧「票比纸亮」：两枚都翻成白色叠加而不是继承色阶档位。 */
+  --paper: rgba(255, 255, 255, 0.72);
+  --ticket: rgba(255, 255, 255, 0.88);
   /* 结构线一律走半透明墨：压在白纸上合成出 #e8e8e8 一带的灰，正好落在「有但不出声」那一档，
      而且换到任何底色上都自动保持相对关系，不必为深色态另算一遍。 */
   --border: rgba(20, 22, 24, 0.1);
@@ -41,20 +46,23 @@
   --ink: #1b1d1f;
   --text: #1b1d1f;
   --text-2: #4a4d50;
-  --text-3: #686c70;
+  --text-3: #5f6367;
   --text-faint: #8b8f93;
   /* 顶光：页面最上方 340px 蒙一层白，屏幕不再是均匀的一块涂料。 */
   --page-art: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0) 340px),
     var(--bg);
 
   /* ---------- 强调色：三条线各管一件事 ----------
-     --accent 水系蓝＝可交互（按钮、选中、链接、焦点）；
+     --accent 珊瑚＝可交互（按钮、选中、链接、焦点）；
      --ember 主干道橙＝氛围与费用，绝不上到可点控件上，否则两个强调色抢同一层注意力；
      六个 ramp 色相＝信息编码（第几天、费用分类），不承担「能点」的暗示。 */
-  --accent: #2f6a99;
-  --accent-strong: #24517a;
-  --accent-soft: #eef2f5;
-  /* 压在 --accent 实心上的字色：亮色是白字（5.77:1 AA），深色主题下 accent 变亮蓝，
+  --accent: #d93a1d;
+  --accent-strong: #b3310f;
+  --accent-soft: #ffe9e3;
+  /* 果冻按钮的底影：主按钮的下沿是一条 4px 的深珊瑚实心影（F 的 .btn-p），
+     按下时它收成 2px、按钮整体沉下去——这颗按钮的「厚度」就是它。 */
+  --accent-deep: #a62c10;
+  /* 压在 --accent 实心上的字色：亮色是白字（4.59:1 AA），深色主题下 accent 变亮珊瑚，
      白字不够，所以那边换成近黑的墨。 */
   --accent-ink: #ffffff;
   /* 主干道橙降到低饱和档（#ba8a53）。它当正文只有 3.07:1，所以正文一律走深档
@@ -161,15 +169,58 @@
   --danger-border: #e47979;
   --code-bg: rgba(20, 22, 24, 0.06);
 
+  /* ---------- 玻璃层（F 皮肤的手术式清单） ----------
+     照片背景铺满之后，「浮在照片上的件」用一层半透明白 + 模糊。这是**清单制**：
+     只有顶栏、页签容器、弹窗、抽屉、地图控件、底部 dock、悬浮面板这几类进清单，
+     铺在照片上的大块内容区（行程页左栏、卡片网格）不进——iOS Safari 大面积 blur
+     掉帧有先例（WebKit 319187），而且大块内容区里的三级文字要压在 .72 上也到不了 AA。
+     白边（--glass-border）是 F 的脸面：玻璃块的轮廓是一条白线，不是墨线。
+     两档 α 是按「六张壁纸最暗的像素」（p0.5 已到近黑，判据 docs/_pback-floor.mjs）
+     反解的，不是抄 mock 的 .72：mock 只看了观感，没算过字。规则是硬的——
+       --glass（.76）其上最小字色 = --text-2（压纯黑照片也 4.7:1），**禁 --text-3**；
+       --glass-dense（.88）允许 --text-3（压纯黑照片 4.58:1）。
+     顶栏与 dock 落在纱罩最重的那两条带上，实际底比纯黑亮得多，用标准档；屏幕中部的
+     弹窗、抽屉、悬浮面板用密档（先例见 docs/F-BG3-2026.html 的 .dlg/.tb/.inp）。 */
+  --glass: rgba(255, 255, 255, 0.76);
+  --glass-dense: rgba(255, 255, 255, 0.88);
+  --glass-border: rgba(255, 255, 255, 0.85);
+  --glass-blur: blur(16px) saturate(170%);
+
+  /* ---------- 糖果瓷砖（表达层，只给首页那五格数据用） ----------
+     与六个 ramp 分开：ramp 是信息色（第几天、费用分类），这一组是表达色（首页门面），
+     只出现在 HomeHero 的数据带上。亮档是 mock 的 t-a..t-d 四块 + 一格天青
+     （第五格给「出行清单」，四块不够分）；数字一律 26px/800 的大字档，
+     所以 ink 只需过 3:1（大字）——实测最紧的一块 3.9:1。
+     深色档翻成深底 + 亮字，数值同样过线（判据在 docs/_fskin-check.mjs）。 */
+  --candy-1: #ffe9e3;
+  --candy-1-ink: var(--accent);
+  --candy-2: #e6f8f2;
+  --candy-2-ink: #0f8d7f;
+  --candy-3: #fff5d6;
+  --candy-3-ink: #8a5a00;
+  --candy-4: #efeaff;
+  --candy-4-ink: #5a45d6;
+  --candy-5: #dceafb;
+  --candy-5-ink: #1b5e93;
+  /* 封面卡上的城市胶囊：柠黄一块，压在照片上，所以两档主题都不反色（同 --photo-scrim）。 */
+  --city-chip: #ffcf3d;
+  --city-chip-ink: #3d2a00;
+  /* 「选中」的实心块：页签里的当前那一格、手机 dock 的当前那一项（mock 的 .tab.on 与
+     .dock button.on）。F 里选中不是「染上强调色」而是「翻成一块墨」——深色态自然反相
+     成一块亮片。 */
+  --chip-on: #131417;
+  --chip-on-ink: #ffffff;
+
   /* ---------- 阶：半径 ----------
-     定案口径是 6 / 8 / 16 三档：芯片与标签 6、控件 8、卡片 16，浮层只比卡片高一档。
-     五档封顶，不许发明中间值。原来全站 25 处硬编码 999px 全收进 --radius-pill。 */
-  --radius-xs: 6px;
-  --radius-sm: 8px;
-  --radius: 16px;
-  --radius-lg: 20px;
+     F 换皮后整排上浮一档（mock 的口径是「控件 15、卡 26、浮层 30」，见 .k-bd 的
+     --r-card/--r-ctl）：芯片与标签 10、控件 14、卡片 24、浮层 28。仍是五档封顶，
+     不许发明中间值。原来全站 25 处硬编码 999px 全收进 --radius-pill。 */
+  --radius-xs: 10px;
+  --radius-sm: 14px;
+  --radius: 24px;
+  --radius-lg: 28px;
   /* 只给贴边的大浮层用（底部抽屉的顶部圆角）。按钮和输入框永远不许碰这一档。 */
-  --radius-xl: 22px;
+  --radius-xl: 32px;
   --radius-pill: 999px;
 
   /* ---------- 阶：间距 ----------
@@ -206,23 +257,24 @@
 
   /* ---------- 阶：阴影 ----------
      三段式软影：第一段是「贴着纸的那 1px」，第二段负责散开，第三段负责把重量推开。
-     口径是「轻盈的悬浮感，而不是厚重的投影」，所以第三段一律带负 spread、透明度不超过 .2。
-     色调跟中性阶走同一支墨（20,22,24），压在暖灰纸上不会发脏。
-     硬偏移那一档（贴纸的 2px/3px 实心影）已经废掉：--shadow-lift 只剩「抬起的软影」，
-     1px 的位移交给 transform 做，hover 不许再靠阴影变厚来表态。 */
-  --shadow-sm: 0 1px 1px rgba(20, 22, 24, 0.03), 0 1px 3px -1px rgba(20, 22, 24, 0.05);
-  --shadow-md: 0 1px 1px rgba(20, 22, 24, 0.03), 0 2px 6px -2px rgba(20, 22, 24, 0.06),
-    0 8px 16px -10px rgba(20, 22, 24, 0.1);
-  --shadow-lg: 0 1px 1px rgba(20, 22, 24, 0.03), 0 2px 6px -2px rgba(20, 22, 24, 0.06),
-    0 18px 32px -20px rgba(20, 22, 24, 0.16);
-  --shadow-pop: 0 1px 1px rgba(20, 22, 24, 0.03), 0 4px 10px -4px rgba(20, 22, 24, 0.08),
-    0 24px 44px -22px rgba(20, 22, 24, 0.2);
-  --shadow-modal: 0 2px 2px rgba(20, 22, 24, 0.04), 0 10px 24px -8px rgba(20, 22, 24, 0.12),
-    0 44px 88px -28px rgba(20, 22, 24, 0.26);
+     口径是「轻盈的悬浮感，而不是厚重的投影」，所以第三段一律带负 spread。
+     色调从灰墨换成带紫的墨（35,28,55）——F 的配方（0 14px 32px -20px rgba(35,28,55,.3)），
+     压在暖白纸上像一层薄荷糖的糖霜，而不是烟灰。
+     硬偏移那一档仍然只为果冻主按钮保留（--accent-deep 那 4px 底影是它的「厚度」）；
+     其余一切 hover 抬起只走软影一档加 transform: translateY(-1px)，不许靠阴影变厚表态。 */
+  --shadow-sm: 0 1px 1px rgba(35, 28, 55, 0.04), 0 2px 6px -2px rgba(35, 28, 55, 0.08);
+  --shadow-md: 0 1px 1px rgba(35, 28, 55, 0.03), 0 6px 16px -8px rgba(35, 28, 55, 0.14),
+    0 14px 32px -20px rgba(35, 28, 55, 0.3);
+  --shadow-lg: 0 2px 4px -1px rgba(35, 28, 55, 0.05), 0 12px 24px -10px rgba(35, 28, 55, 0.16),
+    0 24px 48px -24px rgba(35, 28, 55, 0.34);
+  --shadow-pop: 0 4px 10px -4px rgba(35, 28, 55, 0.12), 0 18px 36px -18px rgba(35, 28, 55, 0.26),
+    0 30px 64px -28px rgba(35, 28, 55, 0.4);
+  --shadow-modal: 0 2px 2px rgba(35, 28, 55, 0.05), 0 16px 40px -12px rgba(35, 28, 55, 0.2),
+    0 44px 88px -28px rgba(35, 28, 55, 0.42);
   /* hover 抬起：只有软影变深一档，位移由 transform: translateY(-1px) 负责。 */
-  --shadow-lift: 0 2px 6px -2px rgba(20, 22, 24, 0.1), 0 10px 20px -12px rgba(20, 22, 24, 0.16);
+  --shadow-lift: 0 8px 20px -10px rgba(35, 28, 55, 0.2), 0 16px 32px -16px rgba(35, 28, 55, 0.24);
   /* 内高光：所有实心块的顶部一条亮线，把「塑料按钮」变成「有厚度的物件」。 */
-  --edge: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  --edge: inset 0 1px 0 rgba(255, 255, 255, 0.8);
 
   /* z 阶梯：局部下拉 → 浮动条 → 遮罩对话框 → 导航 → 通知 → 模态 → toast。
      toast 恒在最上：op 的失败回执即使叠在抽屉/弹窗里也必须看得见，否则写失败完全无声。 */
@@ -335,11 +387,12 @@
   --surface-2: #212830;
   --surface-3: #2a323b;
   --surface-hover: #242c34;
-  --surface-selected: #16283a;
-  /* 深色态这两枚必须换档，不是继承：纸回到 --surface（与桌面同色，靠发丝边和书脊分），
-     票抬到 --surface-2。照抄亮档的间接引用会让票比纸还暗一档，「浮起来」当场变成「按进去」。 */
-  --paper: var(--surface);
-  --ticket: var(--surface-2);
+  --surface-selected: #2e1712;
+  /* 深色态这两枚换的仍是「方向」不是档位：夜里没有白纸可叠，两枚都改成白色叠加
+     （纸 8%、票 13%）——「票比纸亮」在深色里就是「票那层白叠得更多」。
+     照抄亮档的间接引用会让票比纸还暗一档，「浮起来」当场变成「按进去」。 */
+  --paper: rgba(255, 255, 255, 0.08);
+  --ticket: rgba(255, 255, 255, 0.13);
   --border: rgba(255, 255, 255, 0.1);
   --border-faint: rgba(255, 255, 255, 0.07);
   --hairline: rgba(255, 255, 255, 0.12);
@@ -350,12 +403,32 @@
   --text-faint: #74818c;
   --page-art: linear-gradient(180deg, rgba(255, 255, 255, 0.045),
       rgba(255, 255, 255, 0) 340px), var(--bg);
-  /* 深色下 accent 走亮一档的钢蓝（低饱和那支在夜纸上会显得发闷），实心上的字换成近黑的墨：
-     实测 #0b1015 压 #7fb4e0 是 8.65:1，白字压它只有 2.4:1。正文级的蓝用 --accent-strong。 */
-  --accent: #7fb4e0;
-  --accent-strong: #9cc4e4;
-  --accent-soft: #16283a;
-  --accent-ink: #0b1015;
+  /* 深色下 accent 走亮一档的珊瑚（深珊瑚在夜纸上会发闷），实心上的字换成近黑的墨：
+     实测 #2a0f04 压 #ff8a6d 是 7.8:1，白字压它只有 2.4:1。正文级的珊瑚用 --accent-strong。
+     果冻底影在深色里仍是「比按钮面更深」的一条：#c9431f。 */
+  --accent: #ff8a6d;
+  --accent-strong: #ffb09a;
+  --accent-soft: #38190f;
+  --accent-ink: #2a0f04;
+  --accent-deep: #c9431f;
+  /* 深色玻璃：夜纸上的浮层。同一套反解，但最坏底反过来是亮照片（白）：
+     0.82 档上 --text-2 过 4.5，0.93 档上才放 --text-3。 */
+  --glass: rgba(28, 33, 39, 0.82);
+  --glass-dense: rgba(25, 30, 35, 0.93);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  /* 糖果瓷砖翻成深底 + 亮字（数字是大字档，只需 3:1；实测最低 4.9:1）。 */
+  --candy-1: #35170f;
+  --candy-1-ink: #ff9c82;
+  --candy-2: #0f2b26;
+  --candy-2-ink: #4fd6b8;
+  --candy-3: #33280e;
+  --candy-3-ink: #e8bb42;
+  --candy-4: #241d3d;
+  --candy-4-ink: #b3a4ff;
+  --candy-5: #12263c;
+  --candy-5-ink: #6fb3e8;
+  --chip-on: #e9eef3;
+  --chip-on-ink: #12161a;
   /* 橙在深底上同样降饱和：实心档 #c9a173（近黑墨压它 7.43:1，白字 2.38:1 不许用），
      正文档 #d9a86f 压页面底 8.47:1。 */
   --ember: #c9a173;
@@ -428,6 +501,14 @@ body,
   margin: 0;
 }
 
+/* 层叠上下文收在 #app 里（同 .hero 的做法）：照片背景用负 z-index 垫在内容底下，
+   不收的话负 z 会一路穿到画布，顺手把 body 底面上交画布的那条链也带上——只要 <html>
+   上有任何背景（2026-10-09 就被 scoped 编译器把 `:global(html[data-theme='dark']) .x`
+   拍平成裸 html 背景踩过一次），深色态整片照片会被 body 的底面盖死。 */
+#app {
+  isolation: isolate;
+}
+
 /* 框架高度必须是 dvh：iOS 的地址栏一收放，`100%` 链算出来的仍是「大视口」，
    底部 dock 会整条滑到工具栏背后（此前只有 --place-sheet-h 和 AppModal 用了
    dvh，等于全 App 的宪法没改）。不认识 dvh 的老浏览器保持 100%，行为不变。 */
@@ -459,54 +540,11 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ---------- 环境层：会动的纸面 ----------
-   一块均匀的底色读起来就是「后台系统的一块涂料」。这里补两层：三团极慢漂移的柔光，
-   和一层淡到几乎看不见的同心等高线（地图的味道）。两团都不参与命中，也不带自己的颜色——
-   全部从 --accent / --ramp-2 / --ember 用 color-mix 派生，所以换肤与深色态自动跟上。
-
-   负 z-index 能压在内容之下、画布底色之上，靠的是 body 的 background 被提升到画布：
-   画布永远最先画，之后才是根元素的负层级子节点。 */
-body::before {
-  position: fixed;
-  inset: -18%;
-  z-index: -2;
-  pointer-events: none;
-  content: "";
-  background:
-    radial-gradient(38vmax 30vmax at 12% 10%,
-      color-mix(in srgb, var(--accent) 15%, transparent), transparent 62%),
-    radial-gradient(32vmax 26vmax at 86% 16%,
-      color-mix(in srgb, var(--ramp-2) 13%, transparent), transparent 60%),
-    radial-gradient(30vmax 28vmax at 62% 96%,
-      color-mix(in srgb, var(--ember) 11%, transparent), transparent 62%);
-  animation: ambient-drift 54s var(--ease-inout) infinite alternate;
-}
-
-/* 等高线只用 --border-faint，所以两种主题下都是「有但不出声」的那一档；
-   mask 把它收在上方 70%，越往下越干净，正文所在的下半屏不会被搅脏。 */
-body::after {
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  content: "";
-  mask-image: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.35) 46%, transparent 78%);
-  background:
-    repeating-radial-gradient(circle at 18% 20%,
-      transparent 0 27px, var(--border-faint) 27px 28px),
-    repeating-radial-gradient(circle at 84% 62%,
-      transparent 0 35px, var(--border-faint) 35px 36px);
-}
-
-@keyframes ambient-drift {
-  from {
-    transform: translate3d(-2.5%, -1.5%, 0) scale(1);
-  }
-  to {
-    transform: translate3d(3%, 2.5%, 0) scale(1.08);
-  }
-}
-
+/* ---------- 环境层 ----------
+   2026-10-09 起这里不再自己画：旧的「三团糖果光斑 + 等高线」两层（曾是 body::before/::after）
+   已被全屏照片背景取代，实现在 components/PhotoBackdrop.vue（定案与参数见
+   docs/F-BG3-2026.html 的 P1）。层次关系不变——负 z-index 压在内容之下、画布底色之上，
+   靠的是 body 的 background 被提升到画布：画布永远最先画，之后才是根元素的负层级子节点。 */
 /* 标题走 display 面并把字距收紧——字号大而不收，就是后台系统的第一特征。 */
 h1,
 h2,
@@ -567,15 +605,23 @@ textarea {
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* 果冻主按钮（F 的 .btn-p）：珊瑚实心 + 一条 4px 的深珊瑚底影，像一颗糖。
+   hover 抬 1px、底影长到 5px；按下沉 2px、底影收成 2px——「厚度」就是它的全部状态，
+   面色不翻（珊瑚是这颗按钮的身份，翻暗了底下那条边影就不像糖了）。 */
 .btn--primary {
   border-color: transparent;
   background: var(--accent);
   color: var(--accent-ink);
-  --btn-shadow: var(--shadow-sm), var(--edge);
+  font-weight: 700;
+  --btn-shadow:
+    0 4px 0 var(--accent-deep),
+    var(--edge);
 }
 .btn--primary:hover:not(:disabled) {
-  background: var(--accent-strong);
-  --btn-shadow: var(--shadow-lift), var(--edge);
+  background: var(--accent);
+  --btn-shadow:
+    0 5px 0 var(--accent-deep),
+    var(--edge);
 }
 /* 会丢数据的确认按钮：整块染 --accent 会把「accent = 可逆交互」这条信号用废，
    所以描边换成 danger，底色停在 danger-soft；hover 反相成实心。
@@ -595,6 +641,13 @@ textarea {
   --btn-shadow: var(--edge);
   transform: translateY(0);
 }
+/* 果冻按钮的按下必须写在通用 .btn:active 之后：两者权重相同（0,3,0），靠后来者胜出。 */
+.btn--primary:active:not(:disabled) {
+  --btn-shadow:
+    0 2px 0 var(--accent-deep),
+    var(--edge);
+  transform: translateY(2px);
+}
 .btn--sm {
   padding: 4px 9px;
   font-size: var(--t-meta);
@@ -605,7 +658,9 @@ textarea {
   --btn-shadow: none;
 }
 .btn--ghost:hover:not(:disabled) {
-  background: var(--surface-2);
+  /* 悬停底色走「正文 8% 的洗」而不是实心 surface-2：幽灵按钮横跨玻璃栏、卡片、
+     照片边角三种底，半透明洗自动跟着底色走，实心块在玻璃上会显出一块补丁。 */
+  background: color-mix(in srgb, var(--text) 8%, transparent);
   --btn-shadow: none;
   transform: none;
 }
@@ -629,7 +684,7 @@ textarea {
 }
 .iconbtn:hover:not(:disabled) {
   color: var(--text);
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
   transform: translateY(-1px);
 }
 .iconbtn:active:not(:disabled) {
@@ -712,11 +767,15 @@ textarea {
   letter-spacing: var(--ls-label);
   color: var(--text-2);
 }
+/* 输入框＝玻璃板上的一块亮井（F 的 .inp）：白线勾边 + 内高光，聚焦时换成珊瑚线
+   加一圈珊瑚浅底光环（mock 的 .inp.focus 是同一套）。底色的最坏情况是压暗底照片，
+   --glass 的可读性账见 :root 的玻璃段——正文与值都在 --text 一档，够。
+   个别落在实心白卡上的输入框（行程页的日期格这类）若白线失形，在组件里本地补描边。 */
 .input {
-  padding: 8px 10px;
-  border: 1px solid var(--border);
+  padding: 9px 11px;
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: var(--glass);
   box-shadow: var(--edge);
   outline: none;
   transition:
@@ -735,6 +794,19 @@ textarea {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-md);
+}
+
+/* 玻璃块：只给「浮在照片上的件」用，清单与理由见 :root 的 --glass 段。
+   用法是在组件里加 class="glass"（全局类，不受 scoped 影响）；块内会出现 --text-3
+   小字的换 --glass-dense（同一条命令：`.glass--dense`）。圆角由调用方自己给。 */
+.glass {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+.glass--dense {
+  background: var(--glass-dense);
 }
 
 .muted {
@@ -806,6 +878,11 @@ textarea {
   display: flex;
   flex: 1;
   min-height: 0;
+  /* F 换皮（量自 mock 的 .panel / .mapbox）：栏和地图不再贴到窗口边上，改成两块浮在照片上
+     的圆角卡——mock 的结构是「两侧 22 / 底下 14 / 缝 14」，这里折成本页自己的栏缝节奏：
+     一圈 12，和海报头的 margin 同读。底下这一圈同时把地图原有的右下直角收掉。 */
+  gap: 12px;
+  padding: 12px;
 }
 .panel {
   display: flex;
@@ -815,17 +892,25 @@ textarea {
      地址能把整栏撑到 510。这一栏的宽度是设计值，不由某一行文字决定。 */
   min-width: 0;
   min-height: 0;
-  /* 纸的齿痕：一层 180px 的湍流噪点。刻意做成 .panel 自己的背景而不是盖在内容上的
-     伪元素——那要给 .panel 加 position: relative，会把栏内所有绝对定位的后代悄悄改锚。
-     tile 本身已经把亮度映到 0.82–1.0 并把 alpha 强制成 1，所以不需要 mix-blend-mode：
-     压在纯白上 overlay 是恒等操作（backdrop=1 时结果恒为 1），照抄别处的参数会一动不动。
-     但 alpha=1 意味着这一层必须用 background-blend-mode 和底色「乘」出来——直接铺会把
-     面板底色整个盖掉，深色态下等于把一块夜纸刷成白纸。 */
-  background:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n' color-interpolation-filters='sRGB'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeColorMatrix type='matrix' values='0.3 0 0 0 0.82 0 0.3 0 0 0.82 0 0 0.3 0 0.82 0 0 0 0 1'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E") 0 0 / 180px 180px,
-    var(--surface);
-  background-blend-mode: multiply;
-  border-right: 1px solid var(--border);
+}
+
+/* F 换肤只给行程栏这一份：这一栏从「实心暖纸 + 噪点」改成一块铺在照片上的玻璃。它**不进
+   blur 清单**——背后的照片一直在缓推，大面积 backdrop-filter 会把每一帧都变成一次全区域模糊；
+   0.76 的 α 是按 `--glass` 那一段反解过的，栏内最低一档字色 --text-2 压纯黑照片也过 4.5。
+   旧的 180px 噪点跟着「纸」一起退了：那层的 alpha 被钉成 1（见其原始注释），和半透明
+   底色不可兼得，而玻璃面本身已经有照片当纹理。
+   原先只有右缘一条白线，现在整块收成一张圆角卡（mock 的 .panel 是同一条规矩）：四边
+   白线勾轮廓（--glass-border）+ 一层轻影，横向那圈缝改由 .shell__body 管。
+   圆角必须真裁进去（`clip` 不建滚动容器——`hidden` 会，见 .edit__foot 的前提），
+   否则滚到卡片边界时方角会从圆角外探出去。
+   皮肤挂在 `.shell__body` 下是有意的：登录页右半也用 `panel` 这个类名，它要的恰恰是
+   没有底色（见 LoginView），别让行程栏的玻璃把它一起染白。 */
+.shell__body .panel {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  overflow: clip;
 }
 .panel__scroll {
   flex: 1;
@@ -834,16 +919,25 @@ textarea {
      主滚动容器横向必须钉死。 */
   overflow: hidden auto;
 }
-/* 一栏里同时摆四五张卡时，每张都带 --shadow-md 就等于没有层次——糊影会互相叠。
-   面板内的卡一律降一档，靠描边分层；浮层（卡片菜单、顶栏菜单、地图选点）不在
-   `.panel` 里，仍然拿重影把自己从内容上抬起来。 */
+/* 面板内的卡（天卡、清单、费用）统一成同一块玻璃纸：半透明白底 + 白线勾边 + 降一档的影。
+   一栏里同时摆四五张卡时，每张都带 --shadow-md 就等于没有层次——糊影会互相叠，所以面板内
+   一律靠白边分层；浮层（卡片菜单、顶栏菜单、地图选点）不在 `.panel` 里，仍然拿重影把自己
+   从内容上抬起来。`--paper` 是角色令牌，深色态会自己翻成「比栏面亮一档」的白色叠加。 */
 .panel .card {
+  background: var(--paper);
+  border-color: var(--glass-border);
   box-shadow: var(--shadow-sm);
 }
 .map-host {
   position: relative;
   flex: 1;
   min-width: 0;
+  /* 地图也收成一张圆角卡（mock 的 .mapbox：26px + 1px 白线 + 卡影）。高德画布铺满整个
+     盒子，圆角只能靠裁：同 .panel 用 `clip`，不为这一圈边建出滚动容器。 */
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  overflow: clip;
 }
 
 /* ---------- 手机：上下文切换（行程 / 地图） ---------- */
@@ -855,13 +949,27 @@ textarea {
 }
 
 @media (max-width: 860px) {
+  /* 手机端回到通铺：mock 的手机画面里栏面就是整屏，dock 通栏，没有桌面上那圈缝。
+     选择器必须带 `.shell__body`：上面那层桌面皮肤是 `.shell__body .panel`（0,2,0），
+     裸写 `.panel`（0,1,0）就算排在文件更后面也压不住它——圆角、白线、卡影会全留在
+     通铺上（实测 860px 处 panelRadius=28px）。`.map-host` 同理，一起跟住同一层作用域，
+     别让这条覆盖只靠源码顺序赢。 */
   .shell__body {
     flex-direction: column;
+    gap: 0;
+    padding: 0;
   }
-  .panel {
+  .shell__body .panel {
     flex: 1 1 auto;
     width: 100%;
-    border-right: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .shell__body .map-host {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
   }
   .shell__body.map-open .panel {
     display: none;
@@ -877,8 +985,12 @@ textarea {
     height: calc(var(--dock-h) + var(--sab));
     align-items: stretch;
     padding: 8px 12px calc(8px + var(--sab));
-    background: var(--surface);
-    border-top: 1px solid var(--border);
+    /* mock 的 .dock：半透明白 + 白线顶边。它落在纱罩最重的那条带上，标准档够——
+       文字只有按钮里那几行，压最坏底也是 --text-2 一档。 */
+    background: var(--glass);
+    border-top: 1px solid var(--glass-border);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
   }
   .mobile-switch__btn {
     flex: 1;
@@ -889,14 +1001,17 @@ textarea {
     font-size: calc(14px * var(--fs-scale));
     font-weight: 600;
     color: var(--text-2);
-    background: var(--surface-2);
+    /* 按钮比整条 dock 再透一点（mock 是 .55 对 .6）：非选中态就是「一条玻璃上的玻璃格」，
+       选中态才翻成实心。 */
+    background: color-mix(in srgb, var(--glass) 72%, transparent);
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
   }
+  /* 选中＝翻成一块墨（mock 的 .dock button.on），和页签、分段控件同一条规矩。 */
   .mobile-switch__btn--on {
-    color: var(--accent-strong);
-    background: var(--accent-soft);
-    border-color: var(--accent);
+    color: var(--chip-on-ink);
+    background: var(--chip-on);
+    border-color: transparent;
   }
 }
 

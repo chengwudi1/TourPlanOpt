@@ -72,6 +72,8 @@ function choose(poi: Poi) {
 }
 
 function onKeydown(event: KeyboardEvent) {
+  // 输入法正拿着回车/上下键选候选词：这里再解释一遍就会在中途选走一个搜索结果。
+  if (event.isComposing) return
   if (!open.value) return
   if (event.key === 'ArrowDown') {
     event.preventDefault()
@@ -155,9 +157,10 @@ onBeforeUnmount(() => {
   align-items: center;
   height: 38px;
   padding: 0 12px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius);
+  box-shadow: var(--edge);
   transition:
     background var(--dur-fast) var(--ease),
     border-color var(--dur-fast) var(--ease),
@@ -165,7 +168,7 @@ onBeforeUnmount(() => {
 }
 
 .search__bar:focus-within {
-  background: var(--surface);
+  background: var(--glass-dense);
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
@@ -178,6 +181,7 @@ onBeforeUnmount(() => {
   background: none;
   border: 0;
   border-radius: 0;
+  box-shadow: none;
 }
 
 .search--bare .search__bar:focus-within {
@@ -230,10 +234,12 @@ onBeforeUnmount(() => {
   margin: 0;
   overflow-y: auto;
   list-style: none;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--glass-dense);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-md);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 
 .search__item {
@@ -260,7 +266,7 @@ onBeforeUnmount(() => {
 }
 
 .search__stash:hover {
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
 }
 
 .search__item--active {

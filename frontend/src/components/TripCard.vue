@@ -245,15 +245,15 @@ onBeforeUnmount(closeMenu)
   text-align: left;
 }
 
+/* 无照片封面走珊瑚浅底（F 的糖果系），小路线图是珊瑚墨线——跟果冻按钮同一族色。 */
 .tripcard__cover {
   position: relative;
   display: grid;
   place-items: center;
   height: 92px;
   overflow: hidden;
-  color: var(--ember-deep);
-  background: linear-gradient(135deg, var(--ember-soft), var(--surface-2));
-  border-bottom: 1px solid var(--border-faint);
+  color: var(--accent);
+  background: linear-gradient(135deg, var(--accent-soft), var(--surface-2));
 }
 
 .tripcard__cover--photo {
@@ -348,7 +348,7 @@ onBeforeUnmount(closeMenu)
   padding: 1px 7px;
   font-size: var(--t-micro);
   color: var(--text-2);
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
   border: 1px solid var(--border-faint);
   border-radius: var(--radius-pill);
 }
@@ -436,7 +436,7 @@ onBeforeUnmount(closeMenu)
     color var(--dur-fast) var(--ease);
 }
 .tripcard__menu-item:hover {
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 .tripcard__menu-item .ic {
   color: var(--text-3);

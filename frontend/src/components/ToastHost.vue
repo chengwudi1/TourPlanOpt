@@ -71,8 +71,8 @@ function runAction(toast: Toast) {
   animation: rise-in var(--dur-slow) var(--ease-out) backwards;
 }
 .toast--info {
-  background: var(--surface);
-  border-color: var(--border);
+  background: var(--glass-dense);
+  border-color: var(--glass-border);
 }
 .toast--danger {
   background: var(--danger-soft);
@@ -87,12 +87,12 @@ function runAction(toast: Toast) {
   font-size: calc(12px * var(--fs-scale));
   font-weight: 600;
   color: var(--accent-strong);
-  background: var(--surface);
+  background: var(--glass);
   border: 1px solid var(--accent);
   border-radius: var(--radius-pill);
 }
 .toast__action:hover {
-  background: var(--surface-hover);
+  background: var(--glass-dense);
 }
 .toast__close {
   flex: none;
@@ -107,7 +107,7 @@ function runAction(toast: Toast) {
 }
 .toast__close:hover {
   color: var(--text);
-  background: var(--surface-3);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
 @media (max-width: 860px) {

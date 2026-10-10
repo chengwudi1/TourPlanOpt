@@ -318,17 +318,24 @@ export const useTripStore = defineStore('trip', () => {
     }
   }
 
+  // 后发先至：快速切换行程时，旧行程的响应可能晚到，把 A 的快照整份写进共享 store——
+  // 屏幕上却已经是 B。只让最新一次 load 落地；旧请求照旧抛错给调用方，但不许碰 store。
+  let loadSeq = 0
+
   async function load(tripId: string) {
+    const seq = ++loadSeq
     loading.value = true
     loadError.value = null
     try {
-      applySnapshot(await apiFetch<Snapshot>(`/api/trips/${encodeURIComponent(tripId)}`))
+      const snap = await apiFetch<Snapshot>(`/api/trips/${encodeURIComponent(tripId)}`)
+      if (seq !== loadSeq) return
+      applySnapshot(snap)
       void registerSelf()
     } catch (err) {
-      loadError.value = describe(err)
+      if (seq === loadSeq) loadError.value = describe(err)
       throw err
     } finally {
-      loading.value = false
+      if (seq === loadSeq) loading.value = false
     }
   }
 
@@ -869,6 +876,9 @@ export const useTripStore = defineStore('trip', () => {
 
   /** 拖动结果：发整条有序 id 数组，与 day_reorder 同一套规矩（不发送增量）。 */
   function reorderChecklist(orderedIds: string[]) {
+    // 与 reorderDay 同款守卫：含未落地的乐观行时服务端必然整批拒（数组对不上现有 id 集），
+    // 还误报「清单已被调整」。跳过这次整序，那笔新增落地广播时会用权威 item_ids 重建顺序。
+    if (orderedIds.some((id) => id.startsWith('tmp-'))) return
     applyChecklistOrder(orderedIds)
     useSocketStore().sendOp(Ops.CHECKLIST_REORDER, { item_ids: orderedIds })
   }

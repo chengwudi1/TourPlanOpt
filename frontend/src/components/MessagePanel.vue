@@ -260,18 +260,23 @@ watch(
   (bounced) => {
     if (!bounced) return
     store.chatBounced = null
-    if (!props.active) return
+    // 先放回输入框，再决定抢不抢焦点：宽屏宿主切走页签只是 v-show 藏起来，回执落在
+    // 藏着的页签上照样得还回去（切回来就能看见那句话还躺在框里）。
     draft.value = bounced.text
     anchor.value = bounced.ref_place_id
       ? { placeId: bounced.ref_place_id, dayId: '' }
       : bounced.ref_day_id
         ? { placeId: '', dayId: bounced.ref_day_id }
         : null
+    if (!props.active) return
     void nextTick(() => {
       grow()
       draftEl.value?.focus()
     })
   },
+  // 窄屏宿主是 v-if 的：抽屉关着的时候回执到了，组件整棵不在、没人接。immediate 让
+  // 重新打开抽屉的那次挂载把还压在 store 里的那句话捞回来。
+  { immediate: true },
 )
 
 /** 卡片菜单上那句「说一句」：把这一站挂到输入框，并把光标送到话上。 */
@@ -663,7 +668,8 @@ onBeforeUnmount(clearEcho)
   position: relative;
   max-width: min(80%, 460px);
   padding: 6px 10px;
-  background: var(--surface-2);
+  /* 对方的气泡＝玻璃卡上的一小片浅灰洗色（实色 --surface-2 会是一块不透明补丁）。 */
+  background: color-mix(in srgb, var(--text) 7%, transparent);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-sm) var(--radius-sm) var(--radius-sm) 3px;
 }
@@ -744,7 +750,7 @@ onBeforeUnmount(clearEcho)
   padding: 4px 10px;
   font-size: calc(12px * var(--fs-scale));
   color: var(--accent-strong);
-  background: var(--surface);
+  background: var(--glass-dense);
   border: 1px solid var(--accent);
   border-radius: var(--radius-pill);
   box-shadow: var(--shadow-sm);
@@ -839,7 +845,7 @@ onBeforeUnmount(clearEcho)
   width: 30px;
   height: 30px;
   color: var(--text-2);
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
   border: 1px solid var(--hairline);
   border-radius: 50%;
   cursor: pointer;

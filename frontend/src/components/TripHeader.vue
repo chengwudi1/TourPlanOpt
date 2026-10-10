@@ -453,14 +453,26 @@ onBeforeUnmount(() => {
   flex: 0 0 var(--header-total-h);
   height: var(--header-total-h);
   padding: var(--sat) 12px 0;
-  background: var(--surface);
+  /* F 的 .tb：顶栏是一块压在照片上的玻璃。mock 那里 α 只有 .6，我们收在 --glass 的
+     0.76——顶栏横跨全屏、上面全是小字，0.76 是「--text-2 压纯黑照片也过 4.5」
+     反解出来的那一档。blur 属于手术清单（顶栏）。底边留墨发丝线而不是白线：
+     白线在照片上勾不出「栏到哪里为止」——这一条要回答的是「内容从哪开始滚」。 */
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
   border-bottom: 1px solid var(--border);
-  box-shadow: var(--shadow-sm);
 }
 
+/* 顶栏上唯一常驻的导航键借 F 的玻璃格：白线勾边的半透明块，与窄屏 dock 上的
+   按钮同一套（--glass 的 72% 掺水）。实心奶白圆在玻璃栏上是一块不透明的补丁。 */
 .triphead__back {
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--glass) 72%, transparent);
+  border-color: var(--glass-border);
   border-radius: 50%;
+}
+
+.triphead__back:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--glass) 92%, transparent);
 }
 
 /* 行程名是这一屏的主角；品牌字留在首页，这里不占位。 */
@@ -519,20 +531,24 @@ onBeforeUnmount(() => {
 
 .triphead__city {
   flex: 0 0 auto;
-  padding: 1px 8px;
+  /* 1px 白描边吃掉上下各 1px，内距跟着收一档，盒子尺寸与旧版一致。 */
+  padding: 0 7px;
   color: var(--text-2);
-  background: var(--surface-2);
-  border: 0;
+  background: color-mix(in srgb, var(--glass) 80%, transparent);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-pill);
   cursor: pointer;
   transition:
     background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
     color var(--dur-fast) var(--ease);
 }
 
+/* hover 收掉白边、翻成珊瑚浅底（mock 的 .pill.on 就是「on 时 border-color: transparent」）。 */
 .triphead__city:hover {
-  color: var(--accent);
+  color: var(--accent-strong);
   background: var(--accent-soft);
+  border-color: transparent;
 }
 
 .triphead__spacer {
@@ -596,7 +612,8 @@ onBeforeUnmount(() => {
   font-weight: 700;
   color: var(--warp-ink);
   appearance: none;
-  border: 2px solid var(--surface);
+  /* 环色＝顶栏自己的玻璃：头像叠在玻璃上，环就得读同一个底（mock 的 .avs i 同理）。 */
+  border: 2px solid var(--glass);
   border-radius: 50%;
 }
 
@@ -681,6 +698,12 @@ onBeforeUnmount(() => {
   min-width: 208px;
   max-width: min(320px, calc(100vw - 16px));
   padding: 6px;
+  /* 浮层菜单换成重玻璃（与卡片菜单、地图选点同一套）：它悬在内容上，底下一律有字在动，
+     实色 --surface 会把它变成一块和玻璃系统无关的白板。 */
+  background: var(--glass-dense);
+  border: 1px solid var(--glass-border);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 
 .tripmenu__item {
@@ -699,7 +722,7 @@ onBeforeUnmount(() => {
 }
 
 .tripmenu__item:hover {
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
 .tripmenu__item:disabled {

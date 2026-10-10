@@ -62,6 +62,9 @@ const markers = new Map<string, MarkerEntry>()
 const route = shallowRef<RouteOverlays | null>(null)
 /** Sorted id list the fit-view was last computed for. */
 let fittedSignature = ''
+/** 拟合时容器还没有尺寸（窄屏那一格是 `display: none` 挂着的），欠着这一次。 */
+let fitPending = false
+let mapRo: ResizeObserver | null = null
 
 /** geolocation returns WGS-84 -- the project's ONLY coordinate conversion boundary. */
 function locateMe() {
@@ -113,6 +116,22 @@ onMounted(async () => {
   map.value.addControl(new AMap.Scale())
   bindPickHandlers()
   syncMarkers()
+
+  // 容器从 0（display: none）变有尺寸时，把欠着的拟合补上。挑下一帧再动相机：让 SDK 自己
+  // 先把画布换到新尺寸（resizeEnable 已开），否则拟合还是按旧投影算的。
+  mapRo = new ResizeObserver(() => {
+    const el = host.value
+    if (!el || el.clientWidth === 0 || el.clientHeight === 0 || !fitPending) return
+    fitPending = false
+    requestAnimationFrame(() => {
+      const m = map.value
+      if (!m) return
+      // 欠账期间标记可能已被删空（手机上加完又删光）：空数组不许喂给 setFitView。
+      const overlays = m.getAllOverlays('marker')
+      if (overlays.length > 0) m.setFitView(overlays, false, [70, 70, 70, 70])
+    })
+  })
+  mapRo.observe(host.value)
 })
 
 // -- 地图选点（右键 = 桌面，长按 = 触屏）------------------------------------------------
@@ -183,6 +202,8 @@ watch(
 
 onBeforeUnmount(() => {
   clearEcho()
+  mapRo?.disconnect()
+  mapRo = null
   detachPickHandlers?.()
   detachPickHandlers = null
   // 标记 DOM 由地图销毁，但挂进 pill 的 lucide 子树得显式卸载，不然它的 effect 作用域
@@ -405,7 +426,16 @@ function syncMarkers() {
   if (wanted.length > 0 && signature !== fittedSignature) {
     // Refit only when the *set* changes -- not while panning between selections.
     fittedSignature = signature
-    m.setFitView(m.getAllOverlays('marker'), false, [70, 70, 70, 70])
+    const hostEl = host.value
+    if (hostEl && hostEl.clientWidth > 0 && hostEl.clientHeight > 0) {
+      m.setFitView(m.getAllOverlays('marker'), false, [70, 70, 70, 70])
+    } else {
+      // 窄屏上这一格是 `display: none` 挂着的：此刻拟合等于拿 0×0 容器算，视野会被夹在
+      // 最小缩放上（切到「地图」看到的是全省）。欠着，等容器第一次量到尺寸再补（见 onMounted
+      // 的 ResizeObserver）。只欠这一种「此前根本没有尺寸」的账——用户自己拖过的视野不在
+      // 补的范围里。
+      fitPending = true
+    }
   }
 }
 
@@ -616,17 +646,19 @@ defineExpose({
   padding: 7px 12px;
   font-size: calc(13px * var(--fs-scale));
   color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-sm), var(--edge);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
   cursor: pointer;
   transition:
     transform var(--dur) var(--ease),
     background var(--dur) var(--ease);
 }
 .map-panel__locate:hover:not(:disabled) {
-  background: var(--surface-2);
+  background: var(--glass-dense);
   /* 浮层可以挪，瓦片容器不许挪：这 1px 只落在键上。 */
   transform: translateY(-1px);
 }
@@ -660,8 +692,8 @@ defineExpose({
 .map-panel__note {
   padding: 6px 10px;
   color: var(--warn);
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--glass-dense);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
 }
 .map-panel__overlay {

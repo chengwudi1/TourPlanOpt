@@ -91,6 +91,13 @@ function onClosed() {
   pump()
 }
 
+/** 输入法确认候选词的那下回车不是「提交」：preventDefault 还会把它从输入法手里抢走。 */
+function onEnter(e: KeyboardEvent) {
+  if (e.isComposing) return
+  e.preventDefault()
+  submit()
+}
+
 function submit() {
   const entry = active.value
   if (!entry || entry.answered) return
@@ -144,7 +151,7 @@ async function copyManual() {
           :maxlength="promptReq.maxLength"
           autocomplete="off"
           :aria-invalid="error ? 'true' : undefined"
-          @keyup.enter="submit"
+          @keydown.enter="onEnter"
         />
         <span v-if="promptReq.unit" class="dlg__unit">{{ promptReq.unit }}</span>
       </div>

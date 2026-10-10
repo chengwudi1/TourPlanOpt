@@ -235,8 +235,11 @@ onBeforeUnmount(() => {
   overflow: clip;
   height: var(--mast-h);
   margin: 10px 12px 0;
+  /* F 把封面卡收进同一套「白边勾轮廓」：边框换 --glass-border。首页那张大封面按 mock
+     用 6px 半透明白框，这一张（mock 的 .mast 走 --card-bd）是 1px——照片那一圈细白
+     就是 F 里「照片被摆在桌上」的那条边。 */
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
   transition:
@@ -416,10 +419,14 @@ onBeforeUnmount(() => {
   min-width: 0;
   margin: 0 12px 12px;
   padding: 11px 15px;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  /* 票券是浮在照片上的件（与弹窗、抽屉同族）：重玻璃 + blur 把它从会呼吸的照片上
+     收住，小字（--text-2 的统计行）也才站得稳。面积只有一条，不属于大面积禁区。 */
+  background: var(--glass-dense);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
   animation: rise-in var(--dur-entrance) var(--ease-out) calc(var(--stagger) * 3) backwards;
 }
 

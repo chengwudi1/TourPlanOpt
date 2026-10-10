@@ -35,6 +35,12 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
+      // 内置封面走 `/covers/<name>.jpg`（M36 六张）。同样是根绝对路径、同样由后端供，
+      // 漏了它的症状是开发期首页英雄卡与网格卡全是裂图 + alt 文本。
+      '/covers': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
       '/ws': {
         target: 'ws://127.0.0.1:8000',
         ws: true,

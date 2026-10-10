@@ -203,7 +203,8 @@ function choose(url: string) {
   padding: 0;
   overflow: hidden;
   cursor: pointer;
-  background: var(--surface-2);
+  /* 图片加载前的占位面：洗色，不是实色块。 */
+  background: color-mix(in srgb, var(--text) 7%, transparent);
   border: 2px solid transparent;
   border-radius: var(--radius-sm);
 }

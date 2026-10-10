@@ -101,11 +101,13 @@ const who = computed(() => actor(latest.value?.origin ?? ''))
 }
 
 .ot__bar:hover {
-  background: var(--surface-hover);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
 }
 
+/* 展开的那一段借页签条同一档玻璃（--glass 的 72% 掺水）：实色 --surface-2 压在
+   半透明栏面上会是一块跟玻璃系统无关的白补丁。 */
 .ot--open .ot__bar {
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--glass) 72%, transparent);
 }
 
 .ot__ic {
@@ -194,7 +196,7 @@ const who = computed(() => actor(latest.value?.origin ?? ''))
 }
 
 .ot--open .ot__body {
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--glass) 72%, transparent);
 }
 
 .ot__list {

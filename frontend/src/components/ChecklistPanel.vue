@@ -57,6 +57,13 @@ useDragSort(listEl, (ids) => store.reorderChecklist(ids), undefined, {
   ghostClass: 'chk--ghost',
 })
 
+/** 输入法确认候选词的那下回车不是「添加」：preventDefault 还会把它从输入法手里抢走。 */
+function onEnter(e: KeyboardEvent) {
+  if (e.isComposing) return
+  e.preventDefault()
+  submit()
+}
+
 /** 一行一条地粘贴进来，就当成一次批量添加：省得从备忘录里复制十行要点十次。 */
 function submit() {
   const texts = draft.value
@@ -176,7 +183,7 @@ function remove(item: ChecklistItem) {
         type="text"
         maxlength="120"
         placeholder="添加一项，按回车确认；粘贴多行可一次添加多项"
-        @keyup.enter="submit"
+        @keydown.enter="onEnter"
       />
       <button class="btn btn--sm" type="button" :disabled="!draft.trim()" @click="submit">
         添加
@@ -227,7 +234,8 @@ function remove(item: ChecklistItem) {
 }
 
 .check__ring-bg {
-  stroke: var(--surface-3);
+  /* 轨道同一配方（正文洗）；圆环只有 3px 描边，取「标记」那一档的 12% 才立得住。 */
+  stroke: color-mix(in srgb, var(--text) 12%, transparent);
 }
 
 .check__ring-fg {
@@ -262,7 +270,7 @@ function remove(item: ChecklistItem) {
 }
 
 .chk:hover {
-  background: var(--surface-hover);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
 }
 
 /* 拖拽中的占位行压暗，且不跟 hover：跟行卡同一套读法——那是位置，不是可点的东西。 */
@@ -281,7 +289,8 @@ function remove(item: ChecklistItem) {
   height: 20px;
   padding: 0;
   color: transparent;
-  background: var(--surface);
+  /* 方框面走重玻璃那一档：实色 --surface 在半透明卡上是一块补丁。 */
+  background: var(--glass-dense);
   /* 这一枚是全站唯一不许用发丝边的描边：20px 的空方框里没有一个字，可交互性全靠这条线本身，
      而 `--hairline` 压在白纸上只有约 1.25:1，远低于 WCAG 对控件边界的 3:1。
      --text-3 是现有令牌里最浅的一档能过 3:1 的灰（对白 5.3:1、对 --surface-2 4.68:1），

@@ -154,9 +154,11 @@ const mood = computed(() => (speaking.value ? 'talk' : assistant.mood))
   margin: 0;
   padding: var(--s3) var(--s4);
   border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg);
-  background: var(--surface);
-  border: 1.5px solid var(--ink);
+  background: var(--glass-dense);
+  border: 1px solid var(--glass-border);
   box-shadow: var(--shadow-md);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
   font-size: var(--t-meta);
   line-height: var(--lh-body);
   color: var(--text-2);
@@ -171,8 +173,8 @@ const mood = computed(() => (speaking.value ? 'talk' : assistant.mood))
   height: 88px;
   padding: 0;
   border-radius: 50%;
-  background: var(--surface);
-  border: 2px solid var(--ink);
+  background: var(--glass-dense);
+  border: 1px solid var(--glass-border);
   box-shadow: var(--shadow-lg);
   display: grid;
   place-items: center;
@@ -205,7 +207,7 @@ const mood = computed(() => (speaking.value ? 'talk' : assistant.mood))
   background: var(--accent);
   color: var(--accent-ink);
   font: 800 var(--t-micro)/20px var(--font);
-  border: 2px solid var(--surface);
+  border: 2px solid var(--glass-dense);
   animation: pet-pop var(--dur) var(--ease-pop);
 }
 

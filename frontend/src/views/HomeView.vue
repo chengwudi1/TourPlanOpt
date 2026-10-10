@@ -599,6 +599,8 @@ onMounted(() => {
 }
 
 /* ---------- 应用栏 ---------- */
+/* 顶栏是一条横贯屏幕的玻璃（F 的 .tb）：白底 .76 而不是 mock 的 .6——
+   它压在最暗的照片段上也必须托得住 --text-2，账在 :root 的玻璃段。 */
 .homebar {
   position: sticky;
   top: 0;
@@ -610,9 +612,10 @@ onMounted(() => {
   flex: 0 0 var(--header-total-h);
   height: var(--header-total-h);
   padding: var(--sat) 20px 0;
-  background: var(--surface);
+  background: var(--glass);
   border-bottom: 1px solid var(--border);
-  box-shadow: var(--shadow-sm);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 
 .homebar__brand {
@@ -624,8 +627,15 @@ onMounted(() => {
   letter-spacing: 0.01em;
 }
 
+/* 品牌标＝一颗珊瑚圆片（F 的 .brandmark），跟果冻按钮同一块色。 */
 .homebar__mark {
-  color: var(--accent);
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-radius: 50%;
 }
 
 .homebar__right {
@@ -789,7 +799,7 @@ onMounted(() => {
   font-size: var(--t-micro);
   font-weight: 600;
   color: var(--text-2);
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
   border-radius: var(--radius-pill);
 }
 /* 实心用 --ember-deep（深陶土），字用 --ember-deep-ink（白）——不能拿 --ember-ink，
@@ -828,7 +838,7 @@ onMounted(() => {
   gap: 16px;
   align-items: center;
   padding: 24px;
-  background: linear-gradient(140deg, var(--ember-soft), var(--surface) 58%);
+  background: linear-gradient(140deg, var(--accent-soft), var(--surface) 58%);
 }
 
 .welcome__text {
@@ -848,15 +858,6 @@ onMounted(() => {
 
 .welcome__art {
   width: 100%;
-  color: var(--ember);
-  opacity: 0.55;
-}
-
-/* 夜航图是蓝灰的，暖棕块落在首屏会显脏：深色态欢迎卡跟着强调蓝走。 */
-:global(html[data-theme='dark']) .welcome {
-  background: linear-gradient(140deg, var(--accent-soft), var(--surface) 58%);
-}
-:global(html[data-theme='dark']) .welcome__art {
   color: var(--accent);
   opacity: 0.5;
 }
@@ -902,8 +903,14 @@ onMounted(() => {
 }
 
 /* ---------- 侧栏 ---------- */
+/* 侧栏两块是屏幕里的浮层（F 的 .howto）：走玻璃密档——两段里都有 --text-3 的小字，
+   标准玻璃托不住它。padding 学 mock 的 16/18/14。 */
 .side {
-  padding: 14px;
+  padding: 16px 18px 14px;
+  background: var(--glass-dense);
+  border: 1px solid var(--glass-border);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 .side__title {
   display: flex;
@@ -958,8 +965,7 @@ onMounted(() => {
     transform var(--dur-fast) var(--ease);
 }
 .side__row:hover {
-  background: var(--surface-2);
-  border-color: var(--border);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
   transform: translateX(2px);
 }
 .side__row-title {
@@ -1052,11 +1058,12 @@ onMounted(() => {
   align-items: center;
   padding: 11px 18px;
   color: var(--accent-ink);
-  font-weight: 600;
+  font-weight: 700;
   background: var(--accent);
   border: 0;
   border-radius: var(--radius-pill);
-  box-shadow: var(--shadow-lg);
+  /* 果冻底影（跟 .btn--primary 同一颗糖）。 */
+  box-shadow: 0 4px 0 var(--accent-deep);
   transition:
     background var(--dur-fast) var(--ease),
     transform var(--dur-fast) var(--ease);
@@ -1065,7 +1072,8 @@ onMounted(() => {
   background: var(--accent-strong);
 }
 .fab:active {
-  transform: scale(0.97);
+  box-shadow: 0 2px 0 var(--accent-deep);
+  transform: translateY(2px);
 }
 
 /* 桌面右上角的栏里本来就有同一颗「新建行程」，再挂一枚常驻浮标只是把同一个动作说两遍，

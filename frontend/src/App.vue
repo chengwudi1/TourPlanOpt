@@ -2,6 +2,7 @@
 import { RouterView, useRoute } from 'vue-router'
 
 import DialogHost from '@/components/DialogHost.vue'
+import PhotoBackdrop from '@/components/PhotoBackdrop.vue'
 import SettingsPanel from '@/components/SettingsPanel.vue'
 import ToastHost from '@/components/ToastHost.vue'
 
@@ -9,6 +10,9 @@ const route = useRoute()
 </script>
 
 <template>
+  <!-- 照片背景在路由出口之外：换页时它照常走自己的 144s 时间表，不闪不断
+       （同下面几个 host 的理由）。 -->
+  <PhotoBackdrop />
   <!-- out-in：两个视图都是撑满一屏的 flex 布局，交叉淡入会瞬间顶出双份高度。
        进场只淡不做位移——根节点带 transform 会让页面里 position: fixed 的浮层
        （FAB、通知）改以页面为参照，滚动一下就跑到文档底部去了。 -->

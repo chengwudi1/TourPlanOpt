@@ -424,7 +424,7 @@ const bubble = computed(() => dragging.value || hovered.value || focused.value)
 .rail__track {
   position: relative;
   height: 6px;
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   border-radius: var(--radius-pill);
   box-shadow: inset 0 0 0 1px var(--border);
   cursor: grab;
@@ -451,7 +451,7 @@ const bubble = computed(() => dragging.value || hovered.value || focused.value)
 .rail__night {
   position: absolute;
   inset-block: 0;
-  background: var(--surface-3);
+  background: color-mix(in srgb, var(--text) 12%, transparent);
   border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
 }
 
@@ -502,7 +502,7 @@ const bubble = computed(() => dragging.value || hovered.value || focused.value)
 }
 
 .rail__gap--early {
-  background: var(--surface-3);
+  background: color-mix(in srgb, var(--text) 12%, transparent);
 }
 
 /* 到达标是一条竖线，不是又一个圆点：圆点已经被「同一天别的站」占了，两种参照不能撞形。 */
@@ -522,7 +522,7 @@ const bubble = computed(() => dragging.value || hovered.value || focused.value)
   top: 50%;
   width: 5px;
   height: 5px;
-  background: var(--surface);
+  background: var(--glass-dense);
   border: 1.5px solid var(--text-faint);
   border-radius: 50%;
   transform: translate(-50%, -50%);
@@ -569,7 +569,7 @@ const bubble = computed(() => dragging.value || hovered.value || focused.value)
   height: 18px;
   padding: 0;
   background: var(--accent);
-  border: 2px solid var(--surface);
+  border: 2px solid var(--glass-dense);
   border-radius: 50%;
   box-shadow: var(--shadow-sm);
   transform: translate(-50%, -50%);
@@ -590,7 +590,7 @@ const bubble = computed(() => dragging.value || hovered.value || focused.value)
 
 /* 自动态：空心滑块停在排程算出的时刻上，意思是「这儿还没定，拖一下就归你定」。 */
 .rail__knob--auto {
-  background: var(--surface);
+  background: var(--glass-dense);
   border: 2px dashed var(--accent);
 }
 

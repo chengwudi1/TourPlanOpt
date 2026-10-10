@@ -51,6 +51,16 @@ export const useSocketStore = defineStore('socket', () => {
     // 把 ws 置 null 并重新起一条重连链，旧房间的 op 也会一路写进当前这份 store。
     dropSocket(ws)
     ws = null
+    // 队列是「为那个房间没送出去的话」。换了房间它们就成了写给别人的指令：welcome 一落地
+    // flushQueue 会把 A 的 day_add / checklist_add / message_add / trip_update 原样发进 B，
+    // 而服务端按 conn.trip_id 落库——改的是 B 这一趟行程。旧房间的待发一律作废。
+    if (tripId !== id) {
+      pendingQueue.length = 0
+      inFlight.clear()
+      // 挡回来还没被人接走的那句话同属旧房间：新行程的聊天框把它捞回来的话，
+      // 人以为自己在接着 A 说，发出去改的却是 B。
+      useTripStore().chatBounced = null
+    }
     tripId = id
     closedByUs = false
     fatalError.value = null
@@ -338,12 +348,19 @@ export const useSocketStore = defineStore('socket', () => {
       case ServerMsg.OP_REJECT: {
         const op_id = String(frame.op_id ?? '')
         if (frame.reason === 'rate_limited') {
-          // 服务端只是嫌快，不是不认这笔改动：原样塞回队列，按窗口重发。
+          // 服务端只是嫌快，不是不认这笔改动：原样塞回队列，等窗口过去再说。
+          // 立刻 flushQueue() 会变成紧循环——被拒一帧就重发一帧，帧本身也在刷新服务端的
+          // 限流窗口，10 秒能把连接打成几千帧的忙等。等一个窗口再发。
           const queued = inFlight.get(op_id)
           inFlight.delete(op_id)
           if (queued) {
             pendingQueue.unshift(queued)
-            flushQueue()
+            if (!flushTimer) {
+              flushTimer = setTimeout(() => {
+                flushTimer = null
+                flushQueue()
+              }, FLUSH_PAUSE_MS)
+            }
             break
           }
         }

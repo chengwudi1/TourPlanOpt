@@ -85,10 +85,11 @@ const isSelected = computed(() => store.currentDayId === props.day.id)
 const startPlace = computed(() => places.value.find((p) => p.id === props.day.start_place_id) ?? null)
 const endPlace = computed(() => places.value.find((p) => p.id === props.day.end_place_id) ?? null)
 
-/** 天色：六档 ramp 按 day_index 轮着用，这一天的色带底、左脊、序号牌、纵向轨道共用
- *  这三条变量。颜色在这里是「第几天」的编码，所以取值只能是既有的 ramp 阶，
- *  不现场发明色相。`--ramp-N-ink`（实心块上的字色）目前没有消费者了：序号牌不再
- *  是色底白字，登记在 docs/MASTHEAD-AND-RIBBON.md 的例外清单里。 */
+/** 天色：六档 ramp 按 day_index 轮着用，这一天的左脊、站点圆、纵向轨道、天头悬停洗色
+ *  共用这三条变量。颜色在这里是「第几天」的编码，所以取值只能是既有的 ramp 阶，
+ *  不现场发明色相。天头那枚序号方片是例外：F 方案里它统一走珊瑚橙（--accent），
+ *  不读天色，「第几天」的色号编码仍由这两条变量承担。`--ramp-N-ink`（实心块上的字色）
+ *  目前没有消费者，登记在 docs/MASTHEAD-AND-RIBBON.md 的例外清单里。 */
 const ramp = computed(() => (props.day.day_index % 6) + 1)
 
 /** 天头概要：`N 个地点 · 09:00–21:40`。收束时刻先取服务端排程的 end_min（它把当天每一
@@ -265,6 +266,7 @@ function runOptimize() {
       >
         <ChevronDown :size="15" />
       </button>
+      <span class="daysec__num" aria-hidden="true">{{ day.day_index + 1 }}</span>
       <span class="daysec__badge">第 {{ day.day_index + 1 }} 天</span>
       <!-- 有日期才说话。没日期的天在海报头的倒计时里已经是「日期未定」了，这里再挂一个
            空胶囊等于把同一件缺失渲染两次。 -->
@@ -475,7 +477,9 @@ function runOptimize() {
   box-shadow: inset 4px 0 0 var(--dc-deep);
 }
 
-.daysec--on {
+/* 选中态的珊瑚描边多带一枚 .card：全局 `.panel .card` 现在也写 border-color，
+   两边同为 (0,2,0) 时谁赢只取决于样式注入顺序，这里不赌。 */
+.daysec.card.daysec--on {
   border-color: var(--accent);
 }
 
@@ -497,9 +501,11 @@ function runOptimize() {
 
 /* 吸顶行：滚到一天中间时，「第 N 天 + 日期/天气」留在顶上，长列表里不会看着看着
    忘了自己在哪天。只在 ≥768px 开——窄屏一屏就是一天，吸顶只是多占一行。
-   不透明 --paper 加一条下发丝线，不用 blur：这一栏本身就在滚，再叠 backdrop-filter
-   等于把每一帧滚动变成一次全区域模糊。
-   书脊在这一层用 inset 阴影重画一遍：头部的不透明底会盖住天层那条 4px 脊，
+   天纸改成半透明之后，头部再跟纸同色就压不住下穿的内容（0.72 的白底下正文在爬）；
+   它比纸瓷实一档（--glass-dense），再借一层毛玻璃把下穿的字糊掉——顺带留下
+   「吸附着的一块磨砂」的质感。这一条 blur 不属于大面积禁区：它不是内容区，
+   是吸附时才浮起的一条约 40px 高的栏，量级与页签条、吸底 dock 同族。
+   书脊与下发丝线用 inset 阴影重画：头部自己的底会盖住天层那条 4px 脊，
    重画之后吸附时脊跟着头部一起留着，看着像是同一条。 */
 @media (min-width: 768px) {
   .daysec__head {
@@ -508,7 +514,9 @@ function runOptimize() {
        top: 0 会把吸顶行停在圈里侧，上沿漏出一条刚滚过的内容。按同一个数往回抬才贴住边线。 */
     top: calc(var(--pane-pad) * -1);
     z-index: 4;
-    background: var(--paper);
+    background: var(--glass-dense);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
     box-shadow:
       inset 4px 0 0 var(--dc-deep),
       0 1px 0 var(--border-faint);
@@ -536,16 +544,33 @@ function runOptimize() {
   transform: rotate(180deg);
 }
 
-/* 序号牌从「色底白字胶囊」改成一行展示字：天色已经由左脊和整块底色说了，胶囊再说一遍
-   就是同一件事讲两次。19px 的展示字压 --dc-deep，比原来那枚 12px 小药丸好认。 */
+/* 序号方片（F 的 .daynum）：珊瑚橙底 + 白字，30px、10px 圆角。天头从此有一个
+   统一的锚点色——它也是这一行里唯一允许压重色的元素。 */
+.daysec__num {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  font-family: var(--font-display);
+  font-size: calc(13.5px * var(--fs-scale));
+  font-weight: 800;
+  line-height: 1;
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-radius: var(--radius-xs);
+}
+
+/* 「第 n 天」按 mock 的 h4：17px 展示字压正文色。它不读天色——编号已经由方片
+   和这一句各说一遍，颜色再掺进来就是第三遍。 */
 .daysec__badge {
   flex: 0 0 auto;
   font-family: var(--font-display);
-  font-size: calc(19px * var(--fs-scale));
-  font-weight: 700;
+  font-size: calc(17px * var(--fs-scale));
+  font-weight: 800;
   line-height: 1.1;
   letter-spacing: var(--ls-tight);
-  color: var(--dc-deep);
+  color: var(--text);
 }
 
 .daysec__title {
@@ -701,8 +726,8 @@ function runOptimize() {
 }
 
 /* 天头那一枚：`9/28 ☁ 21~29°`。整句（含风向）在 title 里——窄栏放不下，也不该放下：
-   这一枚回答的是「那天要不要带伞」，不是天气详情。底色走 --ticket（票券那一档），
-   天纸已经是 --paper 了，再同色就是一个看不见的胶囊。 */
+   这一枚回答的是「那天要不要带伞」，不是天气详情。F 的胶囊语言：半透明白底 +
+   一道白描边（玻璃上的元素靠白边勾轮廓，不靠加深底色），与 .when 出身无关。 */
 .daysec__when {
   display: inline-flex;
   flex: 0 0 auto;
@@ -710,7 +735,8 @@ function runOptimize() {
   align-items: center;
   padding: 1px 7px;
   color: var(--text-2);
-  background: var(--ticket);
+  background: color-mix(in srgb, var(--glass) 80%, transparent);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-pill);
   font-variant-numeric: tabular-nums;
 }
@@ -863,7 +889,9 @@ function runOptimize() {
   gap: 4px;
   align-items: center;
   padding: 1px 7px;
-  background: var(--surface-2);
+  /* 半透明纸上的小胶囊不能再垫实色 --surface-2：那是一块不透明的浅灰底，
+     会像在纸上开了一个洞。改用正文色的 7% 洗色，亮暗两题都成立。 */
+  background: color-mix(in srgb, var(--text) 7%, transparent);
   border-radius: var(--radius-pill);
 }
 
@@ -878,6 +906,7 @@ function runOptimize() {
 }
 
 /* 空着的一天用虚线读出来：实心描边是「有内容的卡」，虚线是「这里还等东西」。
+   底与描边走 mock 的 .addbox 语言：更淡的一层玻璃 + 2px 虚线。
    入口是那颗文字级按钮，不再是一枚实心 btn——一列里到处都在喊「点我」就等于没人喊。 */
 .daysec__empty {
   display: flex;
@@ -885,8 +914,8 @@ function runOptimize() {
   gap: 2px;
   padding: 8px 10px;
   color: var(--text-2);
-  background: var(--surface-2);
-  border: 1px dashed var(--border);
+  background: color-mix(in srgb, var(--glass) 52%, transparent);
+  border: 2px dashed var(--hairline);
   border-radius: var(--radius-sm);
 }
 

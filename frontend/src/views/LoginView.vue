@@ -390,8 +390,7 @@ onBeforeUnmount(() => {
 
     <!-- ============ 右：表单 ============ -->
     <section class="panel">
-      <span class="rail" aria-hidden="true">瓦片取色 · 夜航图 · No.0001</span>
-      <!-- 公告排在票据上方、与它同宽：政策说的是「数据还能留几天」，正是这一页要交代的事。 -->
+      <!-- 公告排在卡片上方、与它同宽：政策说的是「数据还能留几天」，正是这一页要交代的事。 -->
       <NoticeBar class="panel__notice" />
       <div ref="cardEl" class="card">
         <div class="seg" role="radiogroup" aria-label="账号操作">
@@ -462,20 +461,13 @@ onBeforeUnmount(() => {
 
           <p v-if="errText" class="err" role="alert">{{ errText }}</p>
 
-          <button class="go" type="submit" :disabled="auth.busy || done">
+          <button class="btn btn--primary go" type="submit" :disabled="auth.busy || done">
             <LoaderCircle v-if="auth.busy" class="go__spin" :size="15" />
             <LogIn v-else :size="15" />
             <span>{{ goLabel }}</span>
           </button>
           <p class="exit"><RouterLink class="exit__link" :to="{ name: 'home' }">暂不登录，返回行程列表</RouterLink></p>
         </form>
-
-        <div class="stub" aria-hidden="true">
-          <div class="stub__row">
-            <span class="stub__code">TPO · HANGZHOU · 01</span>
-            <span class="barcode"></span>
-          </div>
-        </div>
 
         <div v-if="done" class="stamp" aria-hidden="true"><span>已登录</span></div>
       </div>
@@ -486,8 +478,9 @@ onBeforeUnmount(() => {
 <style scoped>
 /* ---------- 本页专属件（不进全局 token，理由见 main.css 例外清单） ----------
    夜航图是一张插画：贴在它上面的贴纸永远是亮面纸 + 固定墨字，描边永远是亮墨。
-   两档画布底分开配（亮 #0d2033 / 暗 #16293c），因为深底必须比 --bg 亮一档才认得出
-   分屏界线（1.25，与卡片自己的 surface-2 同级）。逐组合实测见 docs/_contrast-login.mjs。 */
+   两档画布底分开配（亮 #0d2033 / 暗 #16293c）：右半自 F 换肤起没有自己的底，
+   玻璃卡直接压在全站照片背景上，画布与照片纱罩之间要留出可辨的分界线。
+   逐组合实测见 docs/_contrast-login.mjs。 */
 .login {
   --canvas-bg: #0d2033;
   --canvas-title: #f2f6fa;
@@ -521,13 +514,9 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: 45fr 55fr;
   min-height: 100%;
-  background: var(--bg);
-  /* 票根的骑缝线与打孔故意探出卡片 24px；窄屏卡片顶满一栏，这点外溢会撑出横向滚动。
-     用 clip 而不是 hidden：不建滚动容器，页内的定位件不受影响。 */
-  overflow-x: clip;
 }
 
-:global(html[data-theme='dark']) .login {
+:root[data-theme='dark'] .login {
   --canvas-bg: #16293c;
   --canvas-shadow: 3px 3px 0 rgba(3, 8, 14, 0.6);
   --canvas-shadow-hover: 5px 5px 0 rgba(3, 8, 14, 0.65);
@@ -919,15 +908,15 @@ onBeforeUnmount(() => {
 /* ---------- 右：表单 ---------- */
 .panel {
   position: relative;
-  /* 一列居中而不是网格：票据不再是唯一一件，公告与它要同宽（430）同列，
-     place-items: center 会把两条各自居中、宽度各随内容。 */
+  /* 一列居中而不是网格：公告与卡片要同宽（430）同列，
+     place-items: center 会把两条各自居中、宽度各随内容。
+     没有自己的底色：F 的玻璃卡要压在照片背景上才有玻璃可言。 */
   display: flex;
   flex-direction: column;
   gap: var(--s4);
   align-items: center;
   justify-content: center;
   padding: var(--s6) var(--s6) var(--s7);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0) 300px), var(--bg);
 }
 
 /* 公告读的是子组件根节点上的这个类（子组件根的 scoped 属性由父级补上）。 */
@@ -935,41 +924,17 @@ onBeforeUnmount(() => {
   width: min(430px, 100%);
 }
 
-:global(html[data-theme='dark']) .panel {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0) 300px), var(--bg);
-}
-
-/* 骑缝线：本页专属件之一，纵向压在两栏交界上。 */
-.panel::before {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  content: '';
-  border-left: 1.5px dashed var(--canvas-ink);
-  opacity: 0.5;
-}
-
-.rail {
-  position: absolute;
-  top: 50%;
-  right: 26px;
-  transform: translateY(-50%);
-  color: var(--text-faint);
-  font-family: var(--mono);
-  font-size: var(--t-micro);
-  letter-spacing: var(--ls-caps);
-  text-transform: uppercase;
-  writing-mode: vertical-rl;
-}
-
+/* F 玻璃卡：密档玻璃（卡里有 --text-3 的浮动 label 与线性图标，标准档放不下它们）。
+   它是这一页唯一直接压在照片上的大件，blur 只此一处。 */
 .card {
   position: relative;
   width: min(430px, 100%);
   padding: var(--s6) var(--s6) var(--s5);
-  border: 1.5px solid var(--ink);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
-  background: var(--surface);
+  background: var(--glass-dense);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
   box-shadow: var(--shadow-pop), var(--edge);
 }
 
@@ -1000,22 +965,21 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 分段控件走墨线胶囊而不是共享的 SegmentedControl：这一页的控件描边是 1.5px 墨线，
-   和卡片、输入框同一档。ARIA 与那个组件保持一致（radiogroup / radio / aria-checked）。 */
+/* 分段控件不再自成一派：底色/描边/选中芯片全部对齐共享的 SegmentedControl
+   （玻璃井 + 近黑芯片），只保留本页自己的 DOM 与 ARIA（radiogroup / radio / aria-checked）。 */
 .seg {
   display: flex;
-  gap: 2px;
-  padding: 3px;
-  border: 1.5px solid var(--ink);
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-pill);
-  background: var(--surface-2);
-  box-shadow: var(--shadow-sm);
+  background: var(--glass);
 }
 
 .seg__opt {
   flex: 1 1 0;
   padding: 5px 10px;
-  border: 1.5px solid transparent;
+  border: 1px solid transparent;
   border-radius: var(--radius-pill);
   background: transparent;
   color: var(--text-2);
@@ -1029,13 +993,17 @@ onBeforeUnmount(() => {
     border-color var(--dur-fast) linear;
 }
 
-/* 未选中也留着 1.5px 透明边：否则选中那一枚长出边框，两枚就差了 3px 高。 */
-.seg__opt--on {
-  border-color: var(--ink);
-  background: var(--surface);
+.seg__opt:hover:not(.seg__opt--on) {
   color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+/* 未选中也留着透明边：否则选中那一枚长出边框，两枚就差了 2px 高。 */
+.seg__opt--on {
+  border-color: transparent;
+  background: var(--chip-on);
+  color: var(--chip-on-ink);
   font-weight: 700;
-  box-shadow: var(--shadow-sm), var(--edge);
 }
 
 .head {
@@ -1062,9 +1030,10 @@ onBeforeUnmount(() => {
 .field__input {
   width: 100%;
   padding: 21px 44px 7px 40px;
-  border: 1.5px solid var(--border);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: var(--glass);
+  box-shadow: var(--edge);
   color: var(--text);
   font: inherit;
   font-size: var(--t-body);
@@ -1080,7 +1049,7 @@ onBeforeUnmount(() => {
 .field__input:focus {
   border-color: var(--accent);
   outline: none;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--edge);
 }
 
 .field__input:disabled {
@@ -1103,10 +1072,12 @@ onBeforeUnmount(() => {
     color var(--dur-fast) linear;
 }
 
+/* 聚焦/已填的 label 与图标走深一档的珊瑚：卡是玻璃合成，最坏底（压纯黑照片）上
+   亮珊瑚当正文只有 3.5:1，--accent-strong 才到 5.8:1（判据 docs/_contrast-login.mjs）。 */
 .field__input:focus + .field__label,
 .field__input:not(:placeholder-shown) + .field__label {
   top: 9px;
-  color: var(--accent);
+  color: var(--accent-strong);
   font-size: var(--t-micro);
   letter-spacing: var(--ls-label);
   transform: none;
@@ -1122,7 +1093,7 @@ onBeforeUnmount(() => {
 }
 
 .field__input:focus ~ .field__icon {
-  color: var(--accent);
+  color: var(--accent-strong);
 }
 
 .field__eye {
@@ -1141,7 +1112,7 @@ onBeforeUnmount(() => {
 }
 
 .field__eye:hover {
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--text-2);
 }
 
@@ -1149,50 +1120,24 @@ onBeforeUnmount(() => {
   border-color: var(--danger);
 }
 
+/* 错误正文退到一块不透的红浅底上：红字压玻璃卡的最坏底只有 4.49:1（差一丝），
+   压 --danger-soft 是两档主题下都恒定的 4.60 / 5.69（判据 docs/_contrast-login.mjs）。 */
 .err {
   margin: -6px 0 var(--s4);
+  padding: 7px 11px;
+  border-radius: var(--radius-xs);
+  background: var(--danger-soft);
   color: var(--danger);
   font-size: var(--t-meta);
 }
 
+/* 形制全部来自全局 .btn--primary（珊瑚果冻 + 4px 深珊瑚底影、按下沉 2px）；
+   这里只定尺寸——它是整张卡唯一的提交口，占满卡宽。 */
 .go {
-  display: flex;
-  gap: var(--s2);
-  align-items: center;
-  justify-content: center;
   width: 100%;
-  padding: 11px 14px;
-  border: 1.5px solid var(--ink);
-  border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: var(--accent-ink);
-  font: inherit;
-  font-weight: 700;
-  letter-spacing: var(--ls-label);
-  cursor: pointer;
-  box-shadow: 0 2px 0 var(--ink), var(--edge);
-  transition:
-    transform var(--dur) var(--ease-pop),
-    box-shadow var(--dur-fast) var(--ease),
-    background var(--dur-fast) linear;
-}
-
-.go:hover:not(:disabled) {
-  background: var(--accent-strong);
-  /* 这一页是夜航图插画，故意保留贴纸的硬偏移；全局 --shadow-lift 已经改成软影，
-     所以这里就地写死，不去借界面令牌。 */
-  box-shadow: 3px 3px 0 var(--ink), var(--edge);
-  transform: translate(-1px, -1px);
-}
-
-.go:active:not(:disabled) {
-  box-shadow: var(--edge);
-  transform: translate(1px, 1px);
-}
-
-.go:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
+  justify-content: center;
+  padding: 12px 14px;
+  font-size: calc(15px * var(--fs-scale));
 }
 
 .go__spin {
@@ -1212,74 +1157,17 @@ onBeforeUnmount(() => {
 }
 
 .exit__link {
-  color: var(--accent);
-  text-decoration: none;
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
-}
-
-.exit__link:hover {
   color: var(--accent-strong);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent-strong) 40%, transparent);
 }
 
-/* 票根：横向骑缝虚线 + 两侧打孔 + 条码（本页专属件）。 */
-.stub {
-  position: relative;
-  margin-top: var(--s5);
-  padding-top: var(--s4);
+/* 悬停不改色只把虚线下沿填实：基色已是「玻璃上最深的珊瑚」，再往亮里走会掉回 3.5:1。 */
+.exit__link:hover {
+  border-bottom-color: currentColor;
 }
 
-.stub::before {
-  position: absolute;
-  top: 0;
-  right: -24px;
-  left: -24px;
-  content: '';
-  border-top: 1.5px dashed var(--ink);
-  opacity: 0.55;
-}
-
-.stub::after {
-  position: absolute;
-  top: -8px;
-  right: -24px;
-  left: -24px;
-  height: 16px;
-  pointer-events: none;
-  content: '';
-  background: radial-gradient(circle 8px at 0 50%, var(--bg) 98%, transparent) left center / 16px 16px no-repeat,
-    radial-gradient(circle 8px at 100% 50%, var(--bg) 98%, transparent) right center / 16px 16px no-repeat;
-}
-
-.stub__row {
-  display: flex;
-  gap: var(--s3);
-  align-items: flex-end;
-  justify-content: space-between;
-}
-
-.barcode {
-  flex: 1 1 auto;
-  height: 22px;
-  opacity: 0.4;
-  background: repeating-linear-gradient(
-    90deg,
-    var(--ink) 0 1px,
-    transparent 1px 3px,
-    var(--ink) 3px 4px,
-    transparent 4px 8px,
-    var(--ink) 8px 10px,
-    transparent 10px 12px
-  );
-}
-
-.stub__code {
-  color: var(--text-3);
-  font-family: var(--mono);
-  font-size: var(--t-micro);
-  letter-spacing: var(--ls-caps);
-}
-
-/* 成功印章：落在票角上，不盖住分段控件。 */
+/* 成功印章：落在卡角上，不盖住分段控件。 */
 .stamp {
   position: absolute;
   bottom: 22px;
@@ -1288,10 +1176,10 @@ onBeforeUnmount(() => {
   place-items: center;
   width: 66px;
   height: 52px;
-  border: 2px solid var(--accent);
+  border: 2px solid var(--accent-strong);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--surface) 72%, transparent);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--glass) 78%, transparent);
+  color: var(--accent-strong);
   font-family: var(--font-display);
   font-size: calc(15px * var(--fs-scale));
   font-weight: 700;
@@ -1356,22 +1244,9 @@ onBeforeUnmount(() => {
     padding: var(--s5) var(--s4) calc(var(--s6) + var(--sab));
   }
 
-  .panel::before {
-    top: 0;
-    right: 0;
-    bottom: auto;
-    left: 0;
-    border-left: 0;
-    border-top: 1.5px dashed var(--canvas-ink);
-  }
-
   .card {
     width: 100%;
     padding: var(--s5) var(--s5) var(--s4);
-  }
-
-  .rail {
-    display: none;
   }
 }
 

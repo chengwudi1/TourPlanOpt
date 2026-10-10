@@ -111,6 +111,13 @@ function nameOf(clientId: string): string {
   return roster.value.find((p) => p.client_id === clientId)?.name || '同伴'
 }
 
+/** 输入法确认候选词的那下回车不是「添加」：preventDefault 还会把它从输入法手里抢走。 */
+function onEnter(e: KeyboardEvent) {
+  if (e.isComposing) return
+  e.preventDefault()
+  submit()
+}
+
 function submit() {
   const cents = parseMoneyToCents(amount.value)
   const text = title.value.trim()
@@ -253,7 +260,7 @@ function drop(expense: Expense) {
           type="text"
           inputmode="decimal"
           placeholder="0"
-          @keyup.enter="submit"
+          @keydown.enter="onEnter"
         />
       </div>
       <input
@@ -262,7 +269,7 @@ function drop(expense: Expense) {
         type="text"
         maxlength="80"
         placeholder="费用名称，例如高铁票、午餐"
-        @keyup.enter="submit"
+        @keydown.enter="onEnter"
       />
       <button class="btn btn--sm btn--primary" type="button" :disabled="Boolean(complaint)" @click="submit">
         添加
@@ -398,7 +405,8 @@ function drop(expense: Expense) {
 .exp__bar {
   height: 8px;
   overflow: hidden;
-  background: var(--surface-3);
+  /* 空槽与 TimeRail 的轨道同一料（正文 6% 洗 + 细线勾边）——全站「轨道」只有一个配方。 */
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   border-radius: var(--radius-pill);
   /* 空槽要看得见：一条 4px 的实心线在「已经花满」时和一条分隔线没有区别。 */
   box-shadow: inset 0 0 0 1px var(--hairline);
@@ -440,7 +448,8 @@ function drop(expense: Expense) {
   padding: 2px 8px;
   font-size: calc(12px * var(--fs-scale));
   color: var(--text-2);
-  background: var(--surface-2);
+  /* 半透明卡上的小件一律走正文色洗色：实色 --surface-2 是一块不透明的补丁。 */
+  background: color-mix(in srgb, var(--text) 7%, transparent);
   border-radius: var(--radius-pill);
 }
 
@@ -458,8 +467,9 @@ function drop(expense: Expense) {
   display: flex;
   flex: 0 0 84px;
   align-items: center;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  /* 与全局 .input 同一口井（F 的 .inp）：玻璃底 + 白描边。 */
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
   box-shadow: var(--edge);
 }
@@ -524,7 +534,7 @@ function drop(expense: Expense) {
   padding: 3px 9px;
   font-size: var(--t-meta);
   color: var(--text-2);
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
   border: 1px solid transparent;
   border-radius: var(--radius-pill);
   cursor: pointer;
@@ -534,15 +544,16 @@ function drop(expense: Expense) {
 }
 
 .chip:hover {
-  background: var(--surface-3);
+  background: color-mix(in srgb, var(--text) 12%, transparent);
 }
 
 /* 选中态归 accent，不归 ember：陶土是「费用/氛围」的颜色，不上可点控件。
-   分类自己的色相走 ramp 小圆点，和「这一个被选中了」分开说两件事。 */
+   分类自己的色相走 ramp 小圆点，和「这一个被选中了」分开说两件事。
+   选中＝一枚珊瑚浅底的小药丸（mock 的 .pill.on：border-color: transparent，不描边）。 */
 .chip--on {
   color: var(--accent-strong);
   background: var(--accent-soft);
-  border-color: var(--accent);
+  border-color: transparent;
 }
 
 .chip--person {
@@ -566,7 +577,7 @@ function drop(expense: Expense) {
 
 /* 三条类的权重压过 `.chip:hover`，不补这一条的话被移出的人反而没有落点回声。 */
 .chip--person.chip--off:hover {
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
 }
 
 /* 手机上这些 chip 是「谁来摊」的唯一开关，26px 高的落点按不准（O6）。
@@ -605,7 +616,7 @@ function drop(expense: Expense) {
 }
 
 .entry:hover {
-  background: var(--surface-hover);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
 }
 
 .entry__icon {
