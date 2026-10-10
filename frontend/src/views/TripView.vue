@@ -284,6 +284,31 @@ const chatBadge = computed(() =>
   store.chatUnread > 9 ? '9+' : String(store.chatUnread),
 )
 
+// -- 「最近改动」抽屉（窄屏）--------------------------------------------------------------
+// 窄屏的台账从面板里撤掉（搜索浮条上方的位置要干净），改挂到顶栏「N 人在线」那一枚上——
+// 与聊天同一套形制：读数 + 未读点 + 底部抽屉。`flat` 复用同一段行模板。
+
+const ledgerOpen = ref(false)
+
+function openLedger() {
+  ledgerOpen.value = true
+  store.setOpsInView(true)
+}
+
+function onLedgerClosed() {
+  ledgerOpen.value = false
+  store.setOpsInView(false)
+}
+
+/* 抽屉开着时把窗口拉宽：v-if 立刻拆掉抽屉，close 事件压在退场动画后面，跟着实例一起没了——
+   直接落状态；与聊天抽屉同一条规矩，收窄回来不会自己弹开。 */
+watch(narrow, (isNarrow) => {
+  if (!isNarrow && ledgerOpen.value) {
+    ledgerOpen.value = false
+    store.setOpsInView(false)
+  }
+})
+
 /**
  * 跳到某一站：切到他所在的那一天、选中这张卡。聊天气泡的「关于某一站」与顶栏的同伴头像
  * 都要这一件事，各写一份就会出现「一处记得切天、另一处忘了」。
@@ -356,6 +381,17 @@ watch(
 
 /** 清单与费用是整屏文档：宽屏下地图让位，窄屏下靠底部 dock 回地图。 */
 const docOpen = computed(() => pane.value !== 'trip')
+
+/**
+ * 窄屏地图视图是「内容画布」，不是一页要从上往下读的文档：这一屏不渲染海报头。
+ * 海报头在这里是收不掉的——收起靠列表滚动，而地图不滚——于是 270px 永久压在画布上，
+ * 还把「换封面」带到没有封面可看的地方（A 沉浸版，2026-10-10）。
+ *
+ * 顶栏随之自动接管行程名：`hide-title` 本来就是「海报头开着才让位」，这里传它的反面。
+ * 重命名、换城市、换封面都还有「更多」菜单这一条路，不会失联。
+ * 桌面、清单、费用维持现状：`narrow` 与 `docOpen` 各把一层。
+ */
+const immersiveMap = computed(() => narrow.value && mobileView.value === 'map' && !docOpen.value)
 
 // -- 展开态（M15b）---------------------------------------------------------------------
 // 选中与展开是两件事：点天头选中这一天（并展开它），点箭头只折叠/展开。折叠是本地
@@ -460,6 +496,11 @@ const recoEl = ref<InstanceType<typeof RecommendPanel> | null>(null)
     用来画箭头与 `aria-expanded`。 */
 const recoOpen = ref(false)
 const cityText = computed(() => store.trip?.city?.trim() ?? '')
+
+/* 地图浮条（窄屏地图视图）：同一对部件（搜索 + 发现）的第二个宿主。展开态是这一张脸
+   自己的瞬时状态——不落盘（`persist-open="false"`），列表栏那份偏好不归它记。 */
+const mapRecoEl = ref<InstanceType<typeof RecommendPanel> | null>(null)
+const mapRecoOpen = ref(false)
 
 /**
  * 空天那一行点进来：先选中这一天（新地点会落在这里），再把焦点送到搜索框。
@@ -855,20 +896,23 @@ if (import.meta.env.DEV) {
       :self-id="selfId"
       :status="socket.status"
       :chat-unread="store.chatUnread"
-      :hide-title="mastShown && !mastCollapsed"
+      :ops-unread="store.opUnread"
+      :hide-title="mastShown && !mastCollapsed && !immersiveMap"
       @share="copyShareLink"
       @rename="renameTrip(store.trip?.title ?? '')"
       @set-city="setTripCity"
       @cover="openCoverPicker"
       @copy-text="copyTextItinerary"
       @chat="showPane('chat')"
+      @ledger="openLedger"
       @goto="gotoTeammatePlace"
     />
 
     <!-- 海报头（D1）：名字的大字这一屏说了两遍，所以它开着的时候顶栏那行标题让位，
-         重命名与改城市都由这里的标题和「更多」菜单接手。 -->
+         重命名与改城市都由这里的标题和「更多」菜单接手。窄屏地图视图例外
+         （`immersiveMap`）：地图是无滚动的内容画布，这一块不上屏，标题还回顶栏。 -->
     <TripMasthead
-      v-if="mastShown"
+      v-if="mastShown && !immersiveMap"
       ref="mastRef"
       :collapsed="mastCollapsed"
       :scroll-y="mastScrollY"
@@ -957,7 +1001,9 @@ if (import.meta.env.DEV) {
             <span v-if="store.chatUnread" class="panebar__badge tiny mono">{{ chatBadge }}</span>
           </button>
         </nav>
-        <OpTicker />
+        <!-- 窄屏不内联这条台账：它常驻在照片下面，会把「封面 → 搜索」这一对拆开，
+             改由顶栏「N 人在线」开出「最近改动」抽屉（同一份日志、同一个组件）。 -->
+        <OpTicker v-if="!narrow" />
         <div
           class="panel__scroll panel__content"
           :class="{ 'panel__content--fill': pane === 'chat' && !narrow }"
@@ -1053,6 +1099,46 @@ if (import.meta.env.DEV) {
       </div>
       <div class="map-host">
         <MapPanel @pick="onMapPick" />
+        <!-- A 顶部浮条（2026-10-10）：搜索与发现浮在窄屏地图画布顶上——M39 把海报头从
+             这一屏撤掉之后，地图北边第一次空出一条能放东西的位置。两个部件与列表栏
+             「添加地点」栏同源，发现面板不落盘展开态。
+             挂载条件只写 narrow：宽屏这张脸不存在，常驻一份 display:none 的副本等于在
+             DOM 里多养一套 RecommendPanel 与 PlaceSearch（文档级选择器会数到双份类目）。
+             窄屏之内不重建——换列表↔地图 narrow 不变，输入框里没搜完的半句话照旧活着。 -->
+        <div v-if="narrow" class="mapbar" :class="{ 'mapbar--on': immersiveMap }">
+          <div class="mapbar__row">
+            <PlaceSearch
+              class="mapbar__search"
+              bare
+              :city="store.trip?.city ?? ''"
+              @select="onPoiPicked"
+              @stash="onStash"
+            />
+            <span class="mapbar__div" aria-hidden="true" />
+            <button
+              class="mapbar__reco"
+              type="button"
+              :aria-expanded="mapRecoOpen"
+              :title="cityText ? `${cityText}的景点、美食与夜市` : '推荐按城市给出，展开后可设置目的地城市'"
+              @click="mapRecoEl?.toggle()"
+            >
+              <Compass class="ic" :size="14" /> 发现
+              <ChevronDown
+                class="mapbar__caret"
+                :class="{ 'mapbar__caret--on': mapRecoOpen }"
+                :size="14"
+              />
+            </button>
+          </div>
+          <RecommendPanel
+            ref="mapRecoEl"
+            :city="store.trip?.city ?? ''"
+            :trip-id="tripId"
+            :persist-open="false"
+            @update:open="mapRecoOpen = $event"
+            @set-city="setTripCity"
+          />
+        </div>
       </div>
     </div>
 
@@ -1107,6 +1193,20 @@ if (import.meta.env.DEV) {
     >
       <div class="chatsheet">
         <MessagePanel active @open-ref="openChatRef" />
+      </div>
+    </AppModal>
+
+    <!-- 窄屏的台账：内联那条在手机上撤掉，改挂顶栏「N 人在线」那一枚开出这张抽屉。
+         宽屏仍是面板里那条内联台账，这里不渲染（v-if 跟着 narrow）。 -->
+    <AppModal
+      v-if="ledgerOpen && narrow"
+      title="最近改动"
+      sub="这一趟改过的事，最新的在最上面"
+      variant="sheet"
+      @close="onLedgerClosed"
+    >
+      <div class="ledgersheet">
+        <OpTicker flat />
       </div>
     </AppModal>
 
@@ -1418,6 +1518,12 @@ if (import.meta.env.DEV) {
   padding: 0 14px 14px;
 }
 
+/* 「最近改动」抽屉：不钉高度——台账有时只有两条，钉一个 58dvh 的空架子比不画更难看。
+   高度随内容长，封顶交给 AppModal（88dvh）与 `.modal__body` 自己的滚动。 */
+.ledgersheet {
+  padding: 0 14px 14px;
+}
+
 /* ---------- 窄屏：地点抽屉与地图抬起（见上面 sheetOpen） ---------- */
 
 /* 位移写在 .map-host 上，不去动 AMap 的投影：panTo 之后这一站就在容器正中，容器整体上
@@ -1444,6 +1550,114 @@ if (import.meta.env.DEV) {
   .mappick {
     bottom: calc(var(--dock-total-h) + 16px);
   }
+}
+
+/* ---------- 地图浮条（A，2026-10-10） ---------- */
+
+/* 窄屏地图视图顶上的那一条：搜索 + 发现。「我的位置 → 精灵 → dock」之外再加一条浮件，
+   总数到了四条——这是 A 案写明的代价，换来地图北侧那条横带从纯地图变成入口。
+   `--on` 的判据就是 immersiveMap（窄屏 + 地图视图 + 没开整屏文档），宽屏这里永不显示。 */
+.mapbar {
+  position: absolute;
+  z-index: 10;
+  top: 8px;
+  right: 12px;
+  left: 12px;
+  display: none;
+  flex-direction: column;
+  /* 只服务下面那条「地点抽屉抬起地图时反向位移」——与 .map-host 同一曲线。 */
+  transition: transform var(--dur-slow) var(--ease);
+}
+
+.mapbar--on {
+  display: flex;
+}
+
+/* 48px 的胶囊（mock 里那条红线画的横带就是 48 高）：左 15 给搜索图标，右 9 给「发现」。
+   玻璃走 --glass-dense：这一条是搜索面，候选与推荐还会在同一位置展开，0.88 让底下的
+   瓦片线索不至于把输入中的字压花——列表栏的搜索框受焦后也是这一档。 */
+.mapbar__row {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 9px;
+  align-items: center;
+  height: 48px;
+  padding: 0 9px 0 15px;
+  background: var(--glass-dense);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-md);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+
+/* bare 模式把输入框自己的描边与焦点环都撤了（见 PlaceSearch），焦点回声收在这一条上：
+   一个受焦面只留一层框，与添加栏同一条规矩。 */
+.mapbar__row:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-md);
+}
+
+.mapbar__search {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.mapbar__div {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 20px;
+  background: var(--hairline);
+}
+
+.mapbar__reco {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 5px;
+  align-items: center;
+  min-height: 32px;
+  padding: 6px 10px;
+  color: var(--text-2);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+
+.mapbar__reco:hover {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.mapbar__caret {
+  color: var(--text-3);
+  transition: transform var(--dur) var(--ease-inout);
+}
+.mapbar__caret--on {
+  transform: rotate(180deg);
+}
+
+/* 发现面板在地图上是浮层卡：列表栏那份的边框线是接在添加栏下面的（一条 border-top），
+   这里底下压的是地图，得四边勾白、整块玻璃——与搜索候选同一张脸。 */
+.mapbar .reco {
+  margin-top: 12px;
+  background: var(--glass-dense);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+
+/* 地点抽屉把地图整块抬起时，浮条要留在原地：它是这一屏的界面（搜索），不是地图内容——
+   跟着升就顶出屏幕了（8px 的顶距扛不住半个抽屉的位移）。反向位移与 `.map-host` 同一曲线，
+   两边帧帧相抵。 */
+.shell__body.sheet-lift .mapbar {
+  transform: translateY(calc(var(--place-sheet-h) * 0.5));
 }
 
 /* ---------- 分栏（M24b）：行程 / 出行清单 / 费用 ---------- */

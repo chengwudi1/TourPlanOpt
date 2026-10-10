@@ -251,8 +251,17 @@ onBeforeUnmount(() => {
   border-radius: calc(var(--radius) - 4px);
 }
 
+/* 名字是主项、地址是副项，两条都是长文本，flex 怎么分就是「谁先让位」的问题。
+   名字旧写法 flex:1（basis 0）等于把整行余量全交给名字盒子：窄屏下行只有 ~270px，
+   地址一长余量转负，名字被压到 min-content——汉字处处可断，于是「一行一个字」竖着排。
+   名字改成按内容站住、封顶 60%；余量整段给地址（flex-basis 0 起长），省略号都落在副项上。 */
 .search__name {
-  flex: 1;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .search__stash {
@@ -295,6 +304,8 @@ onBeforeUnmount(() => {
 }
 
 .search__meta {
+  flex: 1 1 0;
+  min-width: 0;
   margin-top: 2px;
   overflow: hidden;
   text-overflow: ellipsis;

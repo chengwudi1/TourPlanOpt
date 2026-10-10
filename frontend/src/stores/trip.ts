@@ -309,6 +309,9 @@ export const useTripStore = defineStore('trip', () => {
     // 台账只记这一页亲眼看到的广播：换行程与重连都会重新 welcome，
     // 留着上一段行程的 seq 等于把别处的改动报成本页刚发生的。
     opLog.value = []
+    // 游标跟着日志一起清零：留着一个对着空日志的旧 seq 会让重连后的第一条改动
+    // 永远算不出「未读」——「有没有新东西」的基线就是这个空。
+    opSeenSeq.value = 0
     const alive = new Set(snap.days.map((d) => d.id))
     timelines.value = Object.fromEntries(
       Object.entries(timelines.value).filter(([dayId]) => alive.has(dayId)),
@@ -1338,6 +1341,30 @@ export const useTripStore = defineStore('trip', () => {
 
   const opLog = ref<OpEvent[]>([])
 
+  /**
+   * 台账读到过的最大 seq。**不落盘**：日志每次 welcome 都清空，跨会话游标对着一条空
+   * 日志永远算出「已读」——那只是把一个谎存进 localStorage。与聊天 readPos 的差别就在
+   * 这里：那边有真行才配存盘，这边没有可对的行。
+   */
+  const opSeenSeq = ref(0)
+  /** 「最近改动」抽屉在不在屏幕上。看的时候新到的一条直接算读过（与聊天 setChatInView 同一条规矩）。 */
+  const opsInView = ref(false)
+
+  /** 未读＝「别人改的、比游标新的」。自己那笔回声的 origin 就是本机 client_id，不算。 */
+  const opUnread = computed(() =>
+    opLog.value.some((e) => e.origin !== myClientId && e.seq > opSeenSeq.value),
+  )
+
+  function markOpsSeen() {
+    // 日志新头在前，第 0 条就是最大 seq。
+    opSeenSeq.value = opLog.value[0]?.seq ?? 0
+  }
+
+  function setOpsInView(on: boolean) {
+    opsInView.value = on
+    if (on) markOpsSeen()
+  }
+
   function dayLabel(dayId: string, fallbackIndex?: number): string {
     const day = days.value.find((d) => d.id === dayId)
     const index = day?.day_index ?? fallbackIndex
@@ -1409,6 +1436,8 @@ export const useTripStore = defineStore('trip', () => {
       },
       ...opLog.value,
     ].slice(0, OP_LOG_MAX)
+    // 抽屉开着＝正在看：这一条不用等下次开合，落地即读过（聊天 noteIncoming 同一推理）。
+    if (opsInView.value) markOpsSeen()
   }
 
   /** The echo or another client's op. `pendingOps` distinguishes the two. */
@@ -1953,6 +1982,8 @@ export const useTripStore = defineStore('trip', () => {
     undoOptimize,
     dismissOptimizeResult,
     opLog,
+    opUnread,
+    setOpsInView,
     applyRemoteOp,
     applyReject,
     applyPresence,

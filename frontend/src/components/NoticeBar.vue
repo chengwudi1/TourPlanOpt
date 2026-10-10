@@ -46,7 +46,7 @@ function dismiss() {
       未登录时创建的行程，超过 7 天无人打开或改动会自动清理；在登录状态下打开一次，该行程即长期保留。
     </p>
     <button
-      class="notice__close"
+      class="notice__close tap-pad"
       type="button"
       title="不再提示"
       aria-label="不再提示这条公告"

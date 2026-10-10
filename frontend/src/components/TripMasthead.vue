@@ -12,16 +12,20 @@ import { formatMoney } from '@/utils/money'
 import { countdownOf, formatDateRange } from '@/utils/tripstatus'
 
 /**
- * D1 海报头（V3 骨架 + V2 动效）：一枚圆角卡，照片铺到底、票券浮在下半部。
+ * 海报头（M38 A 版式）：照片铺满整张卡，字压在照片下半部。
  *
- * 为什么字要搬到票券上：照片内容不可控，白字压在亮天空上随时掉到 2:1，而这块是整页
- * 唯一必须读清的信息。落在 `--surface` 上之后，对比度与照片无关。
- * 为什么整块要做成卡：照片的下沿由卡的圆角裁掉，于是那条边既不是硬切（M32 第一版）
- * 也不是淡出，而是这张卡自己的轮廓——和首页那张封面卡是同一种东西。
+ * 为什么字又搬回照片上：票券那一版把照片吃掉三分之二（手机 214px 里 139px 是票券），
+ * 第一眼读到的是一条白色卡片，照片只剩上面 62px 的边——「像贴进来的一张截图」的病根在这。
+ * A 让照片整幅露出来，字直接压在它上面，版面只剩一件事：这趟旅行本身。
  *
- * 「不像截图」靠的是三件动效，不是靠边怎么切：照片 22s Ken Burns 呼吸 + hover 推进、
+ * 白字压任意照片的对比度由 --scrim-hero 保证（与首页英雄卡同一条配方，实测账在
+ * docs/_contrast-mast.mjs：六张内置封面逐张量最亮像素，大字 ≥3:1）。kicker 胶囊撤了，
+ * 日期与天数变成标题下的元信息行；「当前使用的是默认封面」那句没了，改成右上角一枚
+ * 「默认」小胶囊——它说的还是同一件事，只是不再占版面。
+ *
+ * 「不像截图」靠的是三件动效，不是靠字压在哪：照片 22s Ken Burns 呼吸 + hover 推进、
  * 滚动视差（照片比列表慢 0.34 倍、封顶 40px）、指针在照片上留一道柔光带。入场是三段——
- * 照片从 1.12 落回 1.0、票券晚三拍升起、kicker 胶囊最后淡入。
+ * 照片从 1.12 落回 1.0、右上角封面胶囊先淡入、标题栈最后升起。
  *
  * 收起由宿主（TripView 的 `.panel__scroll`）决定，这里只吃 `collapsed` 与 `scrollY`：
  * 组件自己监听滚动就变成「两块界面互相偷看」，而滚动条明明在宿主那一层。反方向只递一件
@@ -41,6 +45,7 @@ defineExpose({ rootEl })
 const store = useTripStore()
 
 const title = computed(() => store.trip?.title ?? '')
+const city = computed(() => store.trip?.city ?? '')
 
 const cover = computed(() => store.coverPhoto)
 /** 坏图不是「没有图」这一档的装饰——它是同一个兜底形态，所以走同一条分支，
@@ -52,9 +57,9 @@ const hasPhoto = computed(() => !!cover.value && brokenUrl.value !== cover.value
 /** WebGL 档是否真的在画。它只由子组件的两条事件决定——`<img>` 一直在底下画着，
  *  所以这里为假时不需要任何「回落动作」，CSS 那两条动画本来就是它的。 */
 const glLive = ref(false)
-/** 出的是两档链里的哪一档。屏幕上只有一处读它（下面那枚「换封面」键），复验时两条判据都要读它。 */
+/** 出的是两档链里的哪一档。屏幕上读它的有两处（右上角那枚「默认」胶囊、复验探针）。 */
 const coverSource = computed<CoverSource>(() => store.coverSource)
-/** 还站在默认那张上：链头空着，或者内置资产读不出来（同一档的兜底形态，键照样要给）。 */
+/** 还站在默认那张上：链头空着，或者内置资产读不出来（同一档的兜底形态，胶囊照样要给）。 */
 const usingDefault = computed(() => coverSource.value === 'builtin')
 function onImgError() {
   brokenUrl.value = cover.value
@@ -73,10 +78,11 @@ const dateRange = computed(() => formatDateRange(dateSpan.value.start, dateSpan.
 /** 胶囊与首页那颗同源：没日期就没有 label，宁可不显示也不摆一个「?? 天后」。 */
 const countdown = computed(() => countdownOf(dateSpan.value.start, dateSpan.value.end))
 
-/** 三段里任何一段没填，整段连同它前面那个分隔符一起消失：「· 10月1日」这种开头
+/** 标题下的第一行：天数与日期区间。城市不在这—它是上面那枚黄胶囊。
+ *  三段里任何一段没填，整段连同它前面那个分隔符一起消失：「· 10月1日」这种开头
  *  的空段比没有这一段更难看。 */
-const kicker = computed(() => {
-  const parts = [store.trip?.city ?? '', store.days.length ? `${store.days.length} 天` : '', dateRange.value]
+const metaLine = computed(() => {
+  const parts = [store.days.length ? `${store.days.length} 天` : '', dateRange.value]
   return parts.filter(Boolean).join(' · ')
 })
 
@@ -123,7 +129,7 @@ watch(reduceMotion, (off) => {
 
 /* -- 行遮罩揭幕（lab D1）：行程名从一条线后面升上来，而不是整块淡入。 ------------- */
 // 遮罩由模板里那两层 span 承担（外层裁、内层跑 transform），GSAP 只碰内层那一枚。
-// 收尾必须 clearProps：票券里还有别的元素在量自己的位置，留一份 transform 在身上，
+// 收尾必须 clearProps：标题栈里还有别的元素在量自己的位置，留一份 transform 在身上，
 // 下一次重排就会拿它当基准（M15 那轮 TransitionGroup 留尾巴的同一种错）。
 useMotion(rootEl, ({ q, gsap, reduce }) => {
   gsap.fromTo(
@@ -182,55 +188,53 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-if="hasPhoto && !reduceMotion" class="mast__glow" aria-hidden="true"></div>
-      <p v-if="kicker" class="mast__kick">{{ kicker }}</p>
-    </div>
 
-    <!-- 票券：正文唯一的落脚处，浮在照片上，两侧与底部各留 12px 的原图。 -->
-    <div class="mast__ticket">
-      <h1 class="mast__title">
-        <button
-          class="mast__name tap-pad"
-          type="button"
-          :title="title ? '点击重命名行程' : '点击设置行程名'"
-          @click="emit('rename')"
-        >
-          <!-- 两层：外层裁、内层被 GSAP 抬起来。文本本身仍是一行带省略号。 -->
-          <span class="mast__maskline"><span class="mast__masktext">{{ title || '未命名行程' }}</span></span>
-        </button>
-        <span v-if="countdown.label" class="mast__pill" :class="`mast__pill--${countdown.tone}`">
-          {{ countdown.label }}
-        </span>
-      </h1>
-      <div v-if="stats" class="mast__rule" aria-hidden="true"></div>
-      <p v-if="stats" class="mast__stats">{{ stats }}</p>
-      <!-- 默认档就地给键（决策 8）：内置海报保证海报头永远有图，所以这一段不再是救火，
-           而是说清「此刻是系统挑的那张」并就地给换的入口。全部落在票券里——票券长高会自己
-           往下顶，`.mast` 的总高与 `mastOccupied()` 不变，M34/M35 的收合几何才不用重开。 -->
-      <div v-if="usingDefault" class="mast__need">
-        <span class="mast__need-text tiny muted">当前使用的是默认封面</span>
-        <span class="mast__need-acts">
-          <button class="btn btn--sm btn--primary" type="button" @click="emit('pickCover')">
-            <ImagePlus class="ic" :size="13" /> 换封面
+      <!-- 标题栈：压在照片下半部。城市与倒计时在上、名字居中、天数与统计在下，
+           整摞离照片下沿 12px——首页英雄卡同一个读法。 -->
+      <div class="mast__stack">
+        <div v-if="city || countdown.label" class="mast__srow">
+          <span v-if="city" class="mast__city">{{ city }}</span>
+          <span v-if="countdown.label" class="mast__pill" :class="`mast__pill--${countdown.tone}`">
+            {{ countdown.label }}
+          </span>
+        </div>
+        <h1 class="mast__title">
+          <button
+            class="mast__name tap-pad"
+            type="button"
+            :title="title ? '点击重命名行程' : '点击设置行程名'"
+            @click="emit('rename')"
+          >
+            <!-- 两层：外层裁、内层被 GSAP 抬起来。文本本身仍是一行带省略号。 -->
+            <span class="mast__maskline"><span class="mast__masktext">{{ title || '未命名行程' }}</span></span>
           </button>
-        </span>
+        </h1>
+        <p v-if="metaLine" class="mast__meta">{{ metaLine }}</p>
+        <p v-if="stats" class="mast__meta">{{ stats }}</p>
+      </div>
+
+      <!-- 封面胶囊（右上角）：默认档说「默认」，换封面这一枚两档都在——键永远就地给，
+           它不再依赖票券那一段说明。 -->
+      <div class="mast__picks">
+        <span v-if="usingDefault" class="mast__cchip">默认</span>
+        <button class="mast__cchip mast__cchip--act tap-pad" type="button" @click="emit('pickCover')">
+          <ImagePlus class="ic" :size="13" /> 换封面
+        </button>
       </div>
     </div>
   </section>
 </template>
 
 <style scoped>
-/* 一整个圆角卡，照片铺满、票券浮在下沿——首页那张封面卡就是这么长的，两页说同一种话。
+/* 一整个圆角卡，照片铺满、字压在下半部——首页那张封面卡就是这么长的，两页说同一种话。
    照片的下沿由此变成「卡自己的圆角」，而不是横切页面的一条硬边（「像贴进来」的另一半在这）。
    总高是这里唯一随收合变的一格（连 margin 一起收，不然折完还剩 10px 的空带）。
-   不用 max-height：那玩意要写成一个大常量，动画全程大部分时间在走空档，看着像迟了一拍
+   不用 max-height：那要写成一个大常量，动画全程大部分时间在走空档，看着像迟了一拍
    （同 DaySection 的 fold 那条口径）。clip 而不是 hidden——不许凭空造出滚动容器。 */
 .mast {
   --mast-h: clamp(214px, 30vh, 258px);
   position: relative;
   z-index: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
   isolation: isolate;
   overflow: clip;
   height: var(--mast-h);
@@ -279,7 +283,7 @@ onBeforeUnmount(() => {
 
 /* -- 有照片 / 没照片两档只在这一层切换 ------------------------------------------ */
 .mast {
-  /* 没有封面时这一格是「地图底」不是「假照片」：淡彩底 + 墨色 kicker 胶囊。
+  /* 没有封面时这一格是「地图底」不是「假照片」：淡彩底 + 墨色字。
      取 ramp-1（水系蓝）——封面说的是这趟旅行，不是某一天；深色态这一档自己
      落回夜航蓝，所以不必再写一套。 */
   --stage-bg: linear-gradient(
@@ -288,14 +292,10 @@ onBeforeUnmount(() => {
     var(--surface) 60%,
     color-mix(in oklab, var(--ramp-1-soft) 48%, var(--surface)) 100%
   );
-  --kick-ink: var(--ramp-1-deep);
-  --kick-bg: color-mix(in srgb, var(--surface) 76%, transparent);
 }
 
 .mast--photo {
   --stage-bg: var(--photo-scrim);
-  --kick-ink: rgba(255, 255, 255, 0.92);
-  --kick-bg: var(--photo-scrim);
 }
 
 /* 没有封面就不占海报的高度：一条 258px 高的空带上只画了一根虚线，读出来是「图没刷出来」，
@@ -304,9 +304,12 @@ onBeforeUnmount(() => {
   --mast-h: clamp(168px, 22vh, 196px);
 }
 
+/* 淡彩底上的插画是水印、不是底衬：.7 那档的路线点会横穿标题与元信息（兜底档实测
+   2.34:1，字读不出来），压到 .3 之后连两点交叠处也在 4.5:1 以上。判据在
+   docs/_contrast-mast.mjs 的「坏封面兜底」那一趟。 */
 .mast--nophoto .mast__art {
   color: var(--ramp-1-deep);
-  opacity: 0.7;
+  opacity: 0.3;
 }
 
 .mast__ph {
@@ -345,22 +348,15 @@ onBeforeUnmount(() => {
   animation: none;
 }
 
-/* 压暗层：这里原本担着「白字压在任意照片上也要 3:1」的活，那活已经搬走了——大字在
-   票券上，kicker 胶囊自带实心底。剩下的全是审美职责：把一张来路不明的照片收进页面，
-   别让它比正文还响。所以只留一道上轻下重的暗角；再压就看不见照片了（深色态一度整块
-   读成一条黑栏，就是这个原因）。 */
+/* 压暗层：白字压任意照片的对比度由它保底。配方是 --scrim-hero（与首页英雄卡同一个值，
+   整张压暗、底部到 .82），实测账在 docs/_contrast-mast.mjs——六张内置封面张张量过最亮
+   像素，白字大字档都过 3:1。没有照片那一路不挂这层：淡彩底上写的是墨字。 */
 .mast--photo .mast__stage::after {
   position: absolute;
   inset: 0;
   z-index: 1;
   content: '';
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--photo-scrim) 42%, transparent) 0%,
-    color-mix(in srgb, var(--photo-scrim) 22%, transparent) 40%,
-    color-mix(in srgb, var(--photo-scrim) 40%, transparent) 72%,
-    color-mix(in srgb, var(--photo-scrim) 62%, transparent) 100%
-  );
+  background: var(--scrim-hero);
 }
 
 /* 指针回声：一道跟着光标走的柔光带，压在压暗层之上——它要提亮的是最终上屏的那张合成图，
@@ -386,69 +382,62 @@ onBeforeUnmount(() => {
   opacity: 0.42;
 }
 
-.mast__kick {
+/* -- 标题栈：城市胶囊 + 倒计时一行、名字、两行元信息，压在照片下半部 ------------- */
+.mast__stack {
   position: absolute;
   z-index: 3;
-  top: 12px;
+  right: 14px;
+  bottom: 12px;
   left: 14px;
-  max-width: calc(100% - 28px);
-  overflow: hidden;
-  padding: 3px 10px;
-  margin: 0;
-  color: var(--kick-ink);
-  background: var(--kick-bg);
-  font-family: var(--mono);
-  font-size: var(--t-micro);
-  font-weight: 600;
-  letter-spacing: var(--ls-caps);
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
-  border-radius: var(--radius-pill);
-  animation: fade-in var(--dur-entrance) var(--ease-out) calc(var(--stagger) * 2) backwards;
-}
-
-/* -- 票券：正文的落脚处，浮在照片下沿，两侧与底部各留 12px ------------------------ */
-.mast__ticket {
-  position: relative;
-  z-index: 2;
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px 14px;
-  align-items: center;
-  min-width: 0;
-  margin: 0 12px 12px;
-  padding: 11px 15px;
-  /* 票券是浮在照片上的件（与弹窗、抽屉同族）：重玻璃 + blur 把它从会呼吸的照片上
-     收住，小字（--text-2 的统计行）也才站得稳。面积只有一条，不属于大面积禁区。 */
-  background: var(--glass-dense);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
+  flex-direction: column;
+  gap: 7px;
+  /* 与票券那一版同一段入场：晚三拍升起，前两拍留给照片沉下与胶囊淡入。 */
   animation: rise-in var(--dur-entrance) var(--ease-out) calc(var(--stagger) * 3) backwards;
 }
 
-.mast__title {
+.mast__srow {
   display: flex;
-  flex: 1 1 auto;
-  gap: 9px;
-  align-items: baseline;
+  gap: 8px;
+  align-items: center;
+}
+
+/* 城市胶囊＝柠黄一块（F 的 .chip.city，与首页那颗同源）：压在照片上，所以两档主题
+   都不反色。 */
+.mast__city {
+  padding: 3px 10px;
+  color: var(--city-chip-ink);
+  font-size: calc(12px * var(--fs-scale));
+  font-weight: 600;
+  line-height: 1.4;
+  background: var(--city-chip);
+  border-radius: var(--radius-pill);
+}
+
+/* 倒计时推到行尾（同首页：城市在左、状态在右）。 */
+.mast__srow .mast__pill {
+  margin-left: auto;
+}
+
+.mast__title {
   min-width: 0;
   margin: 0;
-  font-weight: 700;
-  line-height: 1.14;
 }
 
 .mast__name {
-  min-width: 0;
+  display: block;
+  max-width: 100%;
   padding: 0;
-  color: inherit;
+  color: #fff;
   font-family: var(--font-display);
-  font-size: calc(clamp(22px, 3.2vw, 30px) * var(--fs-scale));
-  letter-spacing: var(--ls-display);
+  font-size: calc(clamp(26px, 2.7vw, 34px) * var(--fs-scale));
+  font-weight: 800;
+  line-height: 1.12;
+  letter-spacing: -0.02em;
   text-align: left;
+  /* 大字是这一屏的主角，遮罩是比例渐变、照片裁切后暗部落在哪没法保证，
+     所以再补一道软投影兜底（同首页大标题）。 */
+  text-shadow: 0 2px 16px rgba(11, 22, 26, 0.4);
   background: none;
   border: 0;
   cursor: pointer;
@@ -456,8 +445,8 @@ onBeforeUnmount(() => {
 
 /* 行遮罩：外层裁、内层被抬起来（GSAP 只碰内层那枚）。省略号从按钮搬到内层——
    块级子元素不吃父级的 text-overflow。下缘 0.14em 是给拉丁字尾留的呼吸：展示字的
-   line-height 是 1.14，直接 clip 会把 g/j 的下半截切掉；外层用等量负 margin 还回去，
-   按钮的盒高与加遮罩之前一致，票券的几何不用重算。 */
+   line-height 是 1.12，直接 clip 会把 g/j 的下半截切掉；外层用等量负 margin 还回去，
+   按钮的盒高与加遮罩之前一致，栈的几何不用重算。 */
 .mast__maskline {
   display: block;
   min-width: 0;
@@ -477,6 +466,20 @@ onBeforeUnmount(() => {
   text-decoration: underline;
   text-decoration-style: dotted;
   text-underline-offset: 4px;
+}
+
+/* 元信息两行：天数/日期、地点/同行/花费。小字压照片同样走一道软投影兜底。 */
+.mast__meta {
+  min-width: 0;
+  overflow: hidden;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.87);
+  font-size: calc(12.5px * var(--fs-scale));
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 2px rgba(11, 22, 26, 0.4);
+  white-space: nowrap;
 }
 
 /* 出发胶囊：深色实心 + 白字，走 --photo-* 那组「不随主题反转」的令牌——
@@ -504,93 +507,105 @@ onBeforeUnmount(() => {
   background: var(--photo-past);
 }
 
-/* 虚线分隔：首页数据带同一条语汇，这里竖着切一刀，把票券分成「名字」和「这趟有什么」两格。 */
-.mast__rule {
-  flex: 0 0 auto;
-  align-self: stretch;
-  margin: 1px 0;
-  border-left: 1px dashed var(--hairline);
-}
-
-.mast__stats {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  margin: 0;
-  color: var(--text-2);
-  font-size: calc(13px * var(--fs-scale));
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  text-align: right;
-  text-overflow: ellipsis;
-}
-
-/* 空态那一行独占一票：说明在左、两枚键在右，中间那道虚线与上面的分隔线是同一种语汇。
-   `flex-basis: 100%` 是「换行」的意思，只在宽屏的横向票券里成立，窄屏那段自己改回去。 */
-.mast__need {
+/* -- 封面胶囊（右上角）：默认档那枚是「说状态」，换封面那枚是「给键」，两枚都在 ----
+   压在照片最亮的那一角上，所以都带自己的实底：默认档用 55% 黑 + 模糊（底下的照片
+   还透一点），换封面用 --photo-scrim 那档实心——它是键，要读得最清。 */
+.mast__picks {
+  position: absolute;
+  z-index: 4;
+  top: 10px;
+  right: 12px;
   display: flex;
-  flex: 1 0 100%;
-  gap: 10px;
+  gap: 6px;
+  animation: fade-in var(--dur-entrance) var(--ease-out) calc(var(--stagger) * 2) backwards;
+}
+
+.mast__cchip {
+  display: inline-flex;
+  gap: 5px;
   align-items: center;
-  justify-content: space-between;
-  padding-top: 9px;
-  border-top: 1px dashed var(--hairline);
+  height: 24px;
+  padding: 0 10px;
+  color: rgba(255, 255, 255, 0.94);
+  font-size: calc(11px * var(--fs-scale));
+  font-weight: 600;
+  line-height: 1;
+  background: rgba(24, 28, 30, 0.55);
+  border: 0;
+  border-radius: var(--radius-pill);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
 }
 
-.mast__need-text {
-  min-width: 0;
-  line-height: 1.5;
+.mast__cchip--act {
+  background: var(--photo-scrim);
+  cursor: pointer;
 }
 
-.mast__need-acts {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 8px;
+.mast__cchip--act:hover {
+  filter: brightness(1.18);
+}
+
+/* -- 没有照片那一路：墨字压淡彩底，胶囊跟着换软底 -------------------------------- */
+.mast--nophoto .mast__name {
+  color: var(--ink);
+  text-shadow: none;
+}
+
+.mast--nophoto .mast__meta {
+  /* 元信息从 --text-2 提到 --text：这一档的底是「淡彩 + 插画水印」，点迹上那一处
+     --text-2 两档主题都压不住。照片档的小字靠 --scrim-hero 保底，这一档靠自己调深。 */
+  color: var(--text);
+  text-shadow: none;
+}
+
+/* 倒计时胶囊：照片那套是「实心深底 + 白字」，淡彩底上要换成软底 + 深色字，
+   否则一块灰贴在浅蓝上，读起来像贴错了卡（同首页 nophoto 那一档）。 */
+.mast--nophoto .mast__pill {
+  color: var(--text);
+  background: var(--surface-3);
+}
+.mast--nophoto .mast__pill--soon {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.mast--nophoto .mast__pill--live {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.mast--nophoto .mast__pill--past {
+  color: var(--text-2);
+  background: var(--surface-3);
+}
+
+.mast--nophoto .mast__cchip {
+  color: var(--text-2);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  border: 1px solid var(--glass-border);
+}
+.mast--nophoto .mast__cchip--act {
+  color: var(--text);
 }
 
 @media (max-width: 860px) {
+  /* 窄屏整页只有这一块是深色照片，再给它卡边、圆角与侧边距，读起来就是一页纸上浮着
+     另一屏（用户截图原话「感觉像是两个界面」）。面板在窄屏本来就是通铺
+     （main.css ≤860 那一档把 padding/圆角/白线全清零），照片跟着通铺：从顶栏下沿铺到
+     两侧边，浅色内容直接接在照片下沿。桌面的「一张卡」读法不变。 */
   .mast {
     --mast-h: clamp(184px, 26vh, 214px);
-    margin-right: 10px;
-    margin-left: 10px;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
   }
   /* 写在 .mast 之后：同一元素上的两个同名令牌，后出现的才算数。 */
   .mast--nophoto {
     --mast-h: clamp(150px, 20vh, 172px);
   }
+  /* 窄屏的展示字比宽屏收一档（真实 430px 上量到 26px 是这一档的上限）。 */
   .mast__name {
-    font-size: calc(clamp(19px, 5.2vw, 24px) * var(--fs-scale));
-  }
-  /* 窄屏塞不下两格：名字与数字上下排，分隔线跟着躺平（首页数据带在同一档换的向）。 */
-  .mast__ticket {
-    flex-direction: column;
-    gap: 0;
-    align-items: flex-start;
-    padding: 10px 12px 11px;
-  }
-  .mast__title {
-    flex: 0 0 auto;
-  }
-  .mast__rule {
-    width: auto;
-    margin: 9px 0 7px;
-    border-top: 1px dashed var(--hairline);
-    border-left: 0;
-  }
-  .mast__stats {
-    align-self: stretch;
-    text-align: left;
-  }
-  /* 纵向票券里「换行」这层意思没了：basis 100% 撑的是高度，这一档按内容占高、占满整行宽。 */
-  .mast__need {
-    flex: 0 0 auto;
-    width: 100%;
-    margin-top: 9px;
-    padding-top: 10px;
-  }
-  .mast__kick {
-    top: 10px;
-    left: 12px;
+    font-size: calc(clamp(22px, 6vw, 26px) * var(--fs-scale));
   }
 }
 </style>

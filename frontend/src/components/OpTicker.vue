@@ -19,9 +19,17 @@ import { formatMin } from '@/utils/time'
  *
  * 换摘要那一下只用 :key 换节点，不套 <Transition>：后台标签页里过渡会被节流到停摆，
  * out-in 得等离场结束才插新节点，那一行就会一直读着上一条改动——台账报错比不动更糟。
+ *
+ * `flat` 是「最近改动」抽屉里那一份：没有摘要条、没有开合，整页就是那份 24 条的清单
+ * （空日志给一句空态而不是什么都不画——抽屉开着一片白读起来像坏了）。窄屏把内联这份
+ * 从面板里撤掉、改挂到顶栏人数按钮上，就是这个变体接待的。行还是同一段模板、同一套
+ * actor：在两个地方各写一份的话，「谁改的」迟早两边说法不一。
  */
+const props = defineProps<{ flat?: boolean }>()
+
 const store = useTripStore()
 
+const flat = computed(() => props.flat ?? false)
 const open = ref(false)
 
 const log = computed(() => store.opLog)
@@ -43,8 +51,11 @@ const who = computed(() => actor(latest.value?.origin ?? ''))
 </script>
 
 <template>
-  <div v-if="latest" class="ot" :class="{ 'ot--open': open }">
+  <!-- 平铺这份照样从「展开」那条路走（`ot--open` 直接钉住），只是没有条、没有开合：
+      行、空态与内联那份共用一段模板，改一处就是改两处。 -->
+  <div v-if="flat || latest" class="ot" :class="{ 'ot--open': open || flat, 'ot--flat': flat }">
     <button
+      v-if="!flat"
       class="ot__bar"
       type="button"
       :aria-expanded="open"
@@ -63,7 +74,8 @@ const who = computed(() => actor(latest.value?.origin ?? ''))
 
     <div class="ot__body">
       <div class="ot__clip">
-        <ol class="ot__list">
+        <p v-if="!log.length" class="ot__flat-empty tiny muted">这一趟还没有改动记录</p>
+        <ol v-else class="ot__list">
           <li v-for="e in log" :key="e.seq" class="ot__row">
             <i class="ot__dot" :style="{ background: actor(e.origin).color }" />
             <span class="ot__text">{{ e.text }}</span>
@@ -220,6 +232,30 @@ const who = computed(() => actor(latest.value?.origin ?? ''))
 .ot__by {
   flex: 0 0 auto;
   color: var(--text-3);
+}
+
+/* ---------- 平铺（「最近改动」抽屉） ---------- */
+
+/* 抽屉板子自己就是一块玻璃，里面再叠一层就是两道横杠；底色只管内联那份。 */
+.ot--flat .ot__body {
+  background: none;
+}
+
+/* 一个容器一个滚动条：220px 的上限与自滚是内联展开态的需要，抽屉里滚动归 .modal__body。 */
+.ot--flat .ot__list {
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+}
+
+.ot--flat .ot__row {
+  padding: 5px 0;
+}
+
+.ot__flat-empty {
+  padding: 8px 0 12px;
+  margin: 0;
+  text-align: center;
 }
 
 @keyframes ot-roll {

@@ -15,10 +15,26 @@ import { useTripStore } from '@/stores/trip'
 import type { Poi } from '@/types/domain'
 import { apiFetch } from '@/utils/api'
 
-const props = defineProps<{ city: string; tripId: string }>()
+const props = defineProps<{
+  city: string
+  tripId: string
+  /** 展开态要不要写进按行程存的那份偏好。列表栏那份宿主写（刷新后展开态要回来）；
+   *  地图浮条那份整整不读也不写——它是同一件事的另一张脸，不是第二个记忆。 */
+  persistOpen?: boolean
+}>()
 const emit = defineEmits<{ 'update:open': [value: boolean]; setCity: [] }>()
 
 const store = useTripStore()
+
+/** key = 城市:类目:排序:基准点。命中就换数据，不重新打接口；distance 档零配额，
+    换基准点只是本地重排，缓存里躺着的是同一批候选的不同顺序，值得各存一份。
+    活在模块上而不是实例里：候选只属于城市，两个宿主（列表栏、地图浮条）各挂一份实例
+    时同一批结果不该被两边各打一次接口，而实例级的缓存卸载即焚。 */
+const cache = new Map<string, { pois: Poi[]; amapUrl: string }>()
+// 在途去重：缓存要等响应回来才写，同一 key 在那之前能被 watch 的多次触发钻过去
+// （实测挪一次基准点就发出两条一模一样的请求）。配额在服务端有缓存兜着，但这条请求本就不该发。
+// 同样跟着实例之外的键走：甲宿主在飞的那一枪，乙宿主问同一 key 时该等它，不该再发一枪。
+const inFlight = new Set<string>()
 
 type Sort = 'composite' | 'hot' | 'distance'
 
@@ -30,13 +46,6 @@ const pois = ref<Poi[]>([])
 const amapUrl = ref('')
 const loading = ref(false)
 const error = ref<{ message: string; hint: string } | null>(null)
-/** key = 城市:类目:排序:基准点。命中就换数据，不重新打接口；distance 档零配额，
-    换基准点只是本地重排，缓存里躺着的是同一批候选的不同顺序，值得各存一份。 */
-const cache = new Map<string, { pois: Poi[]; amapUrl: string }>()
-// 在途去重：缓存要等响应回来才写，同一 key 在那之前能被 watch 的多次触发钻过去
-// （实测挪一次基准点就发出两条一模一样的请求）。配额在服务端有缓存兜着，但这条请求本就不该发。
-const inFlight = new Set<string>()
-
 const CATEGORIES: {
   key: 'scenic' | 'food' | 'night'
   label: string
@@ -123,20 +132,23 @@ const originNote = computed(() => {
 
 const prefsKey = computed(() => `tourplanopt.reco-${props.tripId}`)
 
-function loadPrefs() {
-  let raw: unknown = null
+type StoredPrefs = { sort?: unknown; origin?: unknown; originAt?: unknown; open?: unknown }
+
+function readStoredPrefs(): StoredPrefs {
   try {
-    raw = JSON.parse(localStorage.getItem(prefsKey.value) ?? 'null')
+    const raw: unknown = JSON.parse(localStorage.getItem(prefsKey.value) ?? 'null')
+    if (!raw || typeof raw !== 'object') return {}
+    return raw as StoredPrefs
   } catch {
-    return // 脏数据与无痕模式一样：回到默认，不连带面板一起坏
+    return {} // 脏数据与无痕模式一样：回到默认，不连带面板一起坏
   }
-  if (!raw || typeof raw !== 'object') return
-  const { sort: saved, origin: savedOrigin, originAt: savedAt, open: savedOpen } = raw as {
-    sort?: unknown
-    origin?: unknown
-    originAt?: unknown
-    open?: unknown
-  }
+}
+
+/** 排序与基准点是两份宿主共读共写的那两个字段。展开态不是（见 persistOpen 与 persistPrefs
+    的合并注释）。打开那一刻读回来：在列表栏改成「热度」、到地图浮条开还是「综合」，就是
+    同一份偏好长出了两个真相。关着的时候不读——它此时只是别处状态的镜像，没有可读的必要。 */
+function applySharedPrefs(stored: StoredPrefs = readStoredPrefs()) {
+  const { sort: saved, origin: savedOrigin, originAt: savedAt } = stored
   if (saved === 'composite' || saved === 'hot' || saved === 'distance') sort.value = saved
   if (typeof savedOrigin === 'string') originId.value = savedOrigin
   if (
@@ -146,27 +158,38 @@ function loadPrefs() {
   ) {
     originAt.value = [savedAt[0] as number, savedAt[1] as number]
   }
-  if (typeof savedOpen === 'boolean') open.value = savedOpen
+}
+
+function loadPrefs() {
+  const stored = readStoredPrefs()
+  applySharedPrefs(stored)
+  if (props.persistOpen && typeof stored.open === 'boolean') open.value = stored.open
 }
 
 function persistPrefs() {
   // 坐标快照在这里顺手刷新：它是行 id 失效时唯一的线索，必须跟着基准点走。
   if (originPlace.value) originAt.value = [originPlace.value.lng, originPlace.value.lat]
   try {
-    localStorage.setItem(
-      prefsKey.value,
-      JSON.stringify({
-        sort: sort.value,
-        origin: originId.value,
-        originAt: originAt.value,
-        open: open.value,
-      }),
-    )
+    // 读-改-写而不是整份覆盖：地图浮条那份宿主不写 open，整份覆盖会把列表栏存的
+    // 展开态顶掉——「刷新后展开态没回来」会变成时有时无的鬼故事。
+    const next: StoredPrefs = {
+      ...readStoredPrefs(),
+      sort: sort.value,
+      origin: originId.value,
+      originAt: originAt.value,
+    }
+    if (props.persistOpen) next.open = open.value
+    localStorage.setItem(prefsKey.value, JSON.stringify(next))
   } catch {
     // 无痕模式：丢掉偏好不影响功能
   }
 }
 
+// 读要在写之前（同一次 flush 里 watcher 按创建顺序跑）：打开这一下先把自己对齐到
+// 另一份宿主存的排序，随后那记 persistPrefs 才会把对齐后的值原样写回，而不是拿旧值反杀。
+watch(open, (v) => {
+  if (v) applySharedPrefs()
+})
 // 切档、换基准、开合都得记住：只写一部分的话，「刷新后展开态没回来」会被当成没保存的 bug。
 watch([sort, originId, open], persistPrefs)
 watch(open, (v) => emit('update:open', v), { immediate: true })

@@ -36,6 +36,8 @@ const props = defineProps<{
   status: SocketStatus
   /** 没看的那几句有几条，只决定徽标；入口本身常驻（见 chatBadge）。 */
   chatUnread?: number
+  /** 台账里有别人改过、这屏还没看过的事：手机上的在线人数那一枚据此亮一粒小点。 */
+  opsUnread?: boolean
   /** 海报头开着的时候这一行不再重复行程名：两块大字上下叠着，读起来像没排完版。 */
   hideTitle?: boolean
 }>()
@@ -47,6 +49,8 @@ const emit = defineEmits<{
   cover: []
   copyText: []
   chat: []
+  /** 手机上的在线人数那一枚按下去：开「最近改动」抽屉。 */
+  ledger: []
   /** 按某个同伴的头像：跳到此刻他正看着的那一站。 */
   goto: [placeId: string]
 }>()
@@ -151,10 +155,6 @@ const presenceLabel = computed(() => {
   const n = props.presence.length
   if (!n) return '仅你在线'
   return n === 1 ? '1 人在线' : `${n} 人在线`
-})
-const presenceNames = computed(() => {
-  const names = props.presence.map((p) => p.name || '同伴')
-  return names.length ? names.join('、') : ''
 })
 
 const statusLabel = computed(() => {
@@ -277,7 +277,19 @@ onBeforeUnmount(() => {
 
     <span class="triphead__spacer" />
 
-    <span class="triphead__people tiny" :title="presenceNames">{{ presenceLabel }}</span>
+    <!-- 手机上这一枚兼作「最近改动」的入口：台账与「谁在线」本来就是同一件事的两面，
+         而那一条内联台账在窄屏已经撤掉（它的位置让给了搜索浮条上方的空间）。
+         它仍先是「几个人在线」的读数，其次才是按钮。 -->
+    <button
+      class="triphead__people tiny"
+      type="button"
+      :title="opsUnread ? `${presenceLabel} · 有新的改动` : `${presenceLabel} · 最近改动`"
+      :aria-label="opsUnread ? `${presenceLabel}，有新的改动` : `${presenceLabel}，查看最近改动`"
+      @click="emit('ledger')"
+    >
+      {{ presenceLabel }}
+      <i v-if="opsUnread" class="triphead__people-dot" aria-hidden="true" />
+    </button>
 
     <button
       class="iconbtn triphead__health"
@@ -555,10 +567,35 @@ onBeforeUnmount(() => {
   flex: 1 1 auto;
 }
 
+/* 手机上是按钮（点开「最近改动」抽屉），盒形仍按一行读数收：先读得出几个人在线，
+   其次才是可点。因此只给 hover 一点底，不给它 pill 的描边——它不该跟旁边的城市
+   pill 抢「这里可以设东西」的那种外观。 */
 .triphead__people {
+  display: inline-flex;
   flex: 0 0 auto;
+  gap: 5px;
+  align-items: center;
+  padding: 4px 8px;
   color: var(--text-2);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
   white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.triphead__people:hover {
+  background: var(--accent-soft);
+}
+
+/* 珊瑚色小点＝台账里有没看过的改动。与聊天徽标分两档语义：那边是「N 条」，
+   这边只回答「有」——改动记录不是逐条要读的信。 */
+.triphead__people-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  background: var(--accent);
+  border-radius: 50%;
 }
 
 .triphead__status {
